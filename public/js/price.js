@@ -33,7 +33,7 @@ export function isInquiry(comment = '') {
  * Bắt giá tiền cùng cụm từ khớp từ bình luận
  */
 export function parsePriceWithMatch(text, opts = {}) {
-  const { multiplier = 1000, minPrice = 10000, maxPrice = 50000000 } = opts;
+  const { multiplier = 1000, minPrice = 1, maxPrice = 50000000 } = opts;
   if (!text) return { price: null, matchText: '' };
   const s = stripAccents(String(text).toLowerCase());
   let best = null;

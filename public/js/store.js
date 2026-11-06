@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS = {
   showNickname: true,
   showTime: true,
   multiplier: '1000',
-  minPrice: 10000,
+  minPrice: 1,
   maxPrice: 50000000,
   printerMode: 'virtual',
   sound: true,

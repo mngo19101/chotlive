@@ -1,0 +1,50 @@
+name: Build iOS IPA native (ChốtLive SwiftUI)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ios-native/**'
+      - '.github/workflows/build-native-ipa.yml'
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cài XcodeGen
+        run: brew install xcodegen
+
+      - name: Tạo icon 1024 từ public/img/icon-512.png
+        run: |
+          sips -z 1024 1024 public/img/icon-512.png --out ios-native/ChotLive/Assets.xcassets/AppIcon.appiconset/icon.png
+
+      - name: Tạo project Xcode
+        working-directory: ios-native
+        run: xcodegen generate
+
+      - name: Build (không ký - ESign sẽ ký lại)
+        working-directory: ios-native
+        run: |
+          xcodebuild \
+            -project ChotLive.xcodeproj \
+            -scheme ChotLive \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Đóng gói IPA
+        working-directory: ios-native
+        run: |
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/ChotLive.app Payload/
+          zip -r9 ChotLive-Native.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChotLive-Native-IPA
+          path: ios-native/ChotLive-Native.ipa
+          retention-days: 90

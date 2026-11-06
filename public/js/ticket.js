@@ -149,6 +149,9 @@ export function renderTicket(settings, t) {
     row(`${i + 1}. ${itemName}${itemQty}`, itemPrice, {
       lw: 500, lpx: 26, rw: 700, rpx: 26
     });
+    if (it.comment) {
+      text(`Bình luận: "${it.comment}"`, { w: 600, px: 24, gap: 6, indent: 14, maxW: CW - 14 });
+    }
   });
 
   dashed(16);

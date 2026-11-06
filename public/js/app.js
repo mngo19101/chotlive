@@ -73,7 +73,7 @@ const esc = (s) =>
 const S = () => state.settings;
 const priceOpts = () => ({
   multiplier: Number(S().multiplier) || 1000,
-  minPrice: Number(S().minPrice) || 0,
+  minPrice: 1, // mọi mức giá đều tính (5k, 2k...)
   maxPrice: Number(S().maxPrice) || 1e12
 });
 
@@ -515,15 +515,12 @@ function renderCommentStream() {
       const custOrders = state.orders.filter((o) =>
         areSameCustomer(o, { uniqueId: c.uniqueId, nickname: c.nickname })
       );
-      const hasOrder = c.price > 0 || custOrders.length > 0;
-      const targetOrder = custOrders.find((o) => o.status === 'new') || custOrders[0];
-      const isPrinted = targetOrder
-        ? targetOrder.status === 'printed' || targetOrder.printCount > 0
-        : false;
+      const hasOrder = c.price > 0;
+      const isPrinted = Boolean(c.printed);
 
       const printBtnHtml = hasOrder
         ? `
-        <button class="btn-cmt-quick-print ${isPrinted ? 'printed' : ''}" data-cmt-print-user="${esc(c.uniqueId)}">
+        <button class="btn-cmt-quick-print ${isPrinted ? 'printed' : ''}" data-cmt-print-id="${esc(c.id)}" data-cmt-print-user="${esc(c.uniqueId)}">
           <span>🖨</span>
           <span>${isPrinted ? 'Đã in' : 'In đơn'}</span>
         </button>
@@ -560,18 +557,7 @@ $('#comment-stream-container')?.addEventListener('click', (e) => {
     e.stopPropagation();
     const uid = btnPrint.dataset.cmtPrintUser;
     setSelectedCustomerUid(uid);
-    const cust = state.customers.find((c) => (c.uniqueId || '').toLowerCase() === uid.toLowerCase()) || {
-      uniqueId: uid,
-      nickname: uid
-    };
-    const orders = state.orders.filter((o) => areSameCustomer(o, cust));
-    const targetOrder = orders.find((o) => o.status === 'new') || orders[0];
-    if (targetOrder) {
-      handlePrintOrder(targetOrder);
-      renderLiveView();
-    } else {
-      toast('Không tìm thấy đơn hàng tương ứng để in', '⚠️');
-    }
+    printSingleComment(btnPrint.dataset.cmtPrintId);
     return;
   }
 
@@ -933,11 +919,14 @@ function processIncomingComment({ uniqueId, nickname, comment, userId = '', id =
   const newCmt = {
     id: id || 'c_' + Date.now() + Math.random().toString(36).slice(2, 5),
     uniqueId,
+    userId,
     nickname,
     comment,
     price: price || 0,
     productName: info.productName,
+    qty: info.quantity || 1,
     time: timeStr,
+    ts: Date.now(),
     tag: price ? 'Mới' : ''
   };
 
@@ -949,23 +938,9 @@ function processIncomingComment({ uniqueId, nickname, comment, userId = '', id =
 
   saveComment(newCmt);
 
-  if (price) {
-    addOrMergeOrder({
-      uniqueId,
-      userId,
-      nickname,
-      productName: info.productName || 'Sản phẩm',
-      price,
-      qty: info.quantity || 1,
-      comment,
-      commentId: newCmt.id
-    });
-    state.selectedCustomerUniqueId = uniqueId;
-    playCashChime();
-    toast(`Chốt đơn ${formatVND(price)} từ ${nickname}!`, '🛒');
-  } else {
-    save('new_comment');
-  }
+  // Chỉ lưu bình luận; đơn/khách chỉ được tạo khi người bán bấm "In" trên bình luận đó.
+  save('new_comment');
+  if (price) playCashChime();
 
   if (activeTab === 'live') renderLiveView();
   if (activeTab === 'orders') renderOrdersView();
@@ -2556,13 +2531,37 @@ function renderSalesView() {
 /* ============================================================
    XỬ LÝ IN TEM HOÁ ĐƠN (XPRINTER Q80BS 80MM)
    ============================================================ */
-async function handlePrintOrder(order, isRemoteTrigger = false) {
+/** In đúng 1 bình luận: lưu vào đơn/khách của người đó rồi in tem riêng cho bình luận này. */
+function printSingleComment(commentId) {
+  const c = getLiveComments().find((x) => x.id === commentId);
+  if (!c || !(c.price > 0)) return toast('Bình luận này chưa có giá để in', '⚠️');
+
+  const { order, newItem, isDuplicate } = addOrMergeOrder({
+    uniqueId: c.uniqueId,
+    userId: c.userId || '',
+    nickname: c.nickname,
+    productName: c.productName || 'Sản phẩm',
+    price: c.price,
+    qty: c.qty || 1,
+    comment: c.comment,
+    commentId: c.id
+  });
+  const item = newItem || order.items.find((it) => it.commentId === c.id);
+  if (!item) return toast('Không lưu được bình luận vào khách', '⚠️');
+  if (isDuplicate) toast('Bình luận này đã lưu trước đó, in lại tem', 'ℹ️');
+
+  c.printed = true;
+  state.selectedCustomerUniqueId = c.uniqueId;
+  handlePrintOrder(order, false, item);
+}
+
+async function handlePrintOrder(order, isRemoteTrigger = false, onlyItem = null) {
   toast(`Đang in tem cho ${order.nickname}...`, '🖨');
   order.printCount = (order.printCount || 0) + 1;
   order.status = 'printed';
   if (!isRemoteTrigger) {
     save('order_printed');
-    sendUiEvent({ action: 'print_order', orderId: order.id });
+    sendUiEvent({ action: 'print_order', orderId: order.id, itemId: onlyItem?.id || '' });
   }
   renderOrdersView();
   if (activeTab === 'live') renderLiveView();
@@ -2576,9 +2575,9 @@ async function handlePrintOrder(order, isRemoteTrigger = false) {
       nickname: order.nickname,
       phone: order.phone || '',
       address: order.address || '',
-      items: order.items || [],
-      total: order.total || 0,
-      ts: order.ts
+      items: onlyItem ? [onlyItem] : order.items || [],
+      total: onlyItem ? (Number(onlyItem.price) || 0) * (Number(onlyItem.qty) || 1) : order.total || 0,
+      ts: onlyItem?.ts || order.ts
     });
 
     const bytes = canvasToEscPos(canvas);
@@ -2734,7 +2733,7 @@ onRemoteUiEvent((msg) => {
     const ord = state.orders.find((o) => o.id === msg.orderId);
     // Nếu thiết bị hiện tại (VD: App IPA) đang kết nối máy in Bluetooth thật thì tự động in ra giấy luôn!
     if (ord && printerState.connected) {
-      handlePrintOrder(ord, true);
+      handlePrintOrder(ord, true, ord.items?.find((it) => it.id === msg.itemId) || null);
     }
   }
 });
