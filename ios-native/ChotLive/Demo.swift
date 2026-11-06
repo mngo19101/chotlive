@@ -24,7 +24,7 @@ enum Demo {
         Clock.fixed = date(10, 25, 20, 55)
         store.persistEnabled = false
         seed(store: store, fillToday: !["customers", "customerDetail"].contains(screen))
-        client.liveState = "connected"
+        client.liveState = screen == "liveNew" ? "idle" : "connected"
         client.liveUsername = "shophoahong.live"
         client.loggedIn = true
     }
@@ -52,7 +52,12 @@ enum Demo {
         // Các màn không có trong PDF, chụp để kiểm tra hiển thị.
         case "liveNew":
             ui.tab = .comments
-            ui.present { LiveNewSheet() }
+            ui.present(dim: AppSheet.dim) { LiveNewSheet() }
+        case "areaPicker":
+            ui.tab = .customers
+            ui.push(.customer("linh.nguyen98"))
+            ui.push(.addressEdit("linh.nguyen98"))
+            ui.present(dim: AppSheet.dim) { AreaPickerSheet(region: "Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh") { _ in } }
         case "session":
             ui.tab = .comments
             ui.push(.session("s-toi"))
@@ -109,27 +114,35 @@ enum Demo {
     private static func seed(store: Store, fillToday: Bool) {
         let evening = LiveSession(id: "s-toi", tiktok: "shophoahong.live", start: date(10, 25, 19, 30), end: nil, commentCount: 214)
         let noon = LiveSession(id: "s-trua", tiktok: "shophoahong.live", start: date(10, 25, 12, 0), end: date(10, 25, 13, 40), commentCount: 96)
-        store.sessions = [evening, noon]
+        let kho = LiveSession(id: "s-kho", tiktok: "khohanglinh", start: date(10, 23, 19, 0), end: date(10, 23, 20, 0))
+        store.sessions = [evening, noon, kho]
         store.accounts = [
             TikTokAccount(id: "shophoahong.live", uniqueId: "shophoahong.live", displayName: "Shop Hoa Hồng"),
             TikTokAccount(id: "khohanglinh", uniqueId: "khohanglinh", displayName: "Kho Hàng Linh"),
         ]
         store.activeAccountId = "shophoahong.live"
+        func comment(_ id: String, _ handle: String, _ name: String, _ text: String, _ h: Int, _ m: Int) -> LiveComment {
+            LiveComment(id: id, uniqueId: handle, userId: "", nickname: name, text: text, ts: date(10, 25, h, m),
+                        price: PriceParser.parse(text), sessionId: "s-toi")
+        }
+        // Mới nhất trước, như thứ tự lưu thật.
         store.comments = [
-            LiveComment(id: "c1", uniqueId: "linh.nguyen98", userId: "", nickname: "Linh Nguyễn", text: "chốt 180",
-                        ts: date(10, 25, 20, 42), price: 180_000, printed: true, sessionId: "s-toi"),
-            LiveComment(id: "c2", uniqueId: "hoatran_shop", userId: "", nickname: "Hoa Trần", text: "280",
-                        ts: date(10, 25, 20, 15), price: 280_000, sessionId: "s-toi"),
-            LiveComment(id: "c3", uniqueId: "thu.ha", userId: "", nickname: "Thu Hà", text: "lấy mẫu này nhé shop",
-                        ts: date(10, 25, 20, 3), price: 0, sessionId: "s-toi"),
-            LiveComment(id: "c4", uniqueId: "an.nguyen", userId: "", nickname: "An Nguyễn", text: "đẹp quá",
-                        ts: date(10, 25, 19, 50), price: 0, sessionId: "s-toi"),
+            comment("c6", "ngocanh_hue", "Ngọc Anh", "Xinh quá shop ơi", 20, 42),
+            comment("c5", "linh.nguyen98", "Linh Nguyễn", "Chốt 120 với 180 nữa ạ", 20, 40),
+            comment("c4", "thaovy.ht", "Thảo Vy", "Shop ship Huế mấy ngày vậy ạ", 20, 38),
+            comment("c3", "linh.nguyen98", "Linh Nguyễn", "Mã 150 chốt nha shop ơi", 20, 36),
+            comment("c2", "hoatran_shop", "Hoa Trần", "Mã 280 chốt ạ", 20, 15),
+            comment("c1", "kimchi.shop", "Kim Chi", "Mã 130 giá sao shop ơi", 19, 58),
         ]
 
+        func linhItem(_ id: String, _ code: String, _ price: Int, _ text: String, _ commentId: String) -> OrderItem {
+            OrderItem(id: id, comment: text, price: price, ts: date(10, 25, 20, 42), sessionId: "s-toi", groupId: "o25",
+                      code: code, commentId: commentId)
+        }
         var linh: [OrderItem] = [
-            item("l1", "150", 150_000, date(10, 25, 20, 42), group: "o25", session: "s-toi"),
-            item("l2", "120", 120_000, date(10, 25, 20, 42), group: "o25", session: "s-toi"),
-            item("l3", "180", 180_000, date(10, 25, 20, 42), group: "o25", session: "s-toi"),
+            linhItem("l1", "150", 150_000, "Mã 150 chốt nha shop ơi", "c3"),
+            linhItem("l2", "120", 120_000, "Chốt 120 với 180 nữa ạ", "c5"),
+            linhItem("l3", "180", 180_000, "Chốt 120 với 180 nữa ạ", "c5"),
         ]
         linh += order("l21", count: 4, total: 620_000, ts: date(10, 21, 19, 30), delivered: true)
         linh += order("l18", count: 2, total: 310_000, ts: date(10, 18, 20, 15), delivered: true)
@@ -165,10 +178,13 @@ enum Demo {
         }
 
         if fillToday {
-            customers.append(customer("kimchi.shop", "Kim Chi", [
+            var kim: [OrderItem] = [
                 item("k1", "190", 190_000, date(10, 25, 19, 58), group: "k25", session: "s-toi"),
                 item("k2", "200", 200_000, date(10, 25, 19, 58), group: "k25", session: "s-toi"),
-            ]))
+            ]
+            // Màn chi tiết phiên trong mẫu ghi Kim Chi là khách cũ.
+            if screen == "session" { kim += order("kx", count: 1, total: 100_000, ts: date(9, 1, 20, 0), delivered: true) }
+            customers.append(customer("kimchi.shop", "Kim Chi", kim))
             // Đơn hôm nay để đủ 50 đơn, 37 khách, doanh thu 4.860.000; xếp sau 4 đơn trong mẫu.
             // Trạng thái: 12 đơn mới, 31 đã in, 7 đang giao. Phiên tối 31 đơn / 22 khách, phiên trưa 19 đơn / 15 khách.
             for o in 0..<7 { customers.append(customer("moi\(o)", "Khách mới \(o + 1)", [])) } // cùng Hoa Trần, Kim Chi = 9 khách mới

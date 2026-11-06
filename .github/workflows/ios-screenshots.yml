@@ -56,7 +56,7 @@ jobs:
           xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/ChotLive.app
           mkdir -p screenshots
           for screen in sales live dateFilter customers orders me orderActions orderDetail customerDetail \
-                        liveNew session orderEdit orderCreate orderComments addressEdit addAccount printer keywords notifications help; do
+                        liveNew areaPicker session orderEdit orderCreate orderComments addressEdit addAccount printer keywords notifications help; do
             xcrun simctl terminate "$UDID" com.chotlive.native || true
             xcrun simctl launch "$UDID" com.chotlive.native -demoScreen "$screen"
             sleep 5

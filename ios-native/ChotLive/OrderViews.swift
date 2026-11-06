@@ -61,7 +61,7 @@ struct OrdersView: View {
                 .padding(.horizontal, -Metrics.gutter)
 
                 if list.isEmpty {
-                    T("Chưa có đơn nào. Bấm “Chốt & in” trên một bình luận hoặc “Tạo đơn” để thêm đơn.", 13, .medium, Theme.muted)
+                    T("Chưa có đơn nào. Bấm nút in trên một bình luận hoặc “Tạo đơn” để thêm đơn.", 13, .medium, Theme.muted)
                         .multilineTextAlignment(.center)
                         .padding(.top, 30)
                 }
@@ -289,7 +289,7 @@ struct OrderDetailView: View {
                     T("\(index + 1)", 11, .bold, Theme.muted)
                         .frame(width: 22, height: 22)
                         .background(Circle().fill(Theme.field))
-                    T("Mã \(it.comment)", 14, .bold).lineLimit(1)
+                    T(it.productLabel, 14, .bold).lineLimit(1)
                     T("\(it.qty) × \(money(it.price))", 12, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
                     Spacer(minLength: 4)
                     T(money(it.lineTotal), 14, .bold).lineLimit(1).fixedSize()
@@ -333,42 +333,6 @@ struct OrderDetailView: View {
     }
 }
 
-// MARK: - Bình luận của đơn
-
-struct OrderCommentsView: View {
-    let orderId: String
-    @EnvironmentObject var store: Store
-
-    var body: some View {
-        SubPage(title: "Bình luận chốt đơn") {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 8.5) {
-                    if let o = store.order(id: orderId) {
-                        ForEach(o.items) { it in
-                            HStack(alignment: .top, spacing: 12) {
-                                Avatar(text: o.customer.initials, size: 40, fontSize: 14, seed: o.customer.id)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    HStack(spacing: 6) {
-                                        T(o.customer.nickname, 14, .bold).lineLimit(1)
-                                        T(timeText(it.ts), 11, .medium, Theme.muted)
-                                    }
-                                    T(it.comment, 14, .medium)
-                                }
-                                Spacer(minLength: 4)
-                                T(money(it.price), 14, .heavy).lineLimit(1).fixedSize()
-                            }
-                            .padding(13)
-                            .cardStyle(18)
-                        }
-                    }
-                }
-                .padding(.horizontal, Metrics.gutter)
-                .padding(.bottom, 16)
-            }
-        }
-    }
-}
-
 // MARK: - Sửa / tạo đơn
 
 /// Một dòng sản phẩm trong màn sửa đơn.
@@ -382,7 +346,7 @@ struct ItemEditor: View {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 6) {
                     T("Mã sản phẩm", 12, .medium, Theme.muted)
-                    TextField("150", text: $item.comment)
+                    TextField("150", text: $item.codeText)
                         .font(.bv(15, .semibold))
                         .padding(.horizontal, 13)
                         .frame(height: 44)

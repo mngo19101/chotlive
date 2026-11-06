@@ -48,12 +48,14 @@ enum CommentAlert {
 /// Trả về thông báo (nil nếu in thành công).
 @MainActor
 func printComment(_ c: LiveComment, store: Store, printer: PrinterManager) -> String? {
-    let item = store.saveToCustomer(c)
+    let items = store.saveToCustomer(c)
     guard printer.isConnected else {
         return "Đã lưu đơn của \(c.nickname). Chưa kết nối máy in nên chưa in tem — vào Tôi › Máy in để kết nối."
     }
-    let ok = printer.send(TicketRenderer.ticketBytes(comment: c))
-    if ok { store.markPrinted(itemId: item.id) }
+    var ticket = c
+    ticket.price = items.reduce(0) { $0 + $1.lineTotal }
+    let ok = printer.send(TicketRenderer.ticketBytes(comment: ticket))
+    if ok { items.forEach { store.markPrinted(itemId: $0.id) } }
     return ok ? nil : "Đã lưu đơn nhưng gửi lệnh in thất bại."
 }
 
@@ -66,7 +68,7 @@ func printOrder(_ o: Order, store: Store, printer: PrinterManager) -> String? {
     var failed = false
     for it in o.items {
         let c = LiveComment(id: it.id, uniqueId: o.customer.uniqueId, userId: o.customer.userId,
-                            nickname: o.customer.nickname, text: it.comment, ts: it.ts, price: it.lineTotal)
+                            nickname: o.customer.nickname, text: it.ticketText, ts: it.ts, price: it.lineTotal)
         if printer.send(TicketRenderer.ticketBytes(comment: c)) {
             store.markPrinted(itemId: it.id)
         } else {

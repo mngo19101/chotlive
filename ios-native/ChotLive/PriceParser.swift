@@ -13,11 +13,25 @@ enum PriceParser {
             .replacingOccurrences(of: "Đ", with: "D")
     }
 
+    /// Một số/giá tìm thấy trong bình luận.
+    struct Token {
+        var range: NSRange
+        var code: String
+        var price: Int
+    }
+
     /// Trả về giá (đồng) hoặc 0 nếu không có giá.
     static func parse(_ text: String, multiplier: Double = 1000, minPrice: Double = 1, maxPrice: Double = 50_000_000) -> Int {
-        let s = stripAccents(text.lowercased())
+        tokens(text, multiplier: multiplier, minPrice: minPrice, maxPrice: maxPrice).map(\.price).max() ?? 0
+    }
+
+    private static func folded(_ text: String) -> String { stripAccents(text.precomposedStringWithCanonicalMapping.lowercased()) }
+
+    /// Mọi số/giá trong bình luận, theo thứ tự xuất hiện.
+    static func tokens(_ text: String, multiplier: Double = 1000, minPrice: Double = 1, maxPrice: Double = 50_000_000) -> [Token] {
+        let s = folded(text)
         let ns = s as NSString
-        var best: Double = 0
+        var found: [Token] = []
 
         for m in regex.matches(in: s, range: NSRange(location: 0, length: ns.length)) {
             func group(_ i: Int) -> String {
@@ -51,9 +65,76 @@ enum PriceParser {
             }
             v = v.rounded()
             if v < minPrice || v > maxPrice { continue }
-            if v > best { best = v }
+            found.append(Token(range: m.range, code: rawNum + unit + trail, price: Int(v)))
         }
-        return Int(best)
+        return found
+    }
+
+    /// Các số đi liền nhau chỉ cách bởi "với", "và", dấu phẩy... ("120 với 180").
+    private static let connector = try! NSRegularExpression(pattern: #"^\s*(?:[,;+&/-]|va|voi)?\s*(?:ma\s+)?$"#)
+    private static let codePrefix = try! NSRegularExpression(pattern: #"(?<![a-z\d])ma\s+$"#)
+    private static let fillers = try! NSRegularExpression(pattern: #"(?<![a-z\d])(?:ma|va|voi)(?![a-z\d])|[\s,;+&/.-]"#)
+
+    /// Các mã khách chốt trong 1 bình luận: số có giá lớn nhất và các số nối liền với nó.
+    /// Số nhỏ hơn 10k không tính vì thường là số lượng hoặc size ("lấy 2 cái 150").
+    static func orderTokens(_ text: String) -> [Token] {
+        let all = tokens(text)
+        guard let best = all.indices.max(by: { all[$0].price < all[$1].price }) else { return [] }
+        let ns = folded(text) as NSString
+        func linked(_ a: Token, _ b: Token) -> Bool {
+            let start = a.range.location + a.range.length
+            let gap = ns.substring(with: NSRange(location: start, length: b.range.location - start))
+            return connector.firstMatch(in: gap, range: NSRange(location: 0, length: (gap as NSString).length)) != nil
+        }
+        var from = best, to = best
+        while from > 0, all[from - 1].price >= 10_000, linked(all[from - 1], all[from]) { from -= 1 }
+        while to < all.count - 1, all[to + 1].price >= 10_000, linked(all[to], all[to + 1]) { to += 1 }
+        return Array(all[from...to])
+    }
+
+    /// Bình luận chỉ ghi mã/giá, không có chữ nào khác ("280", "mã 150, 180").
+    static func isOnlyCodes(_ text: String) -> Bool {
+        let all = tokens(text)
+        guard !all.isEmpty else { return false }
+        let ns = folded(text) as NSString
+        var rest = ""
+        var cursor = 0
+        for t in all {
+            rest += ns.substring(with: NSRange(location: cursor, length: t.range.location - cursor)) + " "
+            cursor = t.range.location + t.range.length
+        }
+        rest += ns.substring(from: cursor)
+        let left = fillers.stringByReplacingMatches(in: rest, range: NSRange(location: 0, length: (rest as NSString).length), withTemplate: "")
+        return left.isEmpty
+    }
+
+    struct Segment: Hashable {
+        var text: String
+        var isCode: Bool
+    }
+
+    /// Tách bình luận thành từng từ, phần mã ("Mã 150", "120") đứng riêng để tô nền.
+    static func segments(_ text: String) -> [Segment] {
+        let original = text.precomposedStringWithCanonicalMapping
+        let s = folded(text)
+        let words: (String) -> [Segment] = { $0.split(whereSeparator: \.isWhitespace).map { Segment(text: String($0), isCode: false) } }
+        // Bỏ dấu làm đổi độ dài (rất hiếm) thì không tô để khỏi tô lệch chữ.
+        guard s.utf16.count == original.utf16.count else { return words(original) }
+        let ns = s as NSString, source = original as NSString
+        var result: [Segment] = []
+        var cursor = 0
+        for t in orderTokens(text) {
+            var start = t.range.location
+            let before = ns.substring(with: NSRange(location: cursor, length: start - cursor))
+            if let m = codePrefix.firstMatch(in: before, range: NSRange(location: 0, length: (before as NSString).length)) {
+                start = cursor + m.range.location
+            }
+            result += words(source.substring(with: NSRange(location: cursor, length: start - cursor)))
+            let end = t.range.location + t.range.length
+            result.append(Segment(text: source.substring(with: NSRange(location: start, length: end - start)), isCode: true))
+            cursor = end
+        }
+        return result + words(source.substring(from: cursor))
     }
 }
 

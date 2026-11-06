@@ -12,6 +12,9 @@ final class Store: ObservableObject {
     /// Tắt ghi file (bản demo chụp màn hình).
     var persistEnabled = true
 
+    /// ID vừa bắt đầu live với "Lưu ID này cho lần sau" đang tắt.
+    var unsavedLiveId: String?
+
     private static let commentLimit = 2000
     private var saveWork: DispatchWorkItem?
 
@@ -42,10 +45,12 @@ final class Store: ObservableObject {
         scheduleSave()
     }
 
+    /// Bình luận chốt đơn: đã chốt tay, có từ khoá chốt, hoặc chỉ ghi mã. "Mã 130 giá sao" chỉ là hỏi giá.
     func isClosingComment(_ c: LiveComment) -> Bool {
-        if c.price > 0 { return true }
+        if c.printed { return true }
         let text = PriceParser.stripAccents(c.text.lowercased())
-        return keywords.contains { !$0.isEmpty && text.contains(PriceParser.stripAccents($0.lowercased())) }
+        if keywords.contains(where: { !$0.isEmpty && text.contains(PriceParser.stripAccents($0.lowercased())) }) { return true }
+        return PriceParser.isOnlyCodes(c.text)
     }
 
     // MARK: - Phiên live
@@ -76,7 +81,9 @@ final class Store: ObservableObject {
         } else {
             sessions.insert(LiveSession(id: UUID().uuidString, tiktok: tiktok, start: now), at: 0)
         }
-        if !tiktok.isEmpty { addAccount(uniqueId: tiktok, displayName: "", activate: activeAccountId == nil) }
+        if !tiktok.isEmpty && tiktok.lowercased() != unsavedLiveId {
+            addAccount(uniqueId: tiktok, displayName: "", activate: activeAccountId == nil)
+        }
         save()
     }
 
@@ -87,6 +94,11 @@ final class Store: ObservableObject {
         let last = sessions[i].lastActivity ?? sessions[i].start
         sessions[i].end = now.timeIntervalSince(last) > 600 ? last : now
         save()
+    }
+
+    /// Lần live gần nhất của một tài khoản.
+    func lastSession(account id: String) -> LiveSession? {
+        sessions.filter { $0.tiktok.lowercased() == id }.max { $0.start < $1.start }
     }
 
     func sessions(in filter: DateFilter) -> [LiveSession] {
@@ -107,24 +119,35 @@ final class Store: ObservableObject {
 
     // MARK: - Khách & đơn
 
-    /// Lưu bình luận vào khách (tạo khách nếu chưa có). Trả về món vừa lưu.
+    /// Lưu bình luận vào khách (tạo khách nếu chưa có). Trả về các món của bình luận này;
+    /// bình luận chốt nhiều mã ("Chốt 120 với 180") sinh ra nhiều món.
     @discardableResult
-    func saveToCustomer(_ c: LiveComment) -> OrderItem {
+    func saveToCustomer(_ c: LiveComment) -> [OrderItem] {
         let key = Self.key(uniqueId: c.uniqueId, userId: c.userId)
-        let item = OrderItem(id: c.id, comment: c.text, price: c.price, ts: c.ts,
-                             sessionId: c.sessionId, groupId: c.sessionId)
+        let tokens = c.price > 0 ? PriceParser.orderTokens(c.text) : []
+        let items: [OrderItem]
+        if tokens.count > 1 {
+            items = tokens.enumerated().map { i, t in
+                OrderItem(id: i == 0 ? c.id : "\(c.id)#\(i + 1)", comment: c.text, price: t.price, ts: c.ts,
+                          sessionId: c.sessionId, groupId: c.sessionId, code: t.code, commentId: c.id)
+            }
+        } else {
+            items = [OrderItem(id: c.id, comment: c.text, price: c.price, ts: c.ts, sessionId: c.sessionId,
+                               groupId: c.sessionId, code: tokens.first?.code, commentId: c.id)]
+        }
 
+        if let i = comments.firstIndex(where: { $0.id == c.id }) { comments[i].printed = true }
         if let idx = customers.firstIndex(where: { $0.id == key || (!c.userId.isEmpty && $0.userId == c.userId) }) {
-            if let existing = customers[idx].items.first(where: { $0.id == c.id }) { return existing }
-            customers[idx].items.append(item)
+            let existing = customers[idx].items.filter { ($0.commentId ?? $0.id) == c.id }
+            if !existing.isEmpty { return existing }
+            customers[idx].items.append(contentsOf: items)
             if customers[idx].userId.isEmpty { customers[idx].userId = c.userId }
             if !c.nickname.isEmpty { customers[idx].nickname = c.nickname }
         } else {
-            customers.append(Customer(id: key, uniqueId: c.uniqueId, userId: c.userId, nickname: c.nickname, items: [item]))
+            customers.append(Customer(id: key, uniqueId: c.uniqueId, userId: c.userId, nickname: c.nickname, items: items))
         }
-        if let i = comments.firstIndex(where: { $0.id == c.id }) { comments[i].printed = true }
         save()
-        return item
+        return items
     }
 
     func deleteItem(customerId: String, itemId: String) {

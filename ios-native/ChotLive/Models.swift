@@ -62,14 +62,37 @@ struct OrderItem: Identifiable, Codable, Equatable {
     var sessionId: String? = nil
     /// Các món cùng groupId của 1 khách gộp thành 1 đơn. nil = gộp theo ngày (dữ liệu cũ).
     var groupId: String? = nil
+    /// Mã sản phẩm. nil = dữ liệu cũ, lấy từ nội dung bình luận.
+    var code: String? = nil
+    /// Bình luận sinh ra món này (1 bình luận có thể chốt nhiều mã). nil = dữ liệu cũ: id chính là id bình luận.
+    var commentId: String? = nil
 
     var lineTotal: Int { price * max(qty, 1) }
 
+    /// Mã để hiển thị và sửa.
+    var codeText: String {
+        get { code ?? PriceParser.orderTokens(comment).first?.code ?? comment }
+        set { code = newValue }
+    }
+
+    /// "Mã 150"; bình luận không có mã thì giữ nguyên nội dung bình luận.
+    var productLabel: String {
+        let c = codeText
+        return c == comment && c.contains(" ") ? c : "Mã \(c)"
+    }
+
+    /// Nội dung in trên tem: bình luận chốt nhiều mã thì mỗi tem chỉ ghi mã của tem đó.
+    var ticketText: String {
+        comment.isEmpty || PriceParser.orderTokens(comment).count > 1 ? productLabel : comment
+    }
+
     init(id: String, comment: String, price: Int, ts: Date, printed: Bool = false, delivered: Bool = false,
-         shipping: Bool = false, qty: Int = 1, sessionId: String? = nil, groupId: String? = nil) {
+         shipping: Bool = false, qty: Int = 1, sessionId: String? = nil, groupId: String? = nil,
+         code: String? = nil, commentId: String? = nil) {
         self.id = id; self.comment = comment; self.price = price; self.ts = ts
         self.printed = printed; self.delivered = delivered; self.shipping = shipping
         self.qty = qty; self.sessionId = sessionId; self.groupId = groupId
+        self.code = code; self.commentId = commentId
     }
 
     // Tương thích dữ liệu cũ (chưa có các trường mới)
@@ -85,6 +108,8 @@ struct OrderItem: Identifiable, Codable, Equatable {
         qty = try c.decodeIfPresent(Int.self, forKey: .qty) ?? 1
         sessionId = try c.decodeIfPresent(String.self, forKey: .sessionId)
         groupId = try c.decodeIfPresent(String.self, forKey: .groupId)
+        code = try c.decodeIfPresent(String.self, forKey: .code)
+        commentId = try c.decodeIfPresent(String.self, forKey: .commentId)
     }
 }
 
@@ -129,6 +154,37 @@ struct DeliveryAddress: Codable, Equatable {
     var street = ""
     var region = ""
     var note = ""
+
+    /// Các lựa chọn ghi chú giao trên màn Sửa địa chỉ.
+    static let noteOptions = ["Giao giờ hành chính", "Gọi trước khi giao", "Cho xem hàng"]
+
+    private static func noteParts(_ note: String) -> [String] {
+        note.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    func hasNote(_ option: String) -> Bool {
+        Self.noteParts(note).contains { $0.caseInsensitiveCompare(option) == .orderedSame }
+    }
+
+    /// Bật / tắt một lựa chọn; ghi chú khác đã có trong dữ liệu vẫn được giữ.
+    /// Kết quả dạng "Giao giờ hành chính, gọi trước khi giao".
+    mutating func toggleNote(_ option: String) {
+        let parts = Self.noteParts(note)
+        let isOption: (String) -> Bool = { p in Self.noteOptions.contains { $0.caseInsensitiveCompare(p) == .orderedSame } }
+        var chosen = Self.noteOptions.filter { o in parts.contains { $0.caseInsensitiveCompare(o) == .orderedSame } }
+        if let i = chosen.firstIndex(of: option) { chosen.remove(at: i) } else { chosen.append(option) }
+        let picked = chosen
+        let all: [String] = Self.noteOptions.filter { picked.contains($0) } + parts.filter { !isOption($0) }
+        var result: [String] = []
+        for (i, p) in all.enumerated() {
+            if i > 0, isOption(p), let first = p.first {
+                result.append(first.lowercased() + String(p.dropFirst()))
+            } else {
+                result.append(p)
+            }
+        }
+        note = result.joined(separator: ", ")
+    }
 }
 
 struct Customer: Identifiable, Codable, Equatable {

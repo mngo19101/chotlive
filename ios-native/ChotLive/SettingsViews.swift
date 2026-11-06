@@ -256,7 +256,7 @@ struct KeywordsView: View {
         SubPage(title: "Từ khoá chốt đơn") {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Metrics.gap) {
-                    T("Bình luận có giá hoặc chứa một trong các từ khoá này được coi là bình luận chốt đơn.", 13, .medium, Theme.muted)
+                    T("Bình luận chứa một trong các từ khoá này, hoặc chỉ ghi mã, được coi là bình luận chốt đơn.", 13, .medium, Theme.muted)
                     HStack(spacing: 8) {
                         TextField("Thêm từ khoá", text: $draft)
                             .font(.bv(15, .semibold))
@@ -337,7 +337,7 @@ struct HelpView: View {
 
     private let topics: [(String, String)] = [
         ("Bắt đầu đọc bình luận", "Vào tab Bình luận, bấm Live mới, nhập tên TikTok đang live. Phiên được ghi lại tự động."),
-        ("Chốt đơn", "Mở phiên live, bấm Chốt & in trên bình luận. Đơn được lưu vào Khách hàng và Đơn hàng kể cả khi chưa nối máy in."),
+        ("Chốt đơn", "Mở phiên live, bấm nút in trên bình luận. Đơn được lưu vào Khách hàng và Đơn hàng kể cả khi chưa nối máy in."),
         ("In tem", "Vào Tôi › Máy in để tìm và kết nối máy in Bluetooth, sau đó bấm In đơn trên đơn hàng."),
         ("Trạng thái giao", "Bấm Giao hàng để chuyển đơn sang Đang giao, bấm lần nữa khi đã giao xong."),
     ]

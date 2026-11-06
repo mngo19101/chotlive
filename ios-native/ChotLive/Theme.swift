@@ -23,6 +23,10 @@ enum Theme {
     static let peach = Color(hex: 0xFEE4CD)
     static let peachSoft = Color(hex: 0xFEF4EA)
     static let peachLine = Color(hex: 0xFFBD87)
+    static let peachTint = Color(hex: 0xFFF1E4)
+    static let peachCode = Color(hex: 0xFFE9D2)
+    static let peachRow = Color(hex: 0xFFF7EC)
+    static let accentDeep = Color(hex: 0x7A3300)
     static let slate = Color(hex: 0xE6E9F0)
     static let green = Color(hex: 0x107A54)
     static let greenSoft = Color(hex: 0xE6F7EF)
@@ -61,6 +65,12 @@ enum Metrics {
     }
     static let gutter: CGFloat = 20
     static let gap: CGFloat = 14.5
+
+    /// Chiều cao nội dung bottom sheet có mép trên cách đỉnh màn hình `top` điểm.
+    static func sheetHeight(top: CGFloat) -> CGFloat {
+        let bottom = safeBottom > 0 ? safeBottom - 6 : 16
+        return UIScreen.main.bounds.height - top - 22 - bottom
+    }
 }
 
 // MARK: - Định dạng
@@ -507,19 +517,31 @@ struct OutlineButton: View {
 struct SubPage<Trailing: View, Content: View>: View {
     @EnvironmentObject var ui: AppUI
     let title: String
+    var subtitle: String? = nil
+    /// Hiện ngay sau tiêu đề (ví dụ nhãn Live).
+    var accessory: AnyView? = nil
+    var headerBottom: CGFloat = 14
     @ViewBuilder var trailing: () -> Trailing
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: subtitle == nil ? 12 : 14) {
                 CircleButton(icon: .chevronLeft) { ui.pop() }
-                T(title, 20, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.7)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        T(title, 20, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.7)
+                        accessory
+                    }
+                    if let subtitle {
+                        T(subtitle, 13, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                }
                 Spacer(minLength: 0)
                 trailing()
             }
             .padding(.horizontal, Metrics.gutter)
-            .padding(.bottom, 14)
+            .padding(.bottom, headerBottom)
             content()
         }
         .background(Theme.bg.ignoresSafeArea())
@@ -528,8 +550,10 @@ struct SubPage<Trailing: View, Content: View>: View {
 }
 
 extension SubPage where Trailing == EmptyView {
-    init(title: String, @ViewBuilder content: @escaping () -> Content) {
+    init(title: String, subtitle: String? = nil, headerBottom: CGFloat = 14, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
+        self.subtitle = subtitle
+        self.headerBottom = headerBottom
         self.trailing = { EmptyView() }
         self.content = content
     }
@@ -542,35 +566,115 @@ struct LabeledField: View {
     @Binding var text: String
     var keyboard: UIKeyboardType = .default
     var capitalize = true
-    /// Nội dung dài thì tự xuống dòng (tối đa 3 dòng) thay vì bị cắt.
-    var multiline = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             T(label, 12, .medium, Theme.muted)
-            field
+            TextField(placeholder, text: $text)
                 .font(.bv(15, .semibold))
                 .foregroundColor(Theme.ink)
                 .keyboardType(keyboard)
                 .textInputAutocapitalization(capitalize ? .sentences : .never)
                 .autocorrectionDisabled(!capitalize)
                 .padding(.horizontal, 15)
-                .padding(.vertical, multiline ? 11 : 0)
-                .frame(minHeight: 44)
+                .frame(height: 44)
                 .cardStyle(14, fill: Theme.field)
         }
     }
+}
 
-    @ViewBuilder private var field: some View {
-        if multiline {
-            TextField(placeholder, text: $text, axis: .vertical)
-                .lineLimit(1...3)
-                .onChange(of: text) { value in
-                    // Phím Return không tạo dòng mới để địa chỉ vẫn liền một dòng trên tem.
-                    if value.contains("\n") { text = value.replacingOccurrences(of: "\n", with: " ") }
+/// Xếp các phần tử thành hàng, hết chỗ thì xuống dòng.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 8
+
+    private func lines(_ subviews: Subviews, width: CGFloat) -> [(items: [(Int, CGSize)], height: CGFloat)] {
+        var result: [(items: [(Int, CGSize)], height: CGFloat)] = []
+        var items: [(Int, CGSize)] = []
+        var x: CGFloat = 0
+        var height: CGFloat = 0
+        for (i, v) in subviews.enumerated() {
+            let size = v.sizeThatFits(.unspecified)
+            if !items.isEmpty && x + size.width > width {
+                result.append((items, height))
+                items = []
+                x = 0
+                height = 0
+            }
+            items.append((i, size))
+            x += size.width + spacing
+            height = max(height, size.height)
+        }
+        if !items.isEmpty { result.append((items, height)) }
+        return result
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let all = lines(subviews, width: proposal.width ?? .infinity)
+        var used: CGFloat = 0
+        var height: CGFloat = 0
+        for (index, line) in all.enumerated() {
+            var lineWidth = spacing * CGFloat(line.items.count - 1)
+            for item in line.items { lineWidth += item.1.width }
+            used = max(used, lineWidth)
+            height += line.height + (index > 0 ? lineSpacing : 0)
+        }
+        return CGSize(width: proposal.width ?? used, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for line in lines(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for (i, size) in line.items {
+                subviews[i].place(at: CGPoint(x: x, y: y + (line.height - size.height) / 2), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += line.height + lineSpacing
+        }
+    }
+}
+
+/// Thanh nút dưới đáy trang con: nền trắng, kẻ mảnh phía trên.
+struct FooterBar<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HairLine()
+            content()
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.top, 14)
+                .padding(.bottom, Metrics.safeBottom > 0 ? -5.5 : 12)
+        }
+        .background(Color.white.ignoresSafeArea(edges: .bottom))
+    }
+}
+
+/// Nội dung bình luận, phần mã ("Mã 150") được tô nền.
+struct CommentText: View {
+    let text: String
+    var size: CGFloat = 15
+    var highlight = true
+
+    var body: some View {
+        let parts = highlight ? PriceParser.segments(text) : []
+        if parts.contains(where: \.isCode) {
+            FlowLayout(spacing: size * 0.26, lineSpacing: 3) {
+                ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                    if part.isCode {
+                        T(part.text, size, .bold)
+                            .fixedSize()
+                            .padding(.horizontal, 5)
+                            .frame(height: size + 5)
+                            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.peachCode))
+                    } else {
+                        T(part.text, size, .medium).fixedSize()
+                    }
                 }
+            }
         } else {
-            TextField(placeholder, text: $text)
+            T(text, size, .medium).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -579,10 +683,15 @@ struct LabeledField: View {
 struct SheetTitle: View {
     @EnvironmentObject var ui: AppUI
     let title: String
+    var subtitle: String? = nil
+    var size: CGFloat = 20
 
     var body: some View {
         HStack {
-            T(title, 20, .heavy, Theme.ink, track: -0.3)
+            VStack(alignment: .leading, spacing: 5) {
+                T(title, size, .heavy, Theme.ink, track: -0.3)
+                if let subtitle { T(subtitle, 13, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.85) }
+            }
             Spacer()
             Button { ui.dismissSheet() } label: {
                 Icon(name: .close, size: 20).frame(width: 44, height: 44).background(Circle().fill(Theme.field))

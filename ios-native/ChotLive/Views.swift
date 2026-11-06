@@ -495,7 +495,7 @@ struct CustomersView: View {
                 .padding(.horizontal, -Metrics.gutter)
 
                 if list.isEmpty {
-                    T("Chưa có khách. Bấm “Chốt & in” trên một bình luận để lưu khách.", 13, .medium, Theme.muted)
+                    T("Chưa có khách. Bấm nút in trên một bình luận để lưu khách.", 13, .medium, Theme.muted)
                         .multilineTextAlignment(.center)
                         .padding(.top, 30)
                 }
@@ -684,44 +684,5 @@ struct CustomerDetailView: View {
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
-    }
-}
-
-struct AddressEditView: View {
-    let customerId: String
-    @EnvironmentObject var store: Store
-    @EnvironmentObject var ui: AppUI
-    @State private var address = DeliveryAddress()
-    @State private var loaded = false
-
-    var body: some View {
-        SubPage(title: "Địa chỉ nhận hàng") {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 14) {
-                    LabeledField(label: "Người nhận", placeholder: "Tên người nhận", text: $address.receiver)
-                    LabeledField(label: "Số điện thoại", placeholder: "0905 123 456", text: $address.phone, keyboard: .phonePad)
-                    LabeledField(label: "Địa chỉ", placeholder: "Số nhà, tên đường", text: $address.street)
-                    LabeledField(label: "Phường / Quận / Tỉnh", placeholder: "Phường, quận, tỉnh", text: $address.region, multiline: true)
-                    LabeledField(label: "Ghi chú giao", placeholder: "Ví dụ: gọi trước khi giao", text: $address.note, multiline: true)
-                }
-                .padding(16)
-                .cardStyle(20)
-                .padding(.horizontal, Metrics.gutter)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            PrimaryButton(title: "Lưu địa chỉ") {
-                store.setAddress(address, customerId: customerId)
-                ui.pop()
-            }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.vertical, 12)
-        }
-        .onAppear {
-            guard !loaded else { return }
-            loaded = true
-            if let c = store.customers.first(where: { $0.id == customerId }) {
-                address = c.address ?? DeliveryAddress(receiver: c.nickname)
-            }
-        }
     }
 }
