@@ -714,11 +714,7 @@ app.get('/api/state', requireAuth, (req, res) => {
     ok: true,
     rev: userState.rev,
     clientsCount: countOnlineClientsForUser(userId),
-    liveStatus: {
-      state: activeLiveStatus.state,
-      username: activeLiveStatus.username,
-      mode: activeLiveStatus.mode
-    },
+    liveStatus: getLiveStatus(userId),
     state: userState
   });
 });
@@ -808,17 +804,6 @@ function countOnlineClientsForUser(userId) {
     }
   });
   return cnt;
-}
-
-function broadcastAll(payload, excludeWs = null) {
-  const msg = JSON.stringify(payload);
-  wss.clients.forEach((client) => {
-    if (client !== excludeWs && client.readyState === 1) {
-      try {
-        client.send(msg);
-      } catch {}
-    }
-  });
 }
 
 function broadcastToUser(userId, payload, excludeWs = null) {
@@ -1014,64 +999,57 @@ function friendlyError(err) {
   return 'Không kết nối được: ' + msg.slice(0, 160);
 }
 
-let sharedLiveConn = null;
-const activeLiveStatus = {
-  state: 'idle',
-  username: 'shophoahong.live',
-  mode: 'idle'
-};
+const liveSessions = new Map();
 
-function stopSharedLive() {
-  if (sharedLiveConn) {
-    try {
-      sharedLiveConn.removeAllListeners?.();
-      sharedLiveConn.disconnect();
-    } catch {}
-    sharedLiveConn = null;
-  }
-  activeLiveStatus.state = 'idle';
-  activeLiveStatus.mode = 'idle';
+function getLiveStatus(userId) {
+  const sess = userId ? liveSessions.get(userId) : null;
+  return sess ? sess.status : { state: 'idle', username: '', mode: 'idle' };
 }
 
-async function startSharedRealLive(username) {
-  stopSharedLive();
-  activeLiveStatus.username = username;
-  activeLiveStatus.state = 'connecting';
-  activeLiveStatus.mode = 'real';
+function stopUserLive(userId) {
+  const sess = liveSessions.get(userId);
+  if (!sess) return;
+  liveSessions.delete(userId);
+  try {
+    sess.conn.removeAllListeners?.();
+    sess.conn.disconnect();
+  } catch {}
+}
 
-  broadcastAll({
-    type: 'status',
-    state: 'connecting',
-    username
-  });
-
+async function startUserLive(userId, username) {
+  stopUserLive(userId);
+  const status = { state: 'connecting', username, mode: 'real' };
   const conn = new TikTokLiveConnection(username, {
     processInitialData: false,
     fetchRoomInfoOnConnect: true,
     ...(SIGN_API_KEY ? { signApiKey: SIGN_API_KEY } : {})
   });
-  sharedLiveConn = conn;
+  const sess = { conn, status };
+  liveSessions.set(userId, sess);
+  const isCurrent = () => liveSessions.get(userId) === sess;
+  const emit = (payload) => broadcastToUser(userId, payload);
+
+  emit({ type: 'status', state: 'connecting', username });
 
   conn.on(WebcastEvent.CHAT, (data) => {
-    if (sharedLiveConn !== conn) return;
-    const chatObj = mapChat(data);
-    broadcastAll({ type: 'chat', ...chatObj });
+    if (!isCurrent()) return;
+    emit({ type: 'chat', ...mapChat(data) });
   });
 
   conn.on(WebcastEvent.ROOM_USER, (data) => {
-    if (sharedLiveConn !== conn) return;
-    broadcastAll({ type: 'viewers', count: Number(data.viewerCount ?? data.totalUser ?? 0) });
+    if (!isCurrent()) return;
+    emit({ type: 'viewers', count: Number(data.viewerCount ?? data.totalUser ?? 0) });
   });
 
   conn.on(WebcastEvent.STREAM_END, () => {
-    if (sharedLiveConn !== conn) return;
-    broadcastAll({ type: 'status', state: 'ended', username, message: 'Phiên live đã kết thúc.' });
-    stopSharedLive();
+    if (!isCurrent()) return;
+    emit({ type: 'status', state: 'ended', username, message: 'Phiên live đã kết thúc.' });
+    stopUserLive(userId);
   });
 
   conn.on(ControlEvent.DISCONNECTED, () => {
-    if (sharedLiveConn !== conn) return;
-    broadcastAll({ type: 'status', state: 'disconnected', username, message: 'Mất kết nối với TikTok.' });
+    if (!isCurrent()) return;
+    emit({ type: 'status', state: 'disconnected', username, message: 'Mất kết nối với TikTok.' });
   });
 
   conn.on(ControlEvent.ERROR, (err) => {
@@ -1080,25 +1058,15 @@ async function startSharedRealLive(username) {
 
   try {
     const state = await conn.connect();
-    if (sharedLiveConn !== conn) return;
-    activeLiveStatus.state = 'connected';
-    broadcastAll({
-      type: 'status',
-      state: 'connected',
-      username,
-      roomId: state?.roomId || ''
-    });
-    console.log(`[live] connected @${username} room=${state?.roomId}`);
+    if (!isCurrent()) return;
+    status.state = 'connected';
+    emit({ type: 'status', state: 'connected', username, roomId: state?.roomId || '' });
+    console.log(`[live] ${userId} connected @${username} room=${state?.roomId}`);
   } catch (err) {
-    if (sharedLiveConn !== conn) return;
+    if (!isCurrent()) return;
     console.warn('[live] connect failed', username, err?.message || err);
-    broadcastAll({
-      type: 'status',
-      state: 'error',
-      username,
-      message: friendlyError(err)
-    });
-    stopSharedLive();
+    emit({ type: 'status', state: 'error', username, message: friendlyError(err) });
+    stopUserLive(userId);
   }
 }
 
@@ -1136,13 +1104,13 @@ wss.on('connection', (ws, req) => {
       version: 3,
       rev: currentUserState.rev,
       clientsCount: countOnlineClientsForUser(ws.userId),
-      liveStatus: activeLiveStatus,
+      liveStatus: getLiveStatus(ws.userId),
       state: currentUserState,
       user: sanitizeUser(initialUser)
     });
     broadcastClientCountForUser(ws.userId);
   } else {
-    send({ type: 'hello', server: 'susu', version: 3, liveStatus: activeLiveStatus, user: null });
+    send({ type: 'hello', server: 'susu', version: 3, liveStatus: getLiveStatus(null), user: null });
   }
 
   ws.on('message', (raw) => {
@@ -1174,7 +1142,7 @@ wss.on('connection', (ws, req) => {
         version: 3,
         rev: st.rev,
         clientsCount: countOnlineClientsForUser(u.id),
-        liveStatus: activeLiveStatus,
+        liveStatus: getLiveStatus(u.id),
         state: st,
         user: sanitizeUser(u)
       });
@@ -1232,10 +1200,10 @@ wss.on('connection', (ws, req) => {
     } else if (msg.type === 'connect') {
       const u = normalizeUsername(msg.username);
       if (!u) return send({ type: 'status', state: 'error', message: 'Vui lòng nhập tên TikTok.' });
-      startSharedRealLive(u);
+      startUserLive(ws.userId, u);
     } else if (msg.type === 'disconnect') {
-      stopSharedLive();
-      broadcastAll({ type: 'status', state: 'idle' });
+      stopUserLive(ws.userId);
+      broadcastToUser(ws.userId, { type: 'status', state: 'idle' });
     } else if (msg.type === 'ping') {
       const st = getStateForUser(ws.userId);
       send({
