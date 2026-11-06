@@ -45,11 +45,12 @@ struct MainShell: View {
         } message: {
             Text(ui.alert ?? "")
         }
-        .alert(ui.confirm?.title ?? "", isPresented: Binding(get: { ui.confirm != nil }, set: { if !$0 { ui.confirm = nil } })) {
+        .alert(ui.confirm?.title ?? "", isPresented: Binding(get: { ui.confirm != nil }, set: { if !$0 { ui.confirm = nil } }),
+               presenting: ui.confirm) { item in
             Button("Huỷ", role: .cancel) {}
-            Button(ui.confirm?.action ?? "OK", role: .destructive) { ui.confirm?.run() }
-        } message: {
-            Text(ui.confirm?.message ?? "")
+            Button(item.action, role: .destructive) { item.run() }
+        } message: { item in
+            Text(item.message)
         }
         .onReceive(client.$liveState.dropFirst()) { state in
             guard !isDemo else { return }

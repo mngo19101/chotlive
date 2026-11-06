@@ -135,6 +135,7 @@ func deliveryLabel(_ o: Order) -> String {
     }
 }
 
+@MainActor
 func confirmDelete(_ o: Order, store: Store, ui: AppUI, then: @escaping () -> Void = {}) {
     ui.confirm = ConfirmItem(title: "Xoá đơn của \(o.customer.nickname)?",
                              message: "Không thể khôi phục sau khi xoá.", action: "Xoá đơn") {

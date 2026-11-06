@@ -21,7 +21,7 @@ enum Demo {
     @MainActor
     static func prepare(store: Store, client: LiveClient) {
         guard let screen else { return }
-        Clock.override = date(10, 25, 20, 55)
+        Clock.fixed = date(10, 25, 20, 55)
         store.persistEnabled = false
         seed(store: store, fillToday: !["customers", "customerDetail"].contains(screen))
         client.liveState = "connected"

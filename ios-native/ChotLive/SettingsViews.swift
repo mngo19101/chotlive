@@ -262,11 +262,11 @@ struct KeywordsView: View {
                             .font(.bv(15, .semibold))
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                            .onSubmit(add)
+                            .onSubmit { add() }
                             .padding(.horizontal, 15)
                             .frame(height: 44)
                             .cardStyle(14)
-                        CircleButton(icon: .plus, action: add)
+                        CircleButton(icon: .plus) { add() }
                     }
                     VStack(spacing: 0) {
                         ForEach(Array(store.keywords.enumerated()), id: \.element) { index, k in

@@ -2,8 +2,8 @@ import Foundation
 
 /// Đồng hồ của app. Bản demo chụp màn hình cố định thời gian để so với mẫu thiết kế.
 enum Clock {
-    static var override: Date?
-    static var now: Date { override ?? Date() }
+    static var fixed: Date?
+    static var now: Date { fixed ?? Date() }
     static func isToday(_ d: Date) -> Bool { Calendar.current.isDate(d, inSameDayAs: now) }
     static func isYesterday(_ d: Date) -> Bool {
         guard let y = Calendar.current.date(byAdding: .day, value: -1, to: now) else { return false }
