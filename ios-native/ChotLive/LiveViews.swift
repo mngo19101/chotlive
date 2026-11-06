@@ -223,11 +223,21 @@ struct DateFilterSheet: View {
     @State var filter: DateFilter
     let onApply: (DateFilter) -> Void
     @State private var month: Date = Clock.now
+    @State private var editingFrom: Bool? = nil
 
     private var cal: Calendar { Calendar.current }
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
 
     var body: some View {
+        // Máy màn nhỏ hoặc tháng 6 hàng: nội dung không đủ chỗ thì cho cuộn.
+        ViewThatFits(in: .vertical) {
+            content
+            ScrollView(showsIndicators: false) { content }
+        }
+        .onAppear { month = filter.endDay }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetTitle(title: "Xem lại thời điểm")
                 .padding(.top, 8)
@@ -258,10 +268,14 @@ struct DateFilterSheet: View {
 
             T("Khung giờ trong ngày", 14, .bold).padding(.top, 12)
             HStack(spacing: 10) {
-                timeField("Từ", minute: $filter.fromMinute)
-                timeField("Đến", minute: $filter.toMinute)
+                timeField("Từ", isFrom: true, minute: filter.fromMinute)
+                timeField("Đến", isFrom: false, minute: filter.toMinute)
             }
             .padding(.top, 7)
+
+            if let isFrom = editingFrom {
+                timeWheel(isFrom ? $filter.fromMinute : $filter.toMinute)
+            }
 
             PrimaryButton(title: "Áp dụng") {
                 onApply(filter)
@@ -270,7 +284,6 @@ struct DateFilterSheet: View {
             .padding(.top, 16)
         }
         .padding(.horizontal, Metrics.gutter)
-        .onAppear { month = filter.endDay }
     }
 
     private func presetButton(_ title: String, _ preset: DateFilter.Preset) -> some View {
@@ -307,7 +320,7 @@ struct DateFilterSheet: View {
                 Icon(name: .chevronRight, size: 18, color: canNext ? Theme.ink : Theme.faint).frame(width: 26, height: 26)
             }
             .buttonStyle(.plain)
-            .disabled(!canNext)
+            .allowsHitTesting(canNext)
         }
     }
 
@@ -356,32 +369,43 @@ struct DateFilterSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!enabled)
+        .allowsHitTesting(enabled)
     }
 
-    private func timeField(_ label: String, minute: Binding<Int>) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+    /// Ô giờ theo mẫu; bấm vào để mở / đóng bánh xe chọn giờ.
+    private func timeField(_ label: String, isFrom: Bool, minute: Int) -> some View {
+        let active = editingFrom == isFrom
+        return VStack(alignment: .leading, spacing: 5) {
             T(label, 12, .medium, Theme.muted)
-            ZStack(alignment: .leading) {
-                T(minuteText(minute.wrappedValue), 15, .bold).padding(.leading, 15)
-                DatePicker("", selection: Binding<Date>(
-                    get: { cal.date(byAdding: .minute, value: minute.wrappedValue, to: cal.startOfDay(for: Clock.now)) ?? Clock.now },
-                    set: { d in
-                        let c = cal.dateComponents([.hour, .minute], from: d)
-                        minute.wrappedValue = (c.hour ?? 0) * 60 + (c.minute ?? 0)
-                    }
-                ), displayedComponents: .hourAndMinute)
-                    .labelsHidden()
-                    .environment(\.locale, Locale(identifier: "vi_VN"))
-                    .scaleEffect(x: 2.5, y: 1.3)
-                    .frame(maxWidth: .infinity)
-                    .opacity(0.011)
+            Button {
+                editingFrom = active ? nil : isFrom
+            } label: {
+                T(minuteText(minute), 15, .bold)
+                    .padding(.leading, 15)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 43)
+                    .cardStyle(14, fill: Theme.field, border: active ? Theme.orange : Theme.line)
+                    .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 43)
-            .clipped()
-            .cardStyle(14, fill: Theme.field)
+            .buttonStyle(.plain)
         }
+    }
+
+    private func timeWheel(_ minute: Binding<Int>) -> some View {
+        DatePicker("", selection: Binding<Date>(
+            get: { cal.date(byAdding: .minute, value: minute.wrappedValue, to: cal.startOfDay(for: Clock.now)) ?? Clock.now },
+            set: { d in
+                let c = cal.dateComponents([.hour, .minute], from: d)
+                minute.wrappedValue = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+            }
+        ), displayedComponents: .hourAndMinute)
+            .datePickerStyle(.wheel)
+            .labelsHidden()
+            .environment(\.locale, Locale(identifier: "vi_VN"))
+            .frame(maxWidth: .infinity)
+            .frame(height: 120)
+            .clipped()
+            .padding(.top, 6)
     }
 }
 

@@ -2,7 +2,7 @@
 import SwiftUI
 
 /// Dữ liệu demo giống mẫu thiết kế, chỉ có trong bản Debug để chụp màn hình so với mẫu.
-/// Chạy với tham số: -demoScreen sales|live|dateFilter|customers|orders|me|orderActions|orderDetail|customerDetail
+/// Chạy với tham số: -demoScreen <tên màn> (xem danh sách trong show(ui:)).
 enum Demo {
     static var screen: String? {
         let args = ProcessInfo.processInfo.arguments
@@ -49,6 +49,40 @@ enum Demo {
         case "customerDetail":
             ui.tab = .customers
             ui.push(.customer("linh.nguyen98"))
+        // Các màn không có trong PDF, chụp để kiểm tra hiển thị.
+        case "liveNew":
+            ui.tab = .comments
+            ui.present { LiveNewSheet() }
+        case "session":
+            ui.tab = .comments
+            ui.push(.session("s-toi"))
+        case "orderEdit":
+            ui.tab = .orders
+            ui.push(.orderEdit("linh.nguyen98|o25"))
+        case "orderCreate":
+            ui.tab = .orders
+            ui.push(.orderCreate)
+        case "orderComments":
+            ui.tab = .orders
+            ui.push(.orderComments("linh.nguyen98|o25"))
+        case "addressEdit":
+            ui.tab = .customers
+            ui.push(.addressEdit("linh.nguyen98"))
+        case "addAccount":
+            ui.tab = .me
+            ui.present { AddAccountSheet() }
+        case "printer":
+            ui.tab = .me
+            ui.push(.printer)
+        case "keywords":
+            ui.tab = .me
+            ui.push(.keywords)
+        case "notifications":
+            ui.tab = .me
+            ui.push(.notifications)
+        case "help":
+            ui.tab = .me
+            ui.push(.help)
         default: break
         }
     }
@@ -81,6 +115,16 @@ enum Demo {
             TikTokAccount(id: "khohanglinh", uniqueId: "khohanglinh", displayName: "Kho Hàng Linh"),
         ]
         store.activeAccountId = "shophoahong.live"
+        store.comments = [
+            LiveComment(id: "c1", uniqueId: "linh.nguyen98", userId: "", nickname: "Linh Nguyễn", text: "chốt 180",
+                        ts: date(10, 25, 20, 42), price: 180_000, printed: true, sessionId: "s-toi"),
+            LiveComment(id: "c2", uniqueId: "hoatran_shop", userId: "", nickname: "Hoa Trần", text: "280",
+                        ts: date(10, 25, 20, 15), price: 280_000, sessionId: "s-toi"),
+            LiveComment(id: "c3", uniqueId: "thu.ha", userId: "", nickname: "Thu Hà", text: "lấy mẫu này nhé shop",
+                        ts: date(10, 25, 20, 3), price: 0, sessionId: "s-toi"),
+            LiveComment(id: "c4", uniqueId: "an.nguyen", userId: "", nickname: "An Nguyễn", text: "đẹp quá",
+                        ts: date(10, 25, 19, 50), price: 0, sessionId: "s-toi"),
+        ]
 
         var linh: [OrderItem] = [
             item("l1", "150", 150_000, date(10, 25, 20, 42), group: "o25", session: "s-toi"),

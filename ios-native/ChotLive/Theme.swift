@@ -220,22 +220,25 @@ struct SheetLayer: View {
                     .transition(.opacity)
 
                 VStack(spacing: 0) {
+                    // Chỉ kéo ở vùng tay nắm để không tranh cử chỉ với bánh xe chọn giờ và danh sách cuộn.
                     Capsule().fill(Theme.grabber).frame(width: 40, height: 4)
                         .padding(.top, 10).padding(.bottom, 8)
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 4)
+                                .onChanged { drag = $0.translation.height }
+                                .onEnded { v in
+                                    if v.translation.height > 90 { ui.dismissSheet() }
+                                    drag = 0
+                                }
+                        )
                     s.content
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, Metrics.safeBottom > 0 ? -6 : 16)
                 .background(TopRounded(radius: 28).fill(Color.white).ignoresSafeArea(.container, edges: .bottom))
                 .offset(y: max(drag, 0))
-                .gesture(
-                    DragGesture(minimumDistance: 12)
-                        .onChanged { drag = $0.translation.height }
-                        .onEnded { v in
-                            if v.translation.height > 90 { ui.dismissSheet() }
-                            drag = 0
-                        }
-                )
                 .transition(.move(edge: .bottom))
                 .id(s.id)
             }
@@ -289,7 +292,8 @@ struct Avatar: View {
     var seed: String
 
     private var isPeach: Bool {
-        seed.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF } % 2 == 0
+        let hash = seed.unicodeScalars.reduce(0) { ($0 &* 9 &+ Int($1.value)) & 0xFFFF }
+        return (hash >> 3) & 1 == 0
     }
 
     var body: some View {

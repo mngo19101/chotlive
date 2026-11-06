@@ -141,6 +141,7 @@ struct TabBar: View {
             }
         }
         .padding(.horizontal, 12)
+        .padding(.top, 5)
         .frame(height: 75)
         .padding(.bottom, max(Metrics.safeBottom - 25, 0))
         .background(
@@ -263,11 +264,11 @@ struct DashboardView: View {
                     }
                     .frame(height: 131)
                     // Thẻ biểu đồ kéo dài vừa khít tới thanh tab như trong mẫu.
-                    chartCard.frame(height: max(300, geo.size.height - 382.5))
+                    chartCard.frame(height: max(300, geo.size.height - 372.5))
                 }
                 .padding(.horizontal, Metrics.gutter)
                 .padding(.top, 2)
-                .padding(.bottom, 12)
+                .padding(.bottom, 2)
             }
         }
         .background(Theme.bg)
@@ -518,7 +519,7 @@ struct CustomersView: View {
             // Hai dòng tách riêng: dòng @tài khoản được chạy dài xuống dưới cột tiền như trong mẫu.
             VStack(spacing: 4) {
                 HStack(spacing: 0) {
-                    T(c.nickname, 15, .bold).lineLimit(1).minimumScaleFactor(0.85)
+                    T(c.nickname, 15, .bold).lineLimit(1).minimumScaleFactor(0.85).offset(y: 1)
                     if c.isBigSpender {
                         Badge(text: "Mua nhiều").padding(.leading, 7)
                     } else if c.isNewToday {

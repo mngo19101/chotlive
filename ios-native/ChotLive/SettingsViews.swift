@@ -141,7 +141,7 @@ struct SettingsView: View {
                 T(title, 15, .semibold).lineLimit(1)
                 Spacer(minLength: 4)
                 if let trailing { T(trailing, 12, .semibold, trailingColor).lineLimit(1).fixedSize() }
-                Icon(name: .chevronRight, size: 16, color: Theme.muted).padding(.leading, -2)
+                Icon(name: .chevronRight, size: 16, weight: 2.4, color: Theme.muted).padding(.leading, -2)
             }
             .padding(.horizontal, 17)
             .frame(height: 56)
