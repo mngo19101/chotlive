@@ -7,7 +7,7 @@
  * 4. In qua mạng LAN / WiFi (Gửi byte ESC/POS tới cổng 9100 của máy in qua server proxy)
  */
 
-import { authHeaders } from './sync.js';
+import { authHeaders, getServerBaseUrl } from './sync.js';
 
 export const printerState = {
   type: 'virtual', // 'virtual' | 'bluetooth' | 'serial' | 'lan' | 'system'
@@ -145,7 +145,7 @@ export async function printHardwareEscPos(bytes) {
   }
 
   if (printerState.type === 'lan' && printerState.lanIp) {
-    const res = await fetch('/api/print-lan', {
+    const res = await fetch(`${getServerBaseUrl()}/api/print-lan`, {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({
