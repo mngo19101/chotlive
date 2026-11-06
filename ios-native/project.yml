@@ -37,3 +37,19 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
+    scheme:
+      testTargets:
+        - ChotLiveTests
+  ChotLiveTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ChotLiveTests
+    dependencies:
+      - target: ChotLive
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chotlive.native.tests
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: "YES"

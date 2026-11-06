@@ -20,6 +20,7 @@ struct ChotLiveApp: App {
                         store.addComment(c, tiktok: client.liveUsername)
                         if store.isClosingComment(c) { CommentAlert.play() }
                     }
+                    client.onAccountChange = { [store] account in store.switchAccount(account) }
                 }
                 .onChange(of: scenePhase) { phase in
                     if phase != .active { store.save() }

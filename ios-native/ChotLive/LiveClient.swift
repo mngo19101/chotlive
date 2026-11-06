@@ -12,14 +12,20 @@ final class LiveClient: ObservableObject {
     @Published var viewers = 0
 
     var onChat: ((LiveComment) -> Void)?
+    /// Báo đổi tài khoản trước khi nhận bình luận, để dữ liệu không rơi vào vùng của người khác.
+    var onAccountChange: ((String?) -> Void)?
 
-    private(set) var baseURL = UserDefaults.standard.string(forKey: "serverURL") ?? ""
-    private var token = UserDefaults.standard.string(forKey: "authToken") ?? ""
+    private let defaults: UserDefaults
+    private(set) var baseURL: String
+    private var token: String
     private var task: URLSessionWebSocketTask?
     private var pingTimer: Timer?
 
-    init() {
-        username = UserDefaults.standard.string(forKey: "authUser") ?? ""
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        baseURL = defaults.string(forKey: AuthStorage.serverKey) ?? ""
+        token = AuthStorage.token(defaults)
+        username = defaults.string(forKey: AuthStorage.userKey) ?? ""
         if !token.isEmpty && !baseURL.isEmpty {
             loggedIn = true
             openSocket()
@@ -55,9 +61,8 @@ final class LiveClient: ObservableObject {
         baseURL = base
         token = tk
         username = ((json["user"] as? [String: Any])?["username"] as? String) ?? user
-        UserDefaults.standard.set(base, forKey: "serverURL")
-        UserDefaults.standard.set(tk, forKey: "authToken")
-        UserDefaults.standard.set(username, forKey: "authUser")
+        AuthStorage.saveSession(server: base, user: username, token: tk, defaults)
+        onAccountChange?(AuthStorage.accountKey(server: base, user: username))
         loggedIn = true
         openSocket()
     }
@@ -73,7 +78,8 @@ final class LiveClient: ObservableObject {
         }
         closeSocket()
         token = ""
-        UserDefaults.standard.removeObject(forKey: "authToken")
+        AuthStorage.clearToken(defaults)
+        onAccountChange?(nil)
         loggedIn = false
         liveState = "idle"
     }
@@ -81,7 +87,6 @@ final class LiveClient: ObservableObject {
     // MARK: - TikTok Live
 
     func connectLive(tiktok: String) {
-        UserDefaults.standard.set(tiktok, forKey: "tiktokName")
         liveState = "connecting"
         liveMessage = ""
         send(["type": "connect", "username": tiktok])

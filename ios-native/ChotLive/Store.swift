@@ -1,13 +1,16 @@
 import Foundation
 
-/// Lưu bình luận, khách hàng, phiên live... ngay trên máy (JSON trong Documents).
+/// Lưu bình luận, khách hàng, phiên live... ngay trên máy.
+/// Mỗi tài khoản có một file riêng: Documents/accounts/<mã tài khoản>/chotlive.json.
 final class Store: ObservableObject {
     @Published var comments: [LiveComment] = []
     @Published var customers: [Customer] = []
     @Published var sessions: [LiveSession] = []
     @Published var accounts: [TikTokAccount] = []
     @Published var activeAccountId: String?
-    @Published var keywords: [String] = ["chốt", "lấy"]
+    @Published var keywords: [String] = Store.defaultKeywords
+    /// Báo cho người dùng khi không đọc hoặc không ghi được dữ liệu.
+    @Published var storageWarning: String?
 
     /// Tắt ghi file (bản demo chụp màn hình).
     var persistEnabled = true
@@ -15,16 +18,54 @@ final class Store: ObservableObject {
     /// ID vừa bắt đầu live với "Lưu ID này cho lần sau" đang tắt.
     var unsavedLiveId: String?
 
+    private static let defaultKeywords = ["chốt", "lấy"]
     private static let commentLimit = 2000
+    private static let fileName = "chotlive.json"
+
     private var saveWork: DispatchWorkItem?
+    private var accountKey: String?
+    /// Có file chưa đọc được thì không ghi, tránh đè lên dữ liệu cũ.
+    private var saveBlocked = false
+    private var saveFailed = false
 
-    private let fileURL: URL = {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("chotlive.json")
-    }()
+    private let directory: URL
+    private let defaults: UserDefaults
+    private let legacyOwner: String?
 
-    init() {
+    private var fileURL: URL? {
+        accountKey.map {
+            directory.appendingPathComponent("accounts").appendingPathComponent(AuthStorage.folderName(account: $0))
+                .appendingPathComponent(Self.fileName)
+        }
+    }
+
+    init(account: String? = AuthStorage.currentAccountKey(),
+         directory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0],
+         defaults: UserDefaults = .standard) {
+        self.directory = directory
+        self.defaults = defaults
+        legacyOwner = AuthStorage.legacyOwner(defaults)
+        accountKey = account
         load()
-        migrateLegacy()
+    }
+
+    /// Đăng nhập hoặc đăng xuất: ghi nốt dữ liệu tài khoản cũ rồi nạp dữ liệu tài khoản mới.
+    func switchAccount(_ account: String?) {
+        guard account != accountKey else { return }
+        closeOpenSession()
+        save()
+        comments = []
+        customers = []
+        sessions = []
+        accounts = []
+        activeAccountId = nil
+        keywords = Self.defaultKeywords
+        storageWarning = nil
+        unsavedLiveId = nil
+        saveBlocked = false
+        saveFailed = false
+        accountKey = account
+        load()
     }
 
     // MARK: - Bình luận
@@ -329,8 +370,26 @@ final class Store: ObservableObject {
     }
 
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let snap = try? JSONDecoder().decode(Snapshot.self, from: data) else { return }
+        guard let url = fileURL else { return }
+        let adopted = adoptLegacyFile(to: url)
+        if FileManager.default.fileExists(atPath: url.path) { read(url) }
+        if adopted { migrateLegacy() }
+    }
+
+    /// Không đọc được file thì không ghi đè: lỗi đọc thì tạm ngừng lưu, file hỏng thì cất riêng rồi bắt đầu lại.
+    private func read(_ url: URL) {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            saveBlocked = true
+            storageWarning = "Không đọc được dữ liệu đã lưu. App tạm ngừng lưu để giữ nguyên dữ liệu cũ, bạn hãy mở lại app."
+            return
+        }
+        guard let snap = try? JSONDecoder().decode(Snapshot.self, from: data) else {
+            quarantine(url)
+            return
+        }
         comments = snap.comments
         customers = snap.customers
         sessions = snap.sessions
@@ -339,10 +398,39 @@ final class Store: ObservableObject {
         if let k = snap.keywords { keywords = k }
     }
 
+    private func quarantine(_ url: URL) {
+        let name = "chotlive.loi-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8)).json"
+        do {
+            try FileManager.default.moveItem(at: url, to: url.deletingLastPathComponent().appendingPathComponent(name))
+            storageWarning = "Dữ liệu đã lưu bị lỗi nên app bắt đầu với dữ liệu trống. Bản cũ vẫn được giữ trên máy, chưa bị xoá."
+        } catch {
+            saveBlocked = true
+            storageWarning = "Dữ liệu đã lưu bị lỗi. App tạm ngừng lưu để giữ nguyên dữ liệu cũ."
+        }
+    }
+
+    /// File của bản cũ thuộc về người đã đăng nhập trước khi cập nhật, tài khoản khác không được nhận.
+    private func adoptLegacyFile(to url: URL) -> Bool {
+        let manager = FileManager.default
+        let legacy = directory.appendingPathComponent(Self.fileName)
+        guard manager.fileExists(atPath: legacy.path), !manager.fileExists(atPath: url.path) else { return false }
+        if let legacyOwner, legacyOwner != accountKey { return false }
+        do {
+            try manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try manager.moveItem(at: legacy, to: url)
+            return true
+        } catch {
+            saveBlocked = true
+            storageWarning = "Không chuyển được dữ liệu cũ. App tạm ngừng lưu để giữ nguyên dữ liệu cũ, bạn hãy mở lại app."
+            return false
+        }
+    }
+
     /// Dữ liệu từ bản cũ: gom bình luận chưa có phiên thành một phiên cho mỗi ngày.
     private func migrateLegacy() {
         let cal = Calendar.current
-        let tiktok = UserDefaults.standard.string(forKey: "tiktokName") ?? ""
+        let tiktok = defaults.string(forKey: "tiktokName") ?? ""
+        defaults.removeObject(forKey: "tiktokName")
         if accounts.isEmpty && !tiktok.isEmpty {
             addAccount(uniqueId: tiktok, displayName: "", activate: true)
         }
@@ -378,11 +466,18 @@ final class Store: ObservableObject {
     func save() {
         saveWork?.cancel()
         saveWork = nil
-        guard persistEnabled else { return }
+        guard persistEnabled, !saveBlocked, let url = fileURL else { return }
         let snap = Snapshot(comments: comments, customers: customers, sessions: sessions, accounts: accounts,
                             activeAccountId: activeAccountId, keywords: keywords)
-        if let data = try? JSONEncoder().encode(snap) {
-            try? data.write(to: fileURL, options: .atomic)
+        do {
+            let data = try JSONEncoder().encode(snap)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            saveFailed = false
+        } catch {
+            // Báo một lần cho mỗi đợt lỗi, bình luận về liên tục cũng không hiện lại.
+            if !saveFailed { storageWarning = "Không lưu được dữ liệu. Bạn hãy kiểm tra dung lượng trống của máy." }
+            saveFailed = true
         }
     }
 }

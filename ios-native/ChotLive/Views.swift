@@ -14,6 +14,12 @@ struct RootView: View {
                 LoginView()
             }
         }
+        .alert("Thông báo", isPresented: Binding(get: { store.storageWarning != nil },
+                                                 set: { if !$0 { store.storageWarning = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(store.storageWarning ?? "")
+        }
         .preferredColorScheme(.light)
         .tint(Theme.orangeDeep)
         #if DEBUG

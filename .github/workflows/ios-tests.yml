@@ -1,0 +1,48 @@
+name: iOS tests (đăng nhập và lưu dữ liệu)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ios-native/**'
+      - '.github/workflows/ios-tests.yml'
+
+jobs:
+  tests:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cài XcodeGen
+        run: brew install xcodegen
+
+      - name: Tạo icon 1024
+        run: sips -z 1024 1024 public/img/icon-512.png --out ios-native/ChotLive/Assets.xcassets/AppIcon.appiconset/icon.png
+
+      - name: Tạo project Xcode
+        working-directory: ios-native
+        run: xcodegen generate
+
+      - name: Chạy test trên simulator
+        working-directory: ios-native
+        run: |
+          set -o pipefail
+          UDID="$(xcrun simctl list devices available | grep -E 'iPhone' | head -n 1 | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')"
+          echo "Dùng máy: $UDID"
+          # Ký tạm (ad-hoc) để Keychain của simulator hoạt động như trên máy thật.
+          xcodebuild test \
+            -project ChotLive.xcodeproj \
+            -scheme ChotLive \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -derivedDataPath build \
+            -resultBundlePath build/tests.xcresult \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
+            | tail -n 150
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-test-results
+          path: ios-native/build/tests.xcresult
+          retention-days: 14
