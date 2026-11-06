@@ -19,11 +19,15 @@ struct ChotLiveApp: App {
     }
 }
 
-/// In đúng 1 bình luận: lưu vào khách rồi gửi tem ra máy in. Trả về lỗi (nếu có).
+/// Chốt 1 bình luận: luôn lưu vào khách/đơn hàng, rồi in tem nếu đã nối máy in.
+/// Trả về thông báo (nil nếu in thành công).
 @MainActor
 func printComment(_ c: LiveComment, store: Store, printer: PrinterManager) -> String? {
-    guard printer.isConnected else { return "Chưa kết nối máy in. Vào tab Máy in để kết nối." }
-    store.saveToCustomer(c)
+    let item = store.saveToCustomer(c)
+    guard printer.isConnected else {
+        return "Đã lưu đơn của \(c.nickname). Chưa kết nối máy in nên chưa in tem — vào Tôi › Máy in để kết nối."
+    }
     let ok = printer.send(TicketRenderer.ticketBytes(comment: c))
-    return ok ? nil : "Gửi lệnh in thất bại."
+    if ok { store.markPrinted(itemId: item.id) }
+    return ok ? nil : "Đã lưu đơn nhưng gửi lệnh in thất bại."
 }

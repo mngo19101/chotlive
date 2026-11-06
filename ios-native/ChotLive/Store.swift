@@ -44,6 +44,41 @@ final class Store: ObservableObject {
         save()
     }
 
+    func markPrinted(itemId: String) {
+        for ci in customers.indices {
+            if let ii = customers[ci].items.firstIndex(where: { $0.id == itemId }) {
+                customers[ci].items[ii].printed = true
+            }
+        }
+        save()
+    }
+
+    func setDelivered(_ value: Bool, itemIds: [String]) {
+        for ci in customers.indices {
+            for ii in customers[ci].items.indices where itemIds.contains(customers[ci].items[ii].id) {
+                customers[ci].items[ii].delivered = value
+            }
+        }
+        save()
+    }
+
+    /// Đơn hàng theo ngày (mỗi khách mỗi ngày = 1 đơn), mới nhất trước.
+    func orders(on day: Date? = nil) -> [Order] {
+        let cal = Calendar.current
+        var result: [Order] = []
+        for cust in customers {
+            let groups = Dictionary(grouping: cust.items) { cal.startOfDay(for: $0.ts) }
+            for (d, its) in groups where day == nil || cal.isDate(d, inSameDayAs: day!) {
+                result.append(Order(customer: cust, day: d, items: its.sorted { $0.ts > $1.ts }))
+            }
+        }
+        return result.sorted { $0.lastTs > $1.lastTs }
+    }
+
+    func revenue(on day: Date) -> Int {
+        orders(on: day).reduce(0) { $0 + $1.total }
+    }
+
     func customersToday() -> [Customer] {
         customers.filter { !$0.itemsToday.isEmpty }.sorted { $0.lastTs > $1.lastTs }
     }
