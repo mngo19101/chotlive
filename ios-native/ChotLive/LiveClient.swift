@@ -10,6 +10,8 @@ final class LiveClient: ObservableObject {
     @Published var liveMessage = ""
     @Published var liveUsername = ""
     @Published var viewers = 0
+    /// Các tài khoản ChốtLive đã đăng nhập trên máy (gồm cả tài khoản đang dùng), để đổi qua lại không cần nhập lại mật khẩu.
+    @Published private(set) var savedAccounts: [AuthStorage.SavedAccount] = []
 
     var onChat: ((LiveComment) -> Void)?
     /// Báo đổi tài khoản trước khi nhận bình luận, để dữ liệu không rơi vào vùng của người khác.
@@ -21,12 +23,16 @@ final class LiveClient: ObservableObject {
     private var task: URLSessionWebSocketTask?
     private var pingTimer: Timer?
 
+    private var currentAccountKey: String { AuthStorage.accountKey(server: baseURL, user: username) }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let tk = AuthStorage.currentToken(defaults) // chạy di chuyển dữ liệu bản cũ nếu cần
         baseURL = defaults.string(forKey: AuthStorage.serverKey) ?? ""
-        token = AuthStorage.token(defaults)
         username = defaults.string(forKey: AuthStorage.userKey) ?? ""
-        if !token.isEmpty && !baseURL.isEmpty {
+        token = tk
+        savedAccounts = AuthStorage.savedAccounts(defaults)
+        if !tk.isEmpty && !baseURL.isEmpty {
             loggedIn = true
             openSocket()
         }
@@ -62,11 +68,14 @@ final class LiveClient: ObservableObject {
         token = tk
         username = ((json["user"] as? [String: Any])?["username"] as? String) ?? user
         AuthStorage.saveSession(server: base, user: username, token: tk, defaults)
+        savedAccounts = AuthStorage.savedAccounts(defaults)
         onAccountChange?(AuthStorage.accountKey(server: base, user: username))
         loggedIn = true
         openSocket()
     }
 
+    /// Đăng xuất tài khoản đang dùng. Dữ liệu đã lưu trên máy vẫn được giữ lại, chỉ không hiện trong
+    /// danh sách tài khoản đã lưu nữa — đăng nhập lại từ đầu mới dùng được.
     func logout() {
         let t = token
         let base = baseURL
@@ -78,10 +87,43 @@ final class LiveClient: ObservableObject {
         }
         closeSocket()
         token = ""
-        AuthStorage.clearToken(defaults)
+        AuthStorage.clearCurrentSession(defaults)
+        savedAccounts = AuthStorage.savedAccounts(defaults)
         onAccountChange?(nil)
         loggedIn = false
         liveState = "idle"
+    }
+
+    /// Chuyển sang một tài khoản đã lưu khác, không cần nhập lại mật khẩu.
+    func switchAccount(to key: String) {
+        guard key != currentAccountKey, let account = AuthStorage.switchCurrent(to: key, defaults),
+              let tk = AuthStorage.token(for: key) else { return }
+        closeSocket()
+        baseURL = account.server
+        username = account.user
+        token = tk
+        savedAccounts = AuthStorage.savedAccounts(defaults)
+        onAccountChange?(key)
+        loggedIn = true
+        liveState = "idle"
+        liveMessage = ""
+        liveUsername = ""
+        viewers = 0
+        openSocket()
+    }
+
+    /// Quên một tài khoản đã lưu khác — không tác động tới tài khoản đang dùng.
+    func forgetSavedAccount(_ key: String) {
+        guard key != currentAccountKey else { return }
+        if let t = AuthStorage.token(for: key), let account = savedAccounts.first(where: { $0.key == key }),
+           let url = URL(string: account.server + "/api/auth/logout") {
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
+            URLSession.shared.dataTask(with: req).resume()
+        }
+        AuthStorage.forgetAccount(key, defaults)
+        savedAccounts = AuthStorage.savedAccounts(defaults)
     }
 
     // MARK: - TikTok Live
@@ -198,6 +240,17 @@ final class LiveClient: ObservableObject {
         }
     }
 }
+
+#if DEBUG
+extension LiveClient {
+    /// Dữ liệu demo cho màn Tôi (chụp màn hình), không đụng tới Keychain/UserDefaults thật.
+    func setDemoAccounts(_ accounts: [AuthStorage.SavedAccount], current: AuthStorage.SavedAccount) {
+        savedAccounts = accounts
+        baseURL = current.server
+        username = current.user
+    }
+}
+#endif
 
 enum ClientError: LocalizedError {
     case msg(String)

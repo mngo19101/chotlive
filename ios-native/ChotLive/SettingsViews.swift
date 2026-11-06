@@ -26,8 +26,8 @@ struct SettingsView: View {
                 PageHeader(subtitle: "Tài khoản và cài đặt", title: "Tôi") { EmptyView() }
                     .padding(.bottom, 15)
 
-                sectionLabel("Tài khoản TikTok")
-                accountsCard.padding(.bottom, 15)
+                sectionLabel("Tài khoản")
+                appAccountsCard.padding(.bottom, 15)
 
                 sectionLabel("Cài đặt")
                 settingsCard.padding(.bottom, 15)
@@ -63,14 +63,15 @@ struct SettingsView: View {
             .padding(.bottom, 8)
     }
 
-    private var accountsCard: some View {
+    /// Tài khoản ChốtLive đã đăng nhập trên máy — khác với tài khoản TikTok (quản lý trong Live mới).
+    private var appAccountsCard: some View {
         VStack(spacing: 0) {
-            ForEach(store.accounts) { a in
-                accountRow(a)
+            ForEach(client.savedAccounts) { a in
+                appAccountRow(a)
                 HairLine()
             }
             Button {
-                ui.present { AddAccountSheet() }
+                ui.present { AddAppAccountSheet(defaultServer: client.baseURL) }
             } label: {
                 HStack(spacing: 12) {
                     Icon(name: .plus, size: 20, color: Theme.accent)
@@ -88,14 +89,24 @@ struct SettingsView: View {
         .cardStyle(22)
     }
 
-    private func accountRow(_ a: TikTokAccount) -> some View {
-        let active = a.id == store.activeAccountId
-        return Button { store.selectAccount(a.id) } label: {
+    private var currentAccountKey: String { AuthStorage.accountKey(server: client.baseURL, user: client.username) }
+
+    private func appAccountRow(_ a: AuthStorage.SavedAccount) -> some View {
+        let active = a.key == currentAccountKey
+        return Button {
+            guard !active else { return }
+            if ["connected", "connecting"].contains(client.liveState) {
+                ui.confirm = ConfirmItem(title: "Đổi tài khoản?", message: "Phiên live đang đọc sẽ dừng lại.",
+                                         action: "Đổi tài khoản") { client.switchAccount(to: a.key) }
+            } else {
+                client.switchAccount(to: a.key)
+            }
+        } label: {
             HStack(spacing: 12) {
-                Avatar(text: a.initials, seed: a.id)
+                Avatar(text: initialsOf(a.user), seed: a.key)
                 VStack(alignment: .leading, spacing: 3) {
-                    T(a.displayName, 15, .bold).lineLimit(1)
-                    T("@" + a.uniqueId, 12, .medium, Theme.muted).lineLimit(1)
+                    T(a.user, 15, .bold).lineLimit(1)
+                    T(serverHost(a.server), 12, .medium, Theme.muted).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 if active {
@@ -113,8 +124,14 @@ struct SettingsView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button("Xoá tài khoản", role: .destructive) { store.removeAccount(a.id) }
+            if !active {
+                Button("Xoá tài khoản", role: .destructive) { client.forgetSavedAccount(a.key) }
+            }
         }
+    }
+
+    private func serverHost(_ s: String) -> String {
+        s.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: "")
     }
 
     private var settingsCard: some View {
@@ -151,20 +168,51 @@ struct SettingsView: View {
     }
 }
 
-struct AddAccountSheet: View {
-    @EnvironmentObject var store: Store
+/// Thêm một tài khoản ChốtLive khác trên cùng máy — đăng nhập xong có thể đổi qua lại không cần nhập lại mật khẩu.
+struct AddAppAccountSheet: View {
+    @EnvironmentObject var client: LiveClient
     @EnvironmentObject var ui: AppUI
-    @State private var handle = ""
-    @State private var name = ""
+    @State var server: String
+    @State private var user = ""
+    @State private var pass = ""
+    @State private var busy = false
+    @State private var error: String?
+
+    init(defaultServer: String) {
+        _server = State(initialValue: defaultServer)
+    }
+
+    private var canSubmit: Bool {
+        !busy && !server.trimmingCharacters(in: .whitespaces).isEmpty && !user.isEmpty && !pass.isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SheetTitle(title: "Thêm tài khoản").padding(.top, 6)
-            LabeledField(label: "Tài khoản TikTok", placeholder: "@shophoahong.live", text: $handle, capitalize: false)
-            LabeledField(label: "Tên hiển thị", placeholder: "Shop Hoa Hồng", text: $name)
-            PrimaryButton(title: "Lưu tài khoản", enabled: !handle.trimmingCharacters(in: CharacterSet(charactersIn: "@ ")).isEmpty) {
-                store.addAccount(uniqueId: handle, displayName: name, activate: true)
-                ui.dismissSheet()
+            SheetTitle(title: "Thêm tài khoản", subtitle: "Đăng nhập một tài khoản ChốtLive khác").padding(.top, 6)
+            LabeledField(label: "Server ChốtLive", placeholder: "https://ten-server.onrender.com",
+                         text: $server, keyboard: .URL, capitalize: false)
+            LabeledField(label: "Tên tài khoản", placeholder: "Tên tài khoản", text: $user, capitalize: false)
+            VStack(alignment: .leading, spacing: 6) {
+                T("Mật khẩu", 12, .medium, Theme.muted)
+                SecureField("Mật khẩu", text: $pass)
+                    .font(.bv(15, .semibold))
+                    .padding(.horizontal, 15)
+                    .frame(height: 44)
+                    .cardStyle(14, fill: Theme.field)
+            }
+            if let error { T(error, 13, .medium, Theme.red) }
+            PrimaryButton(title: busy ? "Đang đăng nhập..." : "Đăng nhập", enabled: canSubmit) {
+                busy = true
+                error = nil
+                Task {
+                    do {
+                        try await client.login(server: server, user: user, password: pass)
+                        ui.dismissSheet()
+                    } catch {
+                        self.error = error.localizedDescription
+                    }
+                    busy = false
+                }
             }
         }
         .padding(.horizontal, Metrics.gutter)

@@ -14,13 +14,20 @@ final class StorageTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         suite = "chotlive.tests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suite)
-        Keychain.delete()
+        wipeKeychain()
     }
 
     override func tearDownWithError() throws {
         defaults.removePersistentDomain(forName: suite)
         try? FileManager.default.removeItem(at: directory)
-        Keychain.delete()
+        wipeKeychain()
+    }
+
+    /// Keychain là của cả hệ thống, không theo UserDefaults suite của test, nên phải tự dọn.
+    private func wipeKeychain() {
+        Keychain.delete(AuthStorage.tokenAccount(accountA))
+        Keychain.delete(AuthStorage.tokenAccount(accountB))
+        Keychain.delete("authToken")
     }
 
     private func makeStore(_ account: String?) -> Store {
@@ -197,32 +204,94 @@ final class StorageTests: XCTestCase {
     // MARK: - Keychain
 
     func testKeychainRoundTrip() {
-        XCTAssertNil(Keychain.read())
-        XCTAssertTrue(Keychain.write("tk-1"))
-        XCTAssertEqual(Keychain.read(), "tk-1")
-        XCTAssertTrue(Keychain.write("tk-2"))
-        XCTAssertEqual(Keychain.read(), "tk-2")
-        Keychain.delete()
-        XCTAssertNil(Keychain.read())
+        let account = AuthStorage.tokenAccount(accountA)
+        XCTAssertNil(Keychain.read(account))
+        XCTAssertTrue(Keychain.write(account, "tk-1"))
+        XCTAssertEqual(Keychain.read(account), "tk-1")
+        XCTAssertTrue(Keychain.write(account, "tk-2"))
+        XCTAssertEqual(Keychain.read(account), "tk-2")
+        Keychain.delete(account)
+        XCTAssertNil(Keychain.read(account))
     }
 
-    func testLegacyTokenMovesToKeychain() {
+    func testLegacyKeychainTokenMovesToKeyedEntry() {
         defaults.set("https://chotlive.test", forKey: AuthStorage.serverKey)
         defaults.set("Shop.A", forKey: AuthStorage.userKey)
-        defaults.set("tk-cu", forKey: "authToken")
+        Keychain.write("authToken", "tk-cu")
 
-        XCTAssertEqual(AuthStorage.token(defaults), "tk-cu")
+        XCTAssertEqual(AuthStorage.currentToken(defaults), "tk-cu")
+        XCTAssertNil(Keychain.read("authToken"))
+        XCTAssertEqual(Keychain.read(AuthStorage.tokenAccount(accountA)), "tk-cu")
+        XCTAssertEqual(AuthStorage.savedAccounts(defaults).map(\.key), [accountA])
+    }
+
+    func testLegacyUserDefaultsTokenMovesToKeychain() {
+        defaults.set("https://chotlive.test", forKey: AuthStorage.serverKey)
+        defaults.set("Shop.A", forKey: AuthStorage.userKey)
+        defaults.set("tk-rat-cu", forKey: "authToken")
+
+        XCTAssertEqual(AuthStorage.currentToken(defaults), "tk-rat-cu")
         XCTAssertNil(defaults.string(forKey: "authToken"))
-        XCTAssertEqual(Keychain.read(), "tk-cu")
-        XCTAssertEqual(AuthStorage.currentAccountKey(defaults), accountA)
+        XCTAssertEqual(Keychain.read(AuthStorage.tokenAccount(accountA)), "tk-rat-cu")
     }
 
     func testReinstallDropsLeftoverToken() {
-        Keychain.write("tk-sot")
-        XCTAssertEqual(AuthStorage.token(defaults), "")
-        XCTAssertNil(Keychain.read())
+        Keychain.write("authToken", "tk-sot")
+        XCTAssertEqual(AuthStorage.currentToken(defaults), "")
+        XCTAssertNil(Keychain.read("authToken"))
         XCTAssertNil(AuthStorage.currentAccountKey(defaults))
     }
+
+    // MARK: - Nhiều tài khoản app
+
+    func testSaveSessionAddsToSavedAccountsAndSwitchChangesCurrent() {
+        AuthStorage.saveSession(server: "https://chotlive.test", user: "Shop.A", token: "tk-a", defaults)
+        AuthStorage.saveSession(server: "https://chotlive.test", user: "shop.b", token: "tk-b", defaults)
+
+        XCTAssertEqual(Set(AuthStorage.savedAccounts(defaults).map(\.key)), [accountA, accountB])
+        XCTAssertEqual(AuthStorage.currentAccountKey(defaults), accountB) // tài khoản vừa thêm là tài khoản hiện tại
+
+        let switched = AuthStorage.switchCurrent(to: accountA, defaults)
+        XCTAssertEqual(switched?.user, "Shop.A")
+        XCTAssertEqual(AuthStorage.currentAccountKey(defaults), accountA)
+        // Token của cả hai vẫn còn, đổi qua lại không cần đăng nhập lại.
+        XCTAssertEqual(AuthStorage.token(for: accountA), "tk-a")
+        XCTAssertEqual(AuthStorage.token(for: accountB), "tk-b")
+    }
+
+    func testSwitchCurrentFailsForUnknownAccount() {
+        AuthStorage.saveSession(server: "https://chotlive.test", user: "Shop.A", token: "tk-a", defaults)
+        XCTAssertNil(AuthStorage.switchCurrent(to: accountB, defaults))
+        XCTAssertEqual(AuthStorage.currentAccountKey(defaults), accountA)
+    }
+
+    func testForgetAccountOnlyAffectsOtherAccounts() {
+        AuthStorage.saveSession(server: "https://chotlive.test", user: "Shop.A", token: "tk-a", defaults)
+        AuthStorage.saveSession(server: "https://chotlive.test", user: "shop.b", token: "tk-b", defaults)
+        AuthStorage.switchCurrent(to: accountA, defaults)
+
+        // Không xoá được tài khoản đang dùng qua đường này.
+        AuthStorage.forgetAccount(accountA, defaults)
+        XCTAssertEqual(AuthStorage.token(for: accountA), "tk-a")
+        XCTAssertEqual(AuthStorage.savedAccounts(defaults).map(\.key).sorted(), [accountA, accountB].sorted())
+
+        AuthStorage.forgetAccount(accountB, defaults)
+        XCTAssertNil(AuthStorage.token(for: accountB))
+        XCTAssertEqual(AuthStorage.savedAccounts(defaults).map(\.key), [accountA])
+        XCTAssertEqual(AuthStorage.currentAccountKey(defaults), accountA) // tài khoản đang dùng không đổi
+    }
+
+    func testClearCurrentSessionRemovesOnlyCurrentFromSavedList() {
+        AuthStorage.saveSession(server: "https://chotlive.test", user: "Shop.A", token: "tk-a", defaults)
+        AuthStorage.saveSession(server: "https://chotlive.test", user: "shop.b", token: "tk-b", defaults)
+
+        AuthStorage.clearCurrentSession(defaults) // hiện đang là accountB
+        XCTAssertNil(AuthStorage.token(for: accountB))
+        XCTAssertEqual(AuthStorage.token(for: accountA), "tk-a")
+        XCTAssertEqual(AuthStorage.savedAccounts(defaults).map(\.key), [accountA])
+    }
+
+    // MARK: - LiveClient: đăng nhập, đổi và quên tài khoản
 
     @MainActor
     func testLoginAndLogoutFlow() async throws {
@@ -236,20 +305,71 @@ final class StorageTests: XCTestCase {
 
         try await client.login(server: "https://chotlive.test", user: "shop.a", password: "mat-khau")
         XCTAssertTrue(client.loggedIn)
-        XCTAssertEqual(Keychain.read(), "tk-dang-nhap")
+        XCTAssertEqual(Keychain.read(AuthStorage.tokenAccount(accountA)), "tk-dang-nhap")
         XCTAssertNil(defaults.string(forKey: "authToken"))
         XCTAssertEqual(AuthStorage.currentAccountKey(defaults), accountA)
+        XCTAssertEqual(client.savedAccounts.map(\.key), [accountA])
 
         let reopened = LiveClient(defaults: defaults)
         XCTAssertTrue(reopened.loggedIn)
         reopened.onAccountChange = nil
-        reopened.logout()
 
         client.logout()
         XCTAssertFalse(client.loggedIn)
-        XCTAssertNil(Keychain.read())
-        XCTAssertNil(AuthStorage.currentAccountKey(defaults))
+        XCTAssertNil(Keychain.read(AuthStorage.tokenAccount(accountA)))
+        XCTAssertNil(AuthStorage.token(for: accountA))
+        XCTAssertTrue(client.savedAccounts.isEmpty)
         XCTAssertEqual(changes, [accountA, nil])
+    }
+
+    @MainActor
+    func testAddingSecondAccountSwitchingAndForgetting() async throws {
+        URLProtocol.registerClass(AuthStub.self)
+        defer { URLProtocol.unregisterClass(AuthStub.self) }
+
+        let client = LiveClient(defaults: defaults)
+        try await client.login(server: "https://chotlive.test", user: "shop.a", password: "x")
+        try await client.login(server: "https://chotlive.test", user: "shop.b", password: "x")
+
+        // Thêm tài khoản thứ hai: nó trở thành tài khoản đang dùng, tài khoản đầu vẫn còn trong danh sách.
+        XCTAssertEqual(client.username, "shop.b")
+        XCTAssertEqual(Set(client.savedAccounts.map(\.key)), [accountA, accountB])
+
+        var changes: [String?] = []
+        client.onAccountChange = { changes.append($0) }
+
+        // Đổi về tài khoản đầu không cần đăng nhập lại.
+        client.switchAccount(to: accountA)
+        XCTAssertEqual(client.username, "Shop.A")
+        XCTAssertEqual(changes, [accountA])
+
+        // Quên tài khoản còn lại (không phải tài khoản đang dùng): không ảnh hưởng tài khoản hiện tại.
+        client.forgetSavedAccount(accountB)
+        XCTAssertEqual(client.savedAccounts.map(\.key), [accountA])
+        XCTAssertTrue(client.loggedIn)
+        XCTAssertEqual(client.username, "Shop.A")
+        XCTAssertNil(AuthStorage.token(for: accountB))
+
+        // Không thể tự quên tài khoản đang dùng qua đường này.
+        client.forgetSavedAccount(accountA)
+        XCTAssertEqual(client.savedAccounts.map(\.key), [accountA])
+        XCTAssertTrue(changes.count == 1) // forgetSavedAccount không gọi onAccountChange
+    }
+
+    @MainActor
+    func testSwitchAccountIgnoresUnknownOrCurrentKey() async throws {
+        URLProtocol.registerClass(AuthStub.self)
+        defer { URLProtocol.unregisterClass(AuthStub.self) }
+
+        let client = LiveClient(defaults: defaults)
+        try await client.login(server: "https://chotlive.test", user: "shop.a", password: "x")
+        var changes: [String?] = []
+        client.onAccountChange = { changes.append($0) }
+
+        client.switchAccount(to: accountA) // đang là tài khoản hiện tại
+        client.switchAccount(to: "khong-ton-tai")
+        XCTAssertEqual(client.username, "Shop.A")
+        XCTAssertTrue(changes.isEmpty)
     }
 }
 
@@ -262,12 +382,43 @@ private final class AuthStub: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        let body = #"{"ok":true,"token":"tk-dang-nhap","user":{"username":"Shop.A"}}"#
+        if request.url?.path == "/api/auth/logout" {
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+        // Đăng nhập: trả token/tên tài khoản dựa theo username gửi lên, để test được 2 tài khoản khác nhau.
+        let body = (try? JSONSerialization.jsonObject(with: request.httpBodyOrStream() ?? Data())) as? [String: Any]
+        let username = (body?["username"] as? String) ?? ""
+        let displayName = username.lowercased() == "shop.a" ? "Shop.A" : username
+        let token = "tk-dang-nhap"
+        let reply = ["ok": true, "token": token, "user": ["username": displayName]] as [String: Any]
+        let data = try! JSONSerialization.data(withJSONObject: reply)
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)
     }
 
     override func stopLoading() {}
+}
+
+private extension URLRequest {
+    /// httpBody không có sẵn khi request đi qua URLProtocol (chuyển thành httpBodyStream); đọc lại từ stream.
+    func httpBodyOrStream() -> Data? {
+        if let body = httpBody { return body }
+        guard let stream = httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        let bufferSize = 4096
+        var buffer = [UInt8](repeating: 0, count: bufferSize)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: bufferSize)
+            if read <= 0 { break }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
 }

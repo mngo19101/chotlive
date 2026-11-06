@@ -139,6 +139,11 @@ struct LiveNewSheet: View {
         return "\(handle) · \(shortDate(start))"
     }
 
+    /// Không cho xoá ID đang live hoặc đang kết nối, tránh mất dấu phiên đang mở.
+    private func isLive(_ account: TikTokAccount) -> Bool {
+        (isConnecting || isConnected) && account.uniqueId.lowercased() == client.liveUsername.lowercased()
+    }
+
     private func savedCard(_ account: TikTokAccount) -> some View {
         let active = account.id == store.activeAccountId
         return Button { start(account) } label: {
@@ -168,6 +173,11 @@ struct LiveNewSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if !isLive(account) {
+                Button("Xoá ID này", role: .destructive) { store.removeAccount(account.id) }
+            }
+        }
     }
 
     private var orDivider: some View {

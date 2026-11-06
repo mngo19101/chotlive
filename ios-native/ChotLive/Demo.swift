@@ -27,6 +27,9 @@ enum Demo {
         client.liveState = screen == "liveNew" ? "idle" : "connected"
         client.liveUsername = "shophoahong.live"
         client.loggedIn = true
+        let accA = AuthStorage.SavedAccount(key: "demo-a", server: "https://shop.onrender.com", user: "Chủ shop")
+        let accB = AuthStorage.SavedAccount(key: "demo-b", server: "https://khohanglinh.onrender.com", user: "Nhân viên kho")
+        client.setDemoAccounts([accA, accB], current: accA)
     }
 
     @MainActor
@@ -75,7 +78,7 @@ enum Demo {
             ui.push(.addressEdit("linh.nguyen98"))
         case "addAccount":
             ui.tab = .me
-            ui.present { AddAccountSheet() }
+            ui.present { AddAppAccountSheet(defaultServer: "") }
         case "printer":
             ui.tab = .me
             ui.push(.printer)
