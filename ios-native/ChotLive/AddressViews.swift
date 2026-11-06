@@ -83,8 +83,8 @@ struct AddressEditView: View {
                         field("Địa chỉ", text: $address.street, placeholder: "")
                         regionField
                     }
-                    section(.message, "Ghi chú giao") {
-                        FlowLayout(spacing: 8, lineSpacing: 8) {
+                    section(.messageSquare, "Ghi chú giao") {
+                        FlowLayout(spacing: 8, lineSpacing: 9) {
                             ForEach(DeliveryAddress.noteOptions, id: \.self) { noteChip($0) }
                         }
                     }
@@ -119,7 +119,7 @@ struct AddressEditView: View {
     }
 
     private func section<Content: View>(_ icon: IconName, _ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 15.5) {
+        VStack(alignment: .leading, spacing: 14.5) {
             HStack(spacing: 10) {
                 Icon(name: icon, size: 15, weight: 2.3, color: Theme.accent)
                     .frame(width: 32, height: 32)
@@ -136,11 +136,11 @@ struct AddressEditView: View {
     }
 
     private func label(_ title: String) -> some View {
-        T(title + " ", 13, .semibold, Theme.muted) + T("*", 15, .bold, Theme.red)
+        T(title + " ", 13, .semibold, Theme.muted) + T("*", 14, .bold, Theme.red)
     }
 
     private func field(_ title: String, text: Binding<String>, placeholder: String, keyboard: UIKeyboardType = .default) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6.4) {
             label(title)
             TextField(placeholder, text: text)
                 .font(.bv(16, .semibold))
@@ -153,7 +153,7 @@ struct AddressEditView: View {
     }
 
     private var regionField: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6.4) {
             label("Phường / Quận / Tỉnh")
             Button {
                 let current = address.region
@@ -162,7 +162,7 @@ struct AddressEditView: View {
                 }
             } label: {
                 HStack(spacing: 10) {
-                    T(address.region, 16, .semibold)
+                    T(regionText, 16, .semibold)
                         .lineSpacing(2)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -171,7 +171,7 @@ struct AddressEditView: View {
                 }
                 .padding(.leading, 17)
                 .padding(.trailing, 16)
-                .padding(.vertical, 10)
+                .padding(.vertical, 11.5)
                 .frame(minHeight: 50)
                 .cardStyle(16, fill: Theme.field)
                 .contentShape(Rectangle())
@@ -180,15 +180,23 @@ struct AddressEditView: View {
         }
     }
 
+    /// Tên tỉnh không bị tách làm hai dòng ("TP." một dòng, "Hồ Chí Minh" một dòng).
+    private var regionText: String {
+        var parts = address.region.components(separatedBy: ", ")
+        guard let last = parts.popLast() else { return address.region }
+        parts.append(last.replacingOccurrences(of: " ", with: "\u{00A0}"))
+        return parts.joined(separator: ", ")
+    }
+
     private func noteChip(_ option: String) -> some View {
         let selected = address.hasNote(option)
         return Button { address.toggleNote(option) } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 8) {
                 if selected { Icon(name: .check, size: 14, weight: 2.6, color: Theme.accentDeep) }
                 T(option, 14, .semibold, selected ? Theme.accentDeep : Theme.ink).lineLimit(1).fixedSize()
             }
             .padding(.horizontal, 15)
-            .frame(height: 40)
+            .frame(height: 38.6)
             .background(
                 Capsule().fill(selected ? Theme.peachTint : Theme.card)
                     .overlay(Capsule().strokeBorder(selected ? Theme.peachLine : Theme.line, lineWidth: 1))
@@ -300,7 +308,7 @@ struct AreaPickerSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 2)
                     .padding(.top, 8)
-                FlowLayout(spacing: 8, lineSpacing: 8) { steps }.padding(.top, 17)
+                FlowLayout(spacing: 8, lineSpacing: 8) { steps }.padding(.top, 15)
                 searchBox.padding(.top, 12.5)
             }
             .padding(.horizontal, Metrics.gutter)
@@ -315,18 +323,18 @@ struct AreaPickerSheet: View {
                 .padding(.horizontal, Metrics.gutter)
             }
             .scrollDismissesKeyboard(.immediately)
-            .padding(.top, 6)
+            .padding(.top, 8)
             .frame(maxHeight: .infinity)
 
             HairLine()
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 T("Địa chỉ đã chọn", 12.5, .medium, Theme.muted)
                 T(summary.isEmpty ? " " : summary, 15, .bold).lineLimit(1).minimumScaleFactor(0.75)
                 PrimaryButton(title: "Xác nhận", fontSize: 18, height: 55.5, enabled: isComplete) {
                     onConfirm(summary)
                     ui.dismissSheet()
                 }
-                .padding(.top, 10)
+                .padding(.top, 6.5)
             }
             .padding(.horizontal, Metrics.gutter)
             .padding(.top, 12)
@@ -377,11 +385,11 @@ struct AreaPickerSheet: View {
             level = value
             query = ""
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 if !active && name != nil { Icon(name: .check, size: 14, weight: 2.6, color: Theme.green) }
                 T(name ?? placeholder, 14, active ? .bold : .semibold).lineLimit(1).fixedSize()
             }
-            .padding(.horizontal, active ? 13.5 : 14)
+            .padding(.horizontal, active ? 13.5 : 13)
             .frame(height: 35.5)
             .background(
                 Capsule().fill(Theme.card)
@@ -429,7 +437,7 @@ struct AreaPickerSheet: View {
                 }
             }
             .padding(.horizontal, 4)
-            .frame(height: 53.5)
+            .frame(height: 53)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

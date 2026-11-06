@@ -23,7 +23,11 @@ struct LiveNewSheet: View {
     private var isConnected: Bool { client.liveState == "connected" }
     private var hasError: Bool { ["error", "ended", "disconnected"].contains(client.liveState) && !client.liveMessage.isEmpty }
     private var liveId: String? { LiveId.parse(input) }
-    private var inputInvalid: Bool { !input.trimmingCharacters(in: .whitespaces).isEmpty && liveId == nil }
+    private var inputEmpty: Bool { input.trimmingCharacters(in: .whitespaces).isEmpty }
+    private var inputInvalid: Bool { !inputEmpty && liveId == nil }
+    /// ID đang được tô sáng: nút dưới cùng bắt đầu ID này khi chưa nhập ID mới.
+    private var highlighted: TikTokAccount? { store.accounts.first { $0.id == store.activeAccountId } }
+    private var canStart: Bool { !isConnecting && (inputEmpty ? highlighted != nil : liveId != nil) }
 
     /// ID live gần đây nhất đứng trước.
     private var saved: [TikTokAccount] {
@@ -70,25 +74,25 @@ struct LiveNewSheet: View {
                             Spacer()
                             T("Bấm để bắt đầu ngay", 12.5, .medium, Theme.muted)
                         }
-                        .padding(.top, 20)
+                        .padding(.top, 17.8)
                         VStack(spacing: 11) {
                             ForEach(saved) { savedCard($0) }
                         }
                         .padding(.top, 15)
-                        orDivider.padding(.top, 19)
+                        orDivider.padding(.top, 16.4)
                     }
-                    (T("ID TikTok Live ", 13, .semibold, Theme.muted) + T("*", 15, .bold, Theme.red))
-                        .padding(.top, saved.isEmpty ? 20 : 18)
-                    idField.padding(.top, 8)
+                    (T("ID TikTok Live ", 13, .semibold, Theme.muted) + T("*", 14, .bold, Theme.red))
+                        .padding(.top, saved.isEmpty ? 20 : 16.8)
+                    idField.padding(.top, 6.4)
                     if inputInvalid {
-                        T("Không đọc được tên tài khoản. Hãy nhập tên dạng ten.tai.khoan.", 12.5, .medium, Theme.red).padding(.top, 8)
+                        T("Không đọc được tên tài khoản. Hãy nhập tên dạng ten.tai.khoan.", 12.5, .medium, Theme.red).padding(.top, 5.6)
                     } else {
-                        T("Nhập tên tài khoản đang live hoặc dán link phiên live.", 12.5, .medium, Theme.muted).padding(.top, 8)
+                        T("Nhập tên tài khoản đang live hoặc dán link phiên live.", 12.5, .medium, Theme.muted).padding(.top, 5.6)
                     }
                     if hasError {
                         T(client.liveMessage, 12.5, .medium, Theme.red).padding(.top, 4)
                     }
-                    rememberRow.padding(.top, 19)
+                    rememberRow.padding(.top, 16.5)
                 }
                 .padding(.horizontal, Metrics.gutter)
                 .padding(.bottom, 12)
@@ -97,8 +101,12 @@ struct LiveNewSheet: View {
 
             HairLine()
             PrimaryButton(title: isConnecting ? "Đang kết nối..." : "Bắt đầu live", fontSize: 18, height: 55.5,
-                          enabled: liveId != nil && !isConnecting) {
-                if let id = liveId { startNew(id) }
+                          enabled: canStart) {
+                if let id = liveId {
+                    startNew(id)
+                } else if let account = highlighted {
+                    start(account)
+                }
             }
             .padding(.horizontal, Metrics.gutter)
             .padding(.top, 13)
@@ -134,15 +142,17 @@ struct LiveNewSheet: View {
     private func savedCard(_ account: TikTokAccount) -> some View {
         let active = account.id == store.activeAccountId
         return Button { start(account) } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 0) {
                 Avatar(text: account.initials, size: 44, fontSize: 15, seed: account.id)
-                VStack(alignment: .leading, spacing: 2) {
-                    T(account.displayName, 16, .bold).lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    T(account.displayName, 16.2, .bold).lineLimit(1)
                     T(lastLiveText(account), 13, .medium, Theme.muted)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 12)
+                .padding(.trailing, 8)
                 T("Bắt đầu", 15, .bold)
                     .fixedSize()
                     .frame(width: 88, height: 36)
@@ -152,8 +162,8 @@ struct LiveNewSheet: View {
                     )
             }
             .padding(.horizontal, 15)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: 69)
+            .padding(.vertical, 11.6)
+            .frame(maxWidth: .infinity, minHeight: 69.3)
             .cardStyle(22, fill: active ? Theme.peachRow : Theme.card, border: active ? Theme.peachLine : Theme.line)
             .contentShape(Rectangle())
         }
@@ -198,7 +208,7 @@ struct LiveNewSheet: View {
 
     private var rememberRow: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 T("Lưu ID này cho lần sau", 15, .bold)
                 T("Lần sau chỉ cần bấm vào ID đã lưu", 13, .medium, Theme.muted)
             }
@@ -280,7 +290,7 @@ struct SessionDetailView: View {
         }) {
             ScrollViewReader { proxy in
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 14) {
+                    VStack(spacing: 13.5) {
                         if searching { SearchField(text: $search) }
                         if let s = session { summaryCard(s) }
                         tabs(total: session?.commentCount ?? comments.count, count)
@@ -288,7 +298,7 @@ struct SessionDetailView: View {
                             T(session?.isLive == true ? "Đang chờ bình luận..." : "Không có bình luận phù hợp.", 13, .medium, Theme.muted)
                                 .padding(.top, 24)
                         }
-                        LazyVStack(spacing: 8.5) {
+                        LazyVStack(spacing: 9) {
                             ForEach(shown) { c in
                                 let owner = customer(of: c, in: map)
                                 CommentRow(c: c, closing: store.isClosingComment(c), customer: owner, isNew: isNew(owner)) {
@@ -412,8 +422,8 @@ struct SessionDetailView: View {
         let selected = tab == value
         return Button { tab = value } label: {
             HStack(spacing: 6) {
-                T(title, 15, .bold)
-                T("\(count)", 13.5, selected ? .bold : .medium, selected ? Theme.ink : Theme.muted)
+                T(title, 14.4, .bold)
+                T("\(count)", 13, selected ? .bold : .medium, selected ? Theme.ink : Theme.muted)
             }
             .fixedSize()
             .padding(.horizontal, 14)
@@ -452,25 +462,27 @@ struct CommentRow: View {
     var body: some View {
         HStack(spacing: 9.7) {
             Avatar(text: initialsOf(c.nickname), size: 34, fontSize: 12.5, seed: c.uniqueId)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    T(c.nickname, 14, .bold).lineLimit(1).layoutPriority(1)
+            VStack(alignment: .leading, spacing: closing ? 3.4 : 2) {
+                HStack(spacing: 5) {
+                    T(c.nickname, 13.4, .bold).lineLimit(1).layoutPriority(1)
                     if customer?.isBigSpender == true {
-                        Badge(text: "Mua nhiều", color: Theme.accentDeep, fill: Theme.peachCode, fontSize: 11.5, height: 20, hPad: 6)
+                        Badge(text: "Mua nhiều", color: Theme.accentDeep, fill: Theme.peachCode, fontSize: 11, height: 20, hPad: 6)
                     } else if isNew {
-                        Badge(text: "Mới", color: Theme.green, fill: Theme.greenSoft, fontSize: 11.5, height: 20, hPad: 6)
+                        Badge(text: "Mới", color: Theme.green, fill: Theme.greenSoft, fontSize: 11, height: 20, hPad: 6)
                     } else {
-                        T("@" + c.uniqueId, 12, .medium, Theme.muted).lineLimit(1)
+                        T("@" + c.uniqueId, 11, .medium, Theme.muted).lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    T(timeText(c.ts), 12, .medium, Theme.muted).fixedSize()
+                    T(timeText(c.ts), 11, .medium, Theme.muted).fixedSize()
                     if closing {
                         Icon(name: .check, size: 10, weight: 3)
                             .frame(width: 18, height: 18)
                             .background(Circle().fill(Theme.orange))
                     }
                 }
-                CommentText(text: c.text, highlight: closing)
+                // Giữ chiều cao dòng tên để badge và dấu tích không đẩy hàng cao lên.
+                .frame(height: 17)
+                CommentText(text: c.text, size: 14, highlight: closing)
             }
             Button(action: onPrint) {
                 Icon(name: .printer, size: 15, weight: 2.2)
@@ -523,16 +535,16 @@ struct OrderCommentsView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         summaryCard(o, commentCount: list.count)
                         HStack(alignment: .firstTextBaseline) {
-                            T("Các bình luận đã chốt", 16.5, .bold).lineLimit(1)
+                            T("Các bình luận đã chốt", 16.2, .bold).lineLimit(1)
                             Spacer()
-                            T("Theo thời gian", 13.5, .medium, Theme.muted)
+                            T("Theo thời gian", 13.2, .medium, Theme.muted)
                         }
                         .padding(.horizontal, 4)
-                        .padding(.top, 17)
+                        .padding(.top, 15)
                         VStack(spacing: 17) {
                             ForEach(list) { row($0) }
                         }
-                        .padding(.top, 19)
+                        .padding(.top, 17)
                     }
                     .padding(.horizontal, Metrics.gutter)
                     .padding(.bottom, 16)
@@ -549,49 +561,50 @@ struct OrderCommentsView: View {
     }
 
     private func summaryCard(_ o: Order, commentCount: Int) -> some View {
-        VStack(alignment: .leading, spacing: 15) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 11) {
                 Avatar(text: o.customer.initials, size: 48, fontSize: 17, seed: o.customer.id)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 0.5) {
                     T(o.customer.nickname, 17.5, .bold).lineLimit(1).minimumScaleFactor(0.8)
                     T("@" + o.customer.uniqueId, 13.5, .medium, Theme.muted).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 Badge(text: "\(commentCount) bình luận", color: Theme.accentDeep, fill: Theme.peachTint, fontSize: 12.5, height: 28, hPad: 10)
             }
-            HairLine()
+            HairLine().padding(.top, 14.6)
             HStack(alignment: .top) {
                 if let s = store.sessions.first(where: { $0.id == o.items.first?.sessionId }) {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 1.6) {
                         T("Phiên live", 12.5, .semibold, Theme.muted)
                         T("\(s.title) · \(timeText(s.start))", 15, .bold).lineLimit(1).minimumScaleFactor(0.8)
                     }
                 }
                 Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 1.6) {
                     T("Giá trị đơn", 12.5, .semibold, Theme.muted)
                     T("\(o.productCount) sản phẩm · \(money(o.total))", 15, .bold).lineLimit(1).minimumScaleFactor(0.8)
                 }
             }
+            .padding(.top, 13.5)
         }
         .padding(.horizontal, 19)
         .padding(.top, 16)
-        .padding(.bottom, 16)
+        .padding(.bottom, 17.2)
         .cardStyle(24)
     }
 
     private func row(_ g: CommentGroup) -> some View {
         HStack(alignment: .top, spacing: 0) {
-            T(timeText(g.ts), 16, .heavy, Theme.ink, track: -0.2)
+            T(timeText(g.ts), 15.5, .heavy, Theme.ink, track: -0.2)
                 .frame(width: 60, alignment: .leading)
                 .padding(.top, 16)
             VStack(alignment: .leading, spacing: 13) {
                 CommentText(text: g.text, size: 16)
                 VStack(spacing: 7) {
                     ForEach(g.items) { it in
-                        HStack(spacing: 10) {
+                        HStack(spacing: 8) {
                             Icon(name: .arrowRight, size: 14, weight: 2.3, color: Theme.accent)
-                            T(it.productLabel, 13.5, .bold).lineLimit(1)
+                            T(it.productLabel, 13.1, .bold).lineLimit(1)
                             T("\(it.qty) × \(money(it.price))", 13, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
                             Spacer(minLength: 0)
                         }

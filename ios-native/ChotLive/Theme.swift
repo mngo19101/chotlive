@@ -666,7 +666,7 @@ struct CommentText: View {
                         T(part.text, size, .bold)
                             .fixedSize()
                             .padding(.horizontal, 5)
-                            .frame(height: size + 5)
+                            .frame(height: size + 4)
                             .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.peachCode))
                     } else {
                         T(part.text, size, .medium).fixedSize()
@@ -687,8 +687,9 @@ struct SheetTitle: View {
     var size: CGFloat = 20
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 5) {
+        // Có dòng phụ thì nút đóng thẳng hàng với đỉnh tiêu đề, như mẫu Live mới.
+        HStack(alignment: subtitle == nil ? .center : .top) {
+            VStack(alignment: .leading, spacing: 1.5) {
                 T(title, size, .heavy, Theme.ink, track: -0.3)
                 if let subtitle { T(subtitle, 13, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.85) }
             }
