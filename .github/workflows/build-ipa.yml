@@ -1,8 +1,6 @@
 name: Build iOS IPA (ChốtLive)
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
     inputs:
       server_url:
@@ -13,7 +11,7 @@ on:
 jobs:
   build-ipa:
     name: Build Unsigned iOS .ipa
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Checkout mã nguồn
         uses: actions/checkout@v4
