@@ -57,10 +57,16 @@ enum PriceParser {
     }
 }
 
-func vnd(_ n: Int) -> String {
+private func groupedNumber(_ n: Int) -> String {
     let f = NumberFormatter()
     f.numberStyle = .decimal
     f.usesGroupingSeparator = true
     f.groupingSeparator = "."
-    return (f.string(from: NSNumber(value: n)) ?? "\(n)") + "đ"
+    return f.string(from: NSNumber(value: n)) ?? "\(n)"
 }
+
+/// Dùng trên tem in.
+func vnd(_ n: Int) -> String { groupedNumber(n) + "đ" }
+
+/// Dùng trên giao diện: "4.860.000 ₫".
+func money(_ n: Int) -> String { groupedNumber(n) + " ₫" }

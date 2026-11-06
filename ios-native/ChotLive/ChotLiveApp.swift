@@ -1,10 +1,13 @@
+import AudioToolbox
 import SwiftUI
+import UIKit
 
 @main
 struct ChotLiveApp: App {
     @StateObject private var store = Store()
     @StateObject private var printer = PrinterManager()
     @StateObject private var client = LiveClient()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -13,8 +16,30 @@ struct ChotLiveApp: App {
                 .environmentObject(printer)
                 .environmentObject(client)
                 .onAppear {
-                    client.onChat = { [store] c in store.addComment(c) }
+                    client.onChat = { [store, client] c in
+                        store.addComment(c, tiktok: client.liveUsername)
+                        if store.isClosingComment(c) { CommentAlert.play() }
+                    }
                 }
+                .onChange(of: scenePhase) { phase in
+                    if phase != .active { store.save() }
+                }
+        }
+    }
+}
+
+/// Âm thanh / rung khi có bình luận chốt đơn (cài trong Tôi › Thông báo).
+enum CommentAlert {
+    static let soundKey = "notifySound"
+    static let hapticKey = "notifyHaptic"
+    private static var lastPlayed = Date.distantPast
+
+    static func play() {
+        guard Date().timeIntervalSince(lastPlayed) > 1 else { return }
+        lastPlayed = Date()
+        if UserDefaults.standard.bool(forKey: soundKey) { AudioServicesPlaySystemSound(1007) }
+        if UserDefaults.standard.bool(forKey: hapticKey) {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }
     }
 }
@@ -30,4 +55,23 @@ func printComment(_ c: LiveComment, store: Store, printer: PrinterManager) -> St
     let ok = printer.send(TicketRenderer.ticketBytes(comment: c))
     if ok { store.markPrinted(itemId: item.id) }
     return ok ? nil : "Đã lưu đơn nhưng gửi lệnh in thất bại."
+}
+
+/// In tem cho tất cả sản phẩm của đơn. Trả về thông báo (nil nếu in thành công).
+@MainActor
+func printOrder(_ o: Order, store: Store, printer: PrinterManager) -> String? {
+    guard printer.isConnected else {
+        return "Chưa kết nối máy in — vào Tôi › Máy in để kết nối."
+    }
+    var failed = false
+    for it in o.items {
+        let c = LiveComment(id: it.id, uniqueId: o.customer.uniqueId, userId: o.customer.userId,
+                            nickname: o.customer.nickname, text: it.comment, ts: it.ts, price: it.lineTotal)
+        if printer.send(TicketRenderer.ticketBytes(comment: c)) {
+            store.markPrinted(itemId: it.id)
+        } else {
+            failed = true
+        }
+    }
+    return failed ? "Gửi lệnh in thất bại với một số sản phẩm." : nil
 }

@@ -13,9 +13,17 @@ targets:
       path: ChotLive/Info.plist
       properties:
         CFBundleDisplayName: ChốtLive
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        UIUserInterfaceStyle: Light
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        UIAppFonts:
+          - BeVietnamPro-Medium.ttf
+          - BeVietnamPro-SemiBold.ttf
+          - BeVietnamPro-Bold.ttf
+          - BeVietnamPro-ExtraBold.ttf
         NSBluetoothAlwaysUsageDescription: Ứng dụng cần Bluetooth để kết nối và in tem qua máy in nhiệt.
         NSBluetoothPeripheralUsageDescription: Ứng dụng cần Bluetooth để kết nối máy in.
         NSAppTransportSecurity:
@@ -23,8 +31,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chotlive.native
-        MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "2"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

@@ -154,9 +154,10 @@ final class LiveClient: ObservableObject {
         }
     }
 
+    // Gán username trước state: nơi lắng nghe liveState cần đọc đúng tên tài khoản.
     private func applyLiveStatus(_ ls: [String: Any]) {
-        liveState = (ls["state"] as? String) ?? "idle"
         liveUsername = (ls["username"] as? String) ?? ""
+        liveState = (ls["state"] as? String) ?? "idle"
     }
 
     private func handle(_ data: Data) {
@@ -166,9 +167,9 @@ final class LiveClient: ObservableObject {
         case "hello":
             if let ls = m["liveStatus"] as? [String: Any] { applyLiveStatus(ls) }
         case "status":
-            liveState = (m["state"] as? String) ?? "idle"
             liveMessage = (m["message"] as? String) ?? ""
             if let u = m["username"] as? String { liveUsername = u }
+            liveState = (m["state"] as? String) ?? "idle"
         case "viewers":
             viewers = (m["count"] as? Int) ?? Int((m["count"] as? Double) ?? 0)
         case "chat":

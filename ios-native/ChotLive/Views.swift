@@ -1,153 +1,151 @@
-import CoreBluetooth
 import SwiftUI
-
-// MARK: - Giao diện chung
-
-enum Theme {
-    static let orange = Color(red: 1.0, green: 0.54, blue: 0.24)
-    static let orangeDeep = Color(red: 0.93, green: 0.40, blue: 0.10)
-    static let orangeSoft = Color(red: 1.0, green: 0.54, blue: 0.24).opacity(0.16)
-    static let card = Color(.secondarySystemGroupedBackground)
-    static let bg = Color(.systemGroupedBackground)
-}
-
-struct Avatar: View {
-    let text: String
-    var size: CGFloat = 42
-    var highlighted = false
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: size * 0.36, weight: .bold))
-            .foregroundColor(highlighted ? Theme.orangeDeep : .secondary)
-            .frame(width: size, height: size)
-            .background(Circle().fill(highlighted ? Theme.orangeSoft : Color(.tertiarySystemFill)))
-    }
-}
-
-struct Badge: View {
-    let text: String
-    var color: Color = Theme.orangeDeep
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundColor(color)
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Capsule().fill(color.opacity(0.14)))
-    }
-}
-
-struct Card<Content: View>: View {
-    @ViewBuilder var content: () -> Content
-    var body: some View {
-        content()
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.card))
-    }
-}
-
-struct Chip: View {
-    let title: String
-    let selected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.footnote.weight(.semibold))
-                .padding(.horizontal, 14).padding(.vertical, 7)
-                .foregroundColor(selected ? .white : .primary)
-                .background(Capsule().fill(selected ? Theme.orange : Color(.tertiarySystemFill)))
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-struct SearchField: View {
-    @Binding var text: String
-    var placeholder = "Tìm tên hoặc @tiktok"
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundColor(.secondary)
-            TextField(placeholder, text: $text)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-            if !text.isEmpty {
-                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundColor(.secondary) }
-            }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.card))
-    }
-}
-
-private func weekdayLabel(_ d: Date) -> String {
-    let w = Calendar.current.component(.weekday, from: d) // 1 = CN
-    return w == 1 ? "CN" : "T\(w)"
-}
-
-private func shortDate(_ d: Date) -> String {
-    let c = Calendar.current.dateComponents([.day, .month], from: d)
-    return "\(c.day ?? 0)/\(c.month ?? 0)"
-}
-
-private func fullDateLabel(_ d: Date) -> String {
-    "\(weekdayLabel(d) == "CN" ? "Chủ nhật" : "Thứ " + String(weekdayLabel(d).dropFirst())), \(shortDate(d))"
-}
-
-private func timeText(_ d: Date) -> String {
-    let c = Calendar.current.dateComponents([.hour, .minute], from: d)
-    return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
-}
-
-private func relativeDay(_ d: Date) -> String {
-    let cal = Calendar.current
-    if cal.isDateInToday(d) { return "\(timeText(d)) nay" }
-    if cal.isDateInYesterday(d) { return "\(timeText(d)) hôm qua" }
-    return "\(weekdayLabel(d)) \(shortDate(d))"
-}
-
-private func compactMoney(_ n: Int) -> String {
-    if n >= 1_000_000 { return String(format: "%.2ftr", Double(n) / 1_000_000).replacingOccurrences(of: ".", with: ",") }
-    if n >= 1_000 { return "\(n / 1_000)k" }
-    return "\(n)"
-}
-
-private struct InfoAlert: ViewModifier {
-    @Binding var message: String?
-    func body(content: Content) -> some View {
-        content.alert("Thông báo", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: { Text(message ?? "") }
-    }
-}
-
-extension View {
-    fileprivate func infoAlert(_ message: Binding<String?>) -> some View { modifier(InfoAlert(message: message)) }
-}
 
 // MARK: - Root
 
 struct RootView: View {
     @EnvironmentObject var client: LiveClient
+    @EnvironmentObject var store: Store
 
     var body: some View {
         Group {
             if client.loggedIn {
-                TabView {
-                    DashboardView().tabItem { Label("Doanh số", systemImage: "chart.bar.fill") }
-                    LiveView().tabItem { Label("Bình luận", systemImage: "bubble.left.fill") }
-                    CustomersView().tabItem { Label("Khách hàng", systemImage: "person.2.fill") }
-                    OrdersView().tabItem { Label("Đơn hàng", systemImage: "bag.fill") }
-                    SettingsView().tabItem { Label("Tôi", systemImage: "person.crop.circle.fill") }
-                }
+                MainShell()
             } else {
                 LoginView()
             }
         }
-        .tint(Theme.orange)
+        .preferredColorScheme(.light)
+        .tint(Theme.orangeDeep)
+        #if DEBUG
+        .onAppear { Demo.prepare(store: store, client: client) }
+        #endif
+    }
+}
+
+struct MainShell: View {
+    @EnvironmentObject var client: LiveClient
+    @EnvironmentObject var store: Store
+    @StateObject private var ui = AppUI()
+
+    var body: some View {
+        ZStack {
+            NavigationStack(path: $ui.path) {
+                TabsContainer()
+                    .toolbar(.hidden, for: .navigationBar)
+                    .navigationDestination(for: Route.self) { route in
+                        destination(route)
+                            .navigationBarBackButtonHidden(true)
+                    }
+            }
+            SheetLayer(ui: ui)
+        }
+        .environmentObject(ui)
+        .alert("Thông báo", isPresented: Binding(get: { ui.alert != nil }, set: { if !$0 { ui.alert = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(ui.alert ?? "")
+        }
+        .alert(ui.confirm?.title ?? "", isPresented: Binding(get: { ui.confirm != nil }, set: { if !$0 { ui.confirm = nil } })) {
+            Button("Huỷ", role: .cancel) {}
+            Button(ui.confirm?.action ?? "OK", role: .destructive) { ui.confirm?.run() }
+        } message: {
+            Text(ui.confirm?.message ?? "")
+        }
+        .onReceive(client.$liveState.dropFirst()) { state in
+            guard !isDemo else { return }
+            store.syncLive(state: state, username: client.liveUsername)
+        }
+        .onAppear {
+            if !isDemo && client.liveState == "connected" {
+                store.syncLive(state: "connected", username: client.liveUsername)
+            }
+            #if DEBUG
+            Demo.show(ui: ui)
+            #endif
+        }
+    }
+
+    private var isDemo: Bool {
+        #if DEBUG
+        return Demo.isActive
+        #else
+        return false
+        #endif
+    }
+
+    @ViewBuilder
+    private func destination(_ route: Route) -> some View {
+        switch route {
+        case .session(let id): SessionDetailView(sessionId: id)
+        case .order(let id): OrderDetailView(orderId: id)
+        case .orderEdit(let id): OrderEditView(orderId: id)
+        case .orderCreate: OrderCreateView()
+        case .orderComments(let id): OrderCommentsView(orderId: id)
+        case .customer(let id): CustomerDetailView(customerId: id)
+        case .addressEdit(let id): AddressEditView(customerId: id)
+        case .printer: PrinterView()
+        case .keywords: KeywordsView()
+        case .notifications: NotificationsView()
+        case .help: HelpView()
+        }
+    }
+}
+
+struct TabsContainer: View {
+    @EnvironmentObject var ui: AppUI
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                tab(.sales) { DashboardView() }
+                tab(.comments) { LiveView() }
+                tab(.customers) { CustomersView() }
+                tab(.orders) { OrdersView() }
+                tab(.me) { SettingsView() }
+            }
+            TabBar(selection: $ui.tab)
+        }
+        .background(Theme.bg.ignoresSafeArea())
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+    }
+
+    private func tab<V: View>(_ t: AppTab, @ViewBuilder _ content: () -> V) -> some View {
+        content()
+            .opacity(ui.tab == t ? 1 : 0)
+            .allowsHitTesting(ui.tab == t)
+    }
+}
+
+/// Thanh tab theo mẫu: 5 cột đều, nhãn "Khách hàng" xuống dòng.
+struct TabBar: View {
+    @Binding var selection: AppTab
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(AppTab.allCases, id: \.self) { t in
+                let active = selection == t
+                Button { selection = t } label: {
+                    VStack(spacing: 2) {
+                        Icon(name: t.icon, size: 24, color: active ? Theme.accent : Theme.muted)
+                        T(t.title, 11, .semibold, active ? Theme.accent : Theme.muted)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(0.5)
+                            .fixedSize()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 75)
+        .padding(.bottom, max(Metrics.safeBottom - 25, 0))
+        .background(
+            Color.white
+                .overlay(Rectangle().fill(Theme.line).frame(height: 1), alignment: .top)
+                .ignoresSafeArea(.container, edges: .bottom)
+        )
     }
 }
 
@@ -161,33 +159,52 @@ struct LoginView: View {
     @State private var busy = false
     @State private var error: String?
 
+    private var canSubmit: Bool { !busy && !server.isEmpty && !user.isEmpty && !pass.isEmpty }
+
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Server ChốtLive") {
-                    TextField("https://ten-server.onrender.com", text: $server)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Metrics.gap) {
+                VStack(alignment: .leading, spacing: 1) {
+                    T("Đăng nhập để bắt đầu", 13, .medium, Theme.muted)
+                    T("ChốtLive", 28, .heavy, Theme.ink, track: -0.5)
                 }
-                Section("Tài khoản") {
-                    TextField("Tên tài khoản", text: $user).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Mật khẩu", text: $pass)
+                .padding(.bottom, 6)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    LabeledField(label: "Server ChốtLive", placeholder: "https://ten-server.onrender.com",
+                                 text: $server, keyboard: .URL, capitalize: false)
+                    LabeledField(label: "Tên tài khoản", placeholder: "Tên tài khoản", text: $user, capitalize: false)
+                    VStack(alignment: .leading, spacing: 6) {
+                        T("Mật khẩu", 12, .medium, Theme.muted)
+                        SecureField("Mật khẩu", text: $pass)
+                            .font(.bv(15, .semibold))
+                            .padding(.horizontal, 15)
+                            .frame(height: 44)
+                            .cardStyle(14, fill: Theme.field)
+                    }
                 }
-                if let error { Text(error).foregroundColor(.red).font(.footnote) }
-                Button {
-                    busy = true; error = nil
+                .padding(16)
+                .cardStyle(24)
+
+                if let error {
+                    T(error, 13, .medium, Theme.red)
+                }
+
+                PrimaryButton(title: busy ? "Đang đăng nhập..." : "Đăng nhập", enabled: canSubmit) {
+                    busy = true
+                    error = nil
                     Task {
                         do { try await client.login(server: server, user: user, password: pass) }
                         catch { self.error = error.localizedDescription }
                         busy = false
                     }
-                } label: {
-                    HStack { Spacer(); if busy { ProgressView() } else { Text("Đăng nhập").bold().foregroundColor(.white) }; Spacer() }
                 }
-                .listRowBackground(Theme.orange)
-                .disabled(busy || server.isEmpty || user.isEmpty || pass.isEmpty)
             }
-            .navigationTitle("ChốtLive")
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.top, 6)
         }
+        .scrollDismissesKeyboard(.interactively)
+        .background(Theme.bg.ignoresSafeArea())
     }
 }
 
@@ -198,22 +215,29 @@ struct DashboardView: View {
     @EnvironmentObject var store: Store
     @State private var days = 7
 
-    private var today: Date { Date() }
     private var cal: Calendar { Calendar.current }
-
+    private var today: Date { Clock.now }
     private var revenueToday: Int { store.revenue(on: today) }
-    private var revenueYesterday: Int { store.revenue(on: cal.date(byAdding: .day, value: -1, to: today) ?? today) }
 
-    private var revenueMonth: Int {
-        store.orders().filter { cal.isDate($0.day, equalTo: today, toGranularity: .month) }.reduce(0) { $0 + $1.total }
+    private var deltaYesterday: Int? {
+        guard let y = cal.date(byAdding: .day, value: -1, to: today) else { return nil }
+        let prev = store.revenue(on: y)
+        guard prev > 0 else { return nil }
+        return Int(((Double(revenueToday) - Double(prev)) / Double(prev) * 100).rounded())
     }
 
-    private var newCustomersToday: Int {
-        store.customers.filter { c in
-            guard let first = c.items.map(\.ts).min() else { return false }
-            return cal.isDateInToday(first)
-        }.count
+    private var monthNumber: Int { cal.component(.month, from: today) }
+    private var previousMonthDate: Date { cal.date(byAdding: .month, value: -1, to: today) ?? today }
+    private var revenueMonth: Int { store.revenue(monthOf: today, throughDay: 31) }
+
+    /// So với cùng số ngày của tháng trước, để giữa tháng không bị so lệch.
+    private var deltaMonth: Int? {
+        let prev = store.revenue(monthOf: previousMonthDate, throughDay: cal.component(.day, from: today))
+        guard prev > 0 else { return nil }
+        return Int(((Double(revenueMonth) - Double(prev)) / Double(prev) * 100).rounded())
     }
+
+    private var newCustomersToday: Int { store.customers.filter(\.isNewToday).count }
 
     private var series: [(Date, Int)] {
         (0..<days).reversed().map { off in
@@ -222,249 +246,208 @@ struct DashboardView: View {
         }
     }
 
-    private var delta: String? {
-        guard revenueYesterday > 0 else { return nil }
-        let p = (Double(revenueToday) - Double(revenueYesterday)) / Double(revenueYesterday) * 100
-        return String(format: "%@%.0f%%", p >= 0 ? "+" : "", p)
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: Metrics.gap) {
+                PageHeader(subtitle: "\(longWeekday(today)), \(fullDate(today))", title: "Doanh số") {
+                    if client.liveState == "connected" { livePill }
+                }
+                hero
+                HStack(spacing: 12) {
+                    customersTile
+                        .frame(width: (Metrics.screenWidth - 2 * Metrics.gutter - 12) * 0.417)
+                    monthTile
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                chartCard
+            }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.top, 6)
+            .padding(.bottom, 12)
+        }
+        .background(Theme.bg)
     }
 
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 12) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(fullDateLabel(today)).font(.footnote).foregroundColor(.secondary)
-                            Text("Doanh số").font(.largeTitle.bold())
-                        }
-                        Spacer()
-                        if client.liveState == "connected" {
-                            HStack(spacing: 6) {
-                                Circle().fill(.red).frame(width: 8, height: 8)
-                                Text("Đang live").font(.footnote.weight(.semibold))
-                            }
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(Capsule().fill(Theme.card))
-                        }
-                    }
-
-                    // Doanh thu hôm nay
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Doanh thu hôm nay").font(.subheadline.weight(.semibold))
-                        Text(vnd(revenueToday)).font(.system(size: 38, weight: .heavy))
-                        HStack(spacing: 8) {
-                            if let delta {
-                                Text(delta).font(.caption.bold())
-                                    .padding(.horizontal, 8).padding(.vertical, 3)
-                                    .background(Capsule().fill(Color.black.opacity(0.28)))
-                                Text("so với hôm qua").font(.footnote)
-                            } else {
-                                Text("Chưa có dữ liệu hôm qua").font(.footnote)
-                            }
-                        }
-                    }
-                    .foregroundColor(.white)
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Theme.orange))
-
-                    HStack(spacing: 12) {
-                        Card {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Khách hôm nay").font(.footnote).foregroundColor(.secondary)
-                                Text("\(store.customersToday().count)").font(.system(size: 30, weight: .bold))
-                                Text("\(newCustomersToday) khách mới").font(.caption).foregroundColor(Theme.orangeDeep)
-                            }
-                        }
-                        Card {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Doanh thu tháng \(cal.component(.month, from: today))")
-                                    .font(.footnote).foregroundColor(.secondary)
-                                Text(vnd(revenueMonth)).font(.system(size: 20, weight: .bold)).minimumScaleFactor(0.6).lineLimit(1)
-                                Text("\(store.orders().filter { cal.isDate($0.day, equalTo: today, toGranularity: .month) }.count) đơn")
-                                    .font(.caption).foregroundColor(.secondary)
-                            }
-                        }
-                    }
-
-                    Card {
-                        VStack(alignment: .leading, spacing: 14) {
-                            HStack {
-                                Text("Doanh thu theo ngày").font(.headline)
-                                Spacer()
-                                Picker("", selection: $days) {
-                                    Text("7 ngày").tag(7)
-                                    Text("30 ngày").tag(30)
-                                }
-                                .pickerStyle(.segmented).frame(width: 150)
-                            }
-                            BarChart(data: series, showAllLabels: days == 7)
-                                .frame(height: 190)
-                        }
-                    }
-                }
-                .padding(.horizontal, 16).padding(.bottom, 16)
-            }
-            .background(Theme.bg)
-            .toolbar(.hidden, for: .navigationBar)
+    private var livePill: some View {
+        HStack(spacing: 8) {
+            Circle().fill(Theme.live).frame(width: 8, height: 8)
+            T("Đang live", 13, .bold).lineLimit(1).fixedSize()
         }
+        .padding(.horizontal, 13)
+        .frame(height: 36)
+        .background(Capsule().fill(Theme.card).overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1)))
+    }
+
+    private var hero: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            T("Doanh thu hôm nay", 14, .semibold)
+            T(money(revenueToday), 40, .heavy, Theme.ink, track: -1.5)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .padding(.top, 2)
+            HStack(spacing: 8) {
+                if let delta = deltaYesterday {
+                    HStack(spacing: 4) {
+                        Icon(name: delta >= 0 ? .chevronUp : .chevronDown, size: 14, weight: 2.6,
+                             color: delta >= 0 ? Theme.greenBright : Theme.live)
+                        T("\(delta >= 0 ? "+" : "")\(delta)%", 13, .semibold, delta >= 0 ? Theme.greenBright : Theme.live)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 23)
+                    .background(Capsule().fill(Color(hex: 0x0D1015)))
+                    T("so với hôm qua", 13, .semibold)
+                } else {
+                    T("Chưa có dữ liệu hôm qua", 13, .semibold).frame(height: 23)
+                }
+            }
+            .padding(.top, 8)
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 20)
+        .padding(.bottom, 21)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(Theme.orange))
+    }
+
+    private var customersTile: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 7) {
+                Icon(name: .users, size: 16, color: Theme.muted).padding(.top, 2)
+                T("Khách hôm nay", 13, .medium, Theme.muted).lineSpacing(0)
+            }
+            T("\(store.customersToday().count)", 30, .heavy, Theme.ink, track: -1).padding(.top, 6)
+            T("\(newCustomersToday) khách mới", 12, .semibold, Theme.accent).padding(.top, 4)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 17)
+        .padding(.top, 15)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .cardStyle(20)
+    }
+
+    private var monthTile: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Icon(name: .calendar, size: 17, color: Theme.muted)
+                T("Doanh thu tháng \(monthNumber)", 13, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            T(money(revenueMonth), 24, .heavy, Theme.ink, track: -0.8)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .padding(.top, 12)
+            monthDelta.padding(.top, 5)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 17)
+        .padding(.top, 15)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .cardStyle(20)
+    }
+
+    @ViewBuilder
+    private var monthDelta: some View {
+        let prevMonth = cal.component(.month, from: previousMonthDate)
+        if let delta = deltaMonth {
+            T("\(delta >= 0 ? "+" : "")\(delta)% so với tháng \(prevMonth)", 12, .semibold, delta >= 0 ? Theme.green : Theme.red)
+                .lineLimit(1).minimumScaleFactor(0.8)
+        } else {
+            T("Chưa có dữ liệu tháng \(prevMonth)", 12, .semibold, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+        }
+    }
+
+    private var chartCard: some View {
+        VStack(spacing: 0) {
+            HStack {
+                T("Doanh thu theo ngày", 15, .bold).lineLimit(1).minimumScaleFactor(0.8)
+                Spacer(minLength: 8)
+                HStack(spacing: 0) {
+                    segment("7 ngày", value: 7)
+                    segment("30 ngày", value: 30)
+                }
+                .padding(3)
+                .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Theme.track))
+            }
+            Spacer(minLength: 16)
+            BarChart(data: series, labelEveryBar: days == 7).frame(height: 170)
+            Spacer(minLength: 16)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .frame(height: 322)
+        .cardStyle(24)
+    }
+
+    private func segment(_ title: String, value: Int) -> some View {
+        Button { days = value } label: {
+            T(title, 12, days == value ? .bold : .semibold, days == value ? Theme.ink : Theme.muted)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 13)
+                .frame(height: 28)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(days == value ? Theme.orange : Color.clear))
+        }
+        .buttonStyle(.plain)
     }
 }
 
+/// Biểu đồ cột: 2 vạch đứt, trục đáy, cột hôm nay màu cam kèm số tiền.
 struct BarChart: View {
     let data: [(Date, Int)]
-    let showAllLabels: Bool
+    let labelEveryBar: Bool
+
+    private let labelArea: CGFloat = 23
+    private let plotTopInset: CGFloat = 25
 
     var body: some View {
-        let maxV = max(data.map(\.1).max() ?? 0, 1)
         GeometryReader { geo in
-            let spacing: CGFloat = data.count > 10 ? 3 : 8
-            let barW = max((geo.size.width - spacing * CGFloat(data.count - 1)) / CGFloat(max(data.count, 1)), 2)
-            let chartH = geo.size.height - 22
-            HStack(alignment: .bottom, spacing: spacing) {
-                ForEach(Array(data.enumerated()), id: \.offset) { idx, item in
-                    let isToday = idx == data.count - 1
-                    VStack(spacing: 4) {
-                        Spacer(minLength: 0)
-                        if isToday && item.1 > 0 {
-                            Text(compactMoney(item.1)).font(.system(size: 10, weight: .bold)).foregroundColor(Theme.orangeDeep)
-                                .fixedSize()
-                        }
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(isToday ? Theme.orangeDeep : Color(.tertiarySystemFill))
-                            .frame(width: barW, height: max(CGFloat(item.1) / CGFloat(maxV) * (chartH - 16), 3))
-                        Text(showAllLabels ? weekdayLabel(item.0) : (idx % 5 == 0 || isToday ? shortDate(item.0) : ""))
-                            .font(.system(size: 10)).foregroundColor(.secondary)
-                            .fixedSize().frame(width: barW, height: 14)
+            let plot = geo.size.height - labelArea - plotTopInset
+            let baseline = plotTopInset + plot
+            let maxValue = max(data.map(\.1).max() ?? 0, 1)
+            let column = geo.size.width / CGFloat(max(data.count, 1))
+            let barWidth = data.count > 10 ? max(column - 3, 2) : min(29, column - 8)
+
+            ZStack(alignment: .topLeading) {
+                gridLine(y: plotTopInset, width: geo.size.width)
+                gridLine(y: plotTopInset + plot / 2, width: geo.size.width)
+                Rectangle().fill(Theme.line).frame(height: 1).offset(y: baseline)
+
+                ForEach(Array(data.enumerated()), id: \.offset) { index, item in
+                    let isToday = index == data.count - 1
+                    let height = max(CGFloat(item.1) / CGFloat(maxValue) * plot * 0.95, 3)
+                    let centerX = column * (CGFloat(index) + 0.5)
+
+                    RoundedRectangle(cornerRadius: data.count > 10 ? 3 : 7, style: .continuous)
+                        .fill(isToday ? Theme.orangeDeep : Theme.bar)
+                        .frame(width: barWidth, height: height)
+                        .position(x: centerX, y: baseline - height / 2)
+
+                    if isToday && item.1 > 0 {
+                        T(compactMoney(item.1), 12, .bold, Theme.accent)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .position(x: min(centerX, geo.size.width - 20), y: baseline - height - 12)
                     }
-                    .frame(width: barW)
+
+                    if labelEveryBar || index % 5 == 4 || isToday {
+                        T(labelEveryBar ? weekdayLabel(item.0) : shortDate(item.0), labelEveryBar ? 12 : 10,
+                          isToday ? .bold : .medium, isToday ? Theme.ink : Theme.muted)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .position(x: centerX, y: baseline + 16)
+                    }
                 }
             }
         }
     }
-}
 
-// MARK: - Bình luận (Live)
-
-struct LiveView: View {
-    @EnvironmentObject var client: LiveClient
-    @EnvironmentObject var store: Store
-    @EnvironmentObject var printer: PrinterManager
-    @State private var tiktok = UserDefaults.standard.string(forKey: "tiktokName") ?? ""
-    @State private var onlyPriced = true
-    @State private var alert: String?
-
-    private var shown: [LiveComment] { onlyPriced ? store.comments.filter { $0.price > 0 } : store.comments }
-    private var isLive: Bool { client.liveState == "connected" || client.liveState == "connecting" }
-
-    private var statusText: String {
-        switch client.liveState {
-        case "connected": return "Đang đọc live @\(client.liveUsername) · \(client.viewers) người xem"
-        case "connecting": return "Đang kết nối..."
-        case "error", "ended", "disconnected": return client.liveMessage.isEmpty ? "Đã ngắt" : client.liveMessage
-        default: return client.socketConnected ? "Chưa kết nối live" : "Đang nối server..."
+    private func gridLine(y: CGFloat, width: CGFloat) -> some View {
+        Path { p in
+            p.move(to: CGPoint(x: 0, y: y))
+            p.addLine(to: CGPoint(x: width, y: y))
         }
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 12) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "at").foregroundColor(.secondary)
-                        TextField("tên TikTok đang live", text: $tiktok)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        if isLive {
-                            Button("Dừng") { client.disconnectLive() }
-                                .font(.subheadline.weight(.bold)).foregroundColor(.red)
-                                .padding(.horizontal, 14).padding(.vertical, 8)
-                                .background(Capsule().fill(Color.red.opacity(0.15)))
-                        } else {
-                            Button("Kết nối") { client.connectLive(tiktok: tiktok) }
-                                .font(.subheadline.weight(.bold)).foregroundColor(.white)
-                                .padding(.horizontal, 14).padding(.vertical, 8)
-                                .background(Capsule().fill(Theme.orange))
-                                .disabled(tiktok.trimmingCharacters(in: .whitespaces).isEmpty)
-                        }
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.card))
-
-                    HStack(spacing: 8) {
-                        Circle().fill(client.liveState == "connected" ? Color.green : Color.gray).frame(width: 8, height: 8)
-                        Text(statusText).font(.footnote).foregroundColor(.secondary).lineLimit(2)
-                        Spacer()
-                    }
-
-                    Card {
-                        HStack(spacing: 0) {
-                            stat("\(store.comments.count)", "bình luận")
-                            Divider().frame(height: 28)
-                            stat("\(store.comments.filter { $0.price > 0 }.count)", "có giá")
-                            Divider().frame(height: 28)
-                            stat("\(store.orders(on: Date()).count)", "đơn hôm nay")
-                        }
-                    }
-
-                    Toggle("Chỉ hiện bình luận có giá", isOn: $onlyPriced)
-                        .font(.subheadline).tint(Theme.orange).padding(.horizontal, 4)
-
-                    if shown.isEmpty {
-                        Text(isLive ? "Đang chờ bình luận..." : "Kết nối live để bắt đầu đọc bình luận.")
-                            .font(.footnote).foregroundColor(.secondary).padding(.top, 30)
-                    }
-
-                    LazyVStack(spacing: 8) {
-                        ForEach(shown) { c in
-                            CommentRow(c: c) { alert = printComment(c, store: store, printer: printer) }
-                        }
-                    }
-                }
-                .padding(.horizontal, 16).padding(.bottom, 16)
-            }
-            .background(Theme.bg)
-            .navigationTitle("Bình luận")
-            .infoAlert($alert)
-        }
-    }
-
-    private func stat(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value).font(.title3.bold())
-            Text(label).font(.caption).foregroundColor(.secondary)
-        }.frame(maxWidth: .infinity)
-    }
-}
-
-struct CommentRow: View {
-    let c: LiveComment
-    let onPrint: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Avatar(text: String(c.nickname.prefix(1)).uppercased(), size: 36, highlighted: c.price > 0)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(c.nickname).font(.subheadline.weight(.bold)).lineLimit(1)
-                    Text(timeText(c.ts)).font(.caption2).foregroundColor(.secondary)
-                }
-                Text("@" + c.uniqueId).font(.caption).foregroundColor(.secondary).lineLimit(1)
-                Text(c.text).font(.body)
-            }
-            Spacer(minLength: 4)
-            if c.price > 0 {
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text(vnd(c.price)).font(.subheadline.weight(.bold)).foregroundColor(Theme.orangeDeep)
-                    Button(c.printed ? "Đã chốt" : "Chốt & in") { onPrint() }
-                        .font(.footnote.weight(.bold))
-                        .foregroundColor(c.printed ? .secondary : .white)
-                        .padding(.horizontal, 12).padding(.vertical, 6)
-                        .background(Capsule().fill(c.printed ? Color(.tertiarySystemFill) : Theme.orange))
-                }
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.card))
+        .stroke(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
     }
 }
 
@@ -472,20 +455,15 @@ struct CommentRow: View {
 
 struct CustomersView: View {
     @EnvironmentObject var store: Store
+    @EnvironmentObject var ui: AppUI
     @State private var search = ""
     @State private var filter = 0 // 0 tất cả, 1 mới hôm nay, 2 mua nhiều
-    private let bigSpender = 1_000_000
-
-    private func isNewToday(_ c: Customer) -> Bool {
-        guard let first = c.items.map(\.ts).min() else { return false }
-        return Calendar.current.isDateInToday(first)
-    }
 
     private var list: [Customer] {
         var l = store.customers.sorted { $0.lastTs > $1.lastTs }
         switch filter {
-        case 1: l = l.filter(isNewToday)
-        case 2: l = l.filter { $0.total >= bigSpender }.sorted { $0.total > $1.total }
+        case 1: l = l.filter(\.isNewToday)
+        case 2: l = l.filter(\.isBigSpender).sorted { $0.total > $1.total }
         default: break
         }
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -494,360 +472,246 @@ struct CustomersView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 12) {
-                    SearchField(text: $search)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            Chip(title: "Tất cả", selected: filter == 0) { filter = 0 }
-                            Chip(title: "Mới hôm nay", selected: filter == 1) { filter = 1 }
-                            Chip(title: "Mua nhiều", selected: filter == 2) { filter = 2 }
-                        }
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: Metrics.gap) {
+                PageHeader(subtitle: "\(store.customers.count) khách · \(store.customers.filter(\.isNewToday).count) khách mới hôm nay",
+                           title: "Khách hàng") { EmptyView() }
+                SearchField(text: $search)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        Chip(title: "Tất cả", selected: filter == 0) { filter = 0 }
+                        Chip(title: "Mới hôm nay", selected: filter == 1) { filter = 1 }
+                        Chip(title: "Mua nhiều", selected: filter == 2) { filter = 2 }
                     }
-                    if list.isEmpty {
-                        Text("Chưa có khách. Bấm “Chốt & in” trên một bình luận để lưu khách.")
-                            .font(.footnote).foregroundColor(.secondary).multilineTextAlignment(.center).padding(.top, 30)
-                    }
-                    LazyVStack(spacing: 8) {
-                        ForEach(list) { c in
-                            NavigationLink(value: c.id) { row(c) }.buttonStyle(.plain)
-                        }
+                    .padding(.horizontal, Metrics.gutter)
+                }
+                .padding(.horizontal, -Metrics.gutter)
+
+                if list.isEmpty {
+                    T("Chưa có khách. Bấm “Chốt & in” trên một bình luận để lưu khách.", 13, .medium, Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 30)
+                }
+                LazyVStack(spacing: 8.5) {
+                    ForEach(list) { c in
+                        Button { ui.push(.customer(c.id)) } label: { row(c) }.buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 16).padding(.bottom, 16)
             }
-            .background(Theme.bg)
-            .navigationTitle("Khách hàng")
-            .navigationBarTitleDisplayMode(.large)
-            .navigationDestination(for: String.self) { id in CustomerDetail(customerId: id) }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.top, 6)
+            .padding(.bottom, 16)
         }
+        .scrollDismissesKeyboard(.interactively)
+        .background(Theme.bg)
     }
 
     private func row(_ c: Customer) -> some View {
         HStack(spacing: 12) {
-            Avatar(text: c.initials, highlighted: c.total >= bigSpender)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(c.nickname).font(.subheadline.weight(.bold)).lineLimit(1)
-                    if c.total >= bigSpender { Badge(text: "Mua nhiều") }
-                    else if isNewToday(c) { Badge(text: "Mới", color: .green) }
+            Avatar(text: c.initials, seed: c.id)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    T(c.nickname, 15, .bold).lineLimit(1)
+                    if c.isBigSpender {
+                        Badge(text: "Mua nhiều")
+                    } else if c.isNewToday {
+                        Badge(text: "Mới", color: Theme.green, fill: Theme.greenSoft)
+                    }
                 }
-                Text("@\(c.uniqueId) · \(relativeDay(c.lastTs))")
-                    .font(.caption).foregroundColor(.secondary).lineLimit(1)
+                T("@\(c.uniqueId) · \(relativeDay(c.lastTs))", 12, .medium, Theme.muted).lineLimit(1)
             }
             Spacer(minLength: 4)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(vnd(c.total)).font(.subheadline.weight(.bold))
-                Text("\(c.items.count) đơn").font(.caption).foregroundColor(.secondary)
+            VStack(alignment: .trailing, spacing: 4) {
+                T(money(c.total), 14, .heavy).lineLimit(1).fixedSize()
+                T("\(store.orders(of: c).count) đơn", 12, .medium, Theme.muted)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.card))
+        .padding(.horizontal, 15)
+        .frame(height: 69)
+        .cardStyle(18)
+        .contentShape(Rectangle())
     }
 }
 
-struct CustomerDetail: View {
+struct CustomerDetailView: View {
     let customerId: String
     @EnvironmentObject var store: Store
-    @EnvironmentObject var printer: PrinterManager
-    @State private var alert: String?
+    @EnvironmentObject var ui: AppUI
 
     var body: some View {
-        if let cust = store.customers.first(where: { $0.id == customerId }) {
-            let items = cust.items.sorted { $0.ts > $1.ts }
-            ScrollView {
-                VStack(spacing: 12) {
-                    Card {
-                        VStack(spacing: 14) {
-                            HStack(spacing: 12) {
-                                Avatar(text: cust.initials, size: 52, highlighted: true)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(cust.nickname).font(.headline)
-                                    Text("@" + cust.uniqueId).font(.subheadline).foregroundColor(.secondary)
-                                    if !cust.userId.isEmpty {
-                                        Text("Mã số: " + cust.userId).font(.caption).foregroundColor(.secondary)
-                                    }
-                                }
-                                Spacer()
-                            }
-                            Divider()
-                            HStack {
-                                summary(vnd(cust.total), "Tổng chi tiêu")
-                                summary("\(cust.items.count)", "Số đơn")
-                                summary(shortDate(cust.lastTs), "Mua gần nhất")
-                            }
-                        }
+        SubPage(title: "Hồ sơ khách hàng") {
+            if let c = store.customers.first(where: { $0.id == customerId }) {
+                let orders = store.orders(of: c)
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: Metrics.gap) {
+                        profileCard(c, orderCount: orders.count)
+                        addressCard(c)
+                        historyCard(orders)
                     }
-
-                    Card {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Lịch sử mua hàng").font(.headline)
-                            ForEach(items) { it in
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(it.comment).font(.subheadline.weight(.semibold))
-                                        Text(relativeDay(it.ts)).font(.caption).foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    VStack(alignment: .trailing, spacing: 3) {
-                                        Text(vnd(it.price)).font(.subheadline.weight(.bold))
-                                        Badge(text: it.delivered ? "Đã giao" : (it.printed ? "Đã in" : "Đơn mới"),
-                                              color: it.delivered ? .green : (it.printed ? .gray : Theme.orangeDeep))
-                                    }
-                                    Menu {
-                                        Button("In lại tem") {
-                                            let c = LiveComment(id: it.id, uniqueId: cust.uniqueId, userId: cust.userId,
-                                                                nickname: cust.nickname, text: it.comment, ts: it.ts, price: it.price)
-                                            alert = printComment(c, store: store, printer: printer)
-                                        }
-                                        Button("Xoá", role: .destructive) { store.deleteItem(customerId: cust.id, itemId: it.id) }
-                                    } label: { Image(systemName: "ellipsis.circle").foregroundColor(.secondary) }
-                                }
-                                if it.id != items.last?.id { Divider() }
-                            }
-                        }
-                    }
+                    .padding(.horizontal, Metrics.gutter)
+                    .padding(.bottom, 16)
                 }
-                .padding(.horizontal, 16).padding(.bottom, 16)
+            } else {
+                Spacer()
+                T("Khách không còn tồn tại", 14, .medium, Theme.muted)
+                Spacer()
             }
-            .background(Theme.bg)
-            .navigationTitle("Hồ sơ khách hàng")
-            .navigationBarTitleDisplayMode(.inline)
-            .infoAlert($alert)
-        } else {
-            Text("Khách không còn tồn tại")
         }
+    }
+
+    private func profileCard(_ c: Customer, orderCount: Int) -> some View {
+        VStack(spacing: 13) {
+            HStack(spacing: 13) {
+                Avatar(text: c.initials, size: 56, fontSize: 19, seed: c.id)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 10) {
+                        T(c.nickname, 18, .bold).lineLimit(1).minimumScaleFactor(0.8)
+                        if c.isBigSpender { Badge(text: "Mua nhiều") }
+                    }
+                    T("@" + c.uniqueId, 13, .medium, Theme.muted).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            HairLine()
+            HStack(spacing: 0) {
+                summary(money(c.total), "Tổng chi tiêu")
+                Rectangle().fill(Theme.line).frame(width: 1, height: 36)
+                summary("\(orderCount)", "Số đơn")
+                Rectangle().fill(Theme.line).frame(width: 1, height: 36)
+                summary(shortDate(c.lastTs), "Mua gần nhất")
+            }
+        }
+        .padding(.horizontal, 17)
+        .padding(.vertical, 15)
+        .cardStyle(20)
     }
 
     private func summary(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value).font(.subheadline.weight(.bold)).minimumScaleFactor(0.7).lineLimit(1)
-            Text(label).font(.caption2).foregroundColor(.secondary)
-        }.frame(maxWidth: .infinity)
-    }
-}
-
-// MARK: - Đơn hàng
-
-struct OrdersView: View {
-    @EnvironmentObject var store: Store
-    @EnvironmentObject var printer: PrinterManager
-    @State private var search = ""
-    @State private var filter = 0 // 0 tất cả, 1 mới, 2 đã in, 3 đang giao
-    @State private var alert: String?
-
-    private var allToday: [Order] { store.orders(on: Date()) }
-
-    private var list: [Order] {
-        var l = allToday
-        switch filter {
-        case 1: l = l.filter { !$0.isPrinted }
-        case 2: l = l.filter { $0.isPrinted && !$0.isDelivered }
-        case 3: l = l.filter { $0.isDelivered }
-        default: break
+        VStack(spacing: 3) {
+            T(value, 16, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.7)
+            T(label, 11, .medium, Theme.muted).lineLimit(1)
         }
-        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        if !q.isEmpty {
-            l = l.filter { $0.customer.nickname.lowercased().contains(q) || $0.customer.uniqueId.lowercased().contains(q) }
-        }
-        return l
+        .frame(maxWidth: .infinity)
     }
 
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 12) {
-                    Text("\(allToday.count) đơn hôm nay · \(fullDateLabel(Date()))")
-                        .font(.footnote).foregroundColor(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-                    SearchField(text: $search)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            Chip(title: "Tất cả · \(allToday.count)", selected: filter == 0) { filter = 0 }
-                            Chip(title: "Đơn mới · \(allToday.filter { !$0.isPrinted }.count)", selected: filter == 1) { filter = 1 }
-                            Chip(title: "Đã in · \(allToday.filter { $0.isPrinted && !$0.isDelivered }.count)", selected: filter == 2) { filter = 2 }
-                            Chip(title: "Đã giao · \(allToday.filter { $0.isDelivered }.count)", selected: filter == 3) { filter = 3 }
-                        }
-                    }
-                    if list.isEmpty {
-                        Text("Chưa có đơn nào. Bấm “Chốt & in” trên một bình luận để tạo đơn.")
-                            .font(.footnote).foregroundColor(.secondary).multilineTextAlignment(.center).padding(.top, 30)
-                    }
-                    LazyVStack(spacing: 10) {
-                        ForEach(list) { o in card(o) }
-                    }
-                }
-                .padding(.horizontal, 16).padding(.bottom, 16)
-            }
-            .background(Theme.bg)
-            .navigationTitle("Đơn hàng")
-            .infoAlert($alert)
-        }
-    }
-
-    private func card(_ o: Order) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                Avatar(text: o.customer.initials, size: 40, highlighted: true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(o.customer.nickname).font(.subheadline.weight(.bold)).lineLimit(1)
-                    Text("@\(o.customer.uniqueId) · \(o.items.count) sản phẩm · \(timeText(o.lastTs))")
-                        .font(.caption).foregroundColor(.secondary).lineLimit(1)
-                }
+    private func addressCard(_ c: Customer) -> some View {
+        let a = c.address ?? DeliveryAddress()
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Icon(name: .pin, size: 17, color: Theme.accent)
+                T("Địa chỉ nhận hàng", 15, .bold).lineLimit(1)
                 Spacer(minLength: 4)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(vnd(o.total)).font(.subheadline.weight(.bold))
-                    Badge(text: o.isDelivered ? "Đã giao" : (o.isPrinted ? "Đã in" : "Đơn mới"),
-                          color: o.isDelivered ? .green : (o.isPrinted ? .gray : Theme.orangeDeep))
-                }
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(o.items) { it in
-                    HStack {
-                        Text("Mã \(it.comment)").font(.footnote).foregroundColor(.secondary)
-                        Spacer()
-                        Text(vnd(it.price)).font(.footnote).foregroundColor(.secondary)
+                Button { ui.push(.addressEdit(c.id)) } label: {
+                    HStack(spacing: 6) {
+                        Icon(name: .pencil, size: 14)
+                        T("Sửa", 13, .bold)
                     }
+                    .padding(.horizontal, 15)
+                    .frame(height: 35)
+                    .background(Capsule().fill(Theme.field))
                 }
+                .buttonStyle(.plain)
             }
-            HStack(spacing: 8) {
-                Button { printOrder(o) } label: {
-                    Label("In đơn", systemImage: "printer").font(.subheadline.weight(.bold))
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
-                        .foregroundColor(o.isPrinted ? .primary : .white)
-                        .background(Capsule().fill(o.isPrinted ? Color(.tertiarySystemFill) : Theme.orange))
-                }
-                Button { store.setDelivered(!o.isDelivered, itemIds: o.items.map(\.id)) } label: {
-                    Label(o.isDelivered ? "Đã giao" : "Giao hàng", systemImage: "shippingbox")
-                        .font(.subheadline.weight(.bold))
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
-                        .foregroundColor(o.isDelivered ? .green : .primary)
-                        .background(Capsule().fill(Color(.tertiarySystemFill)))
-                }
-            }
-            .buttonStyle(.plain)
+            .padding(.bottom, 10)
+            addressRow("Người nhận", a.receiver.isEmpty ? c.nickname : a.receiver)
+            HairLine()
+            addressRow("Số điện thoại", a.phone)
+            HairLine()
+            addressRow("Địa chỉ", a.street)
+            HairLine()
+            addressRow("Phường / Quận / Tỉnh", a.region)
+            HairLine()
+            addressRow("Ghi chú giao", a.note)
         }
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.card))
+        .padding(.horizontal, 17)
+        .padding(.top, 15)
+        .padding(.bottom, 7)
+        .cardStyle(20)
     }
 
-    private func printOrder(_ o: Order) {
-        var msg: String?
-        for it in o.items {
-            let c = LiveComment(id: it.id, uniqueId: o.customer.uniqueId, userId: o.customer.userId,
-                                nickname: o.customer.nickname, text: it.comment, ts: it.ts, price: it.price)
-            msg = printComment(c, store: store, printer: printer) ?? msg
+    private func addressRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            T(label, 13, .medium, Theme.muted).frame(width: 100, alignment: .leading)
+            T(value.isEmpty ? "Chưa có" : value, 14, .semibold, value.isEmpty ? Theme.faint : Theme.ink)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        alert = msg
+        .padding(.vertical, 10)
+    }
+
+    private func historyCard(_ orders: [Order]) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                T("Lịch sử mua hàng", 15, .bold)
+                Spacer()
+                T("\(orders.count) đơn", 12, .medium, Theme.muted)
+            }
+            .padding(.bottom, 8)
+            ForEach(Array(orders.enumerated()), id: \.element.id) { index, o in
+                if index > 0 { HairLine() }
+                Button { ui.push(.order(o.id)) } label: { historyRow(o) }.buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 17)
+        .padding(.top, 15)
+        .padding(.bottom, 8)
+        .cardStyle(20)
+    }
+
+    private func historyRow(_ o: Order) -> some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                T(shortDate(o.lastTs), 15, .heavy, Theme.ink, track: -0.2)
+                T(timeText(o.lastTs), 12, .medium, Theme.muted)
+            }
+            .frame(width: 64, alignment: .leading)
+            T("\(o.productCount) sản phẩm", 13, .medium, Theme.muted).lineLimit(1)
+            Spacer(minLength: 4)
+            VStack(alignment: .trailing, spacing: 3) {
+                T(money(o.total), 14, .heavy).lineLimit(1).fixedSize()
+                StatusBadge(status: o.status)
+            }
+        }
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 }
 
-// MARK: - Máy in
-
-struct PrinterView: View {
-    @EnvironmentObject var printer: PrinterManager
-    @AppStorage("paperWidth") private var paperWidth = 576
-    @AppStorage("shopName") private var shopName = "ChốtLive"
-
-    var body: some View {
-        Form {
-            Section("Trạng thái") {
-                Text(printer.statusText)
-                if let n = printer.connectedName {
-                    Text("Đang dùng: \(n)").foregroundColor(.green)
-                    Button("In thử") { printTest() }
-                    Button("Ngắt kết nối", role: .destructive) { printer.disconnect() }
-                }
-            }
-            Section("Máy in Bluetooth gần đây") {
-                Button(printer.isScanning ? "Đang tìm..." : "Tìm máy in") { printer.startScan() }
-                    .disabled(printer.isScanning)
-                ForEach(printer.devices, id: \.identifier) { p in
-                    Button(p.name ?? p.identifier.uuidString) { printer.connect(p) }
-                }
-            }
-            Section("Tem") {
-                Picker("Khổ giấy", selection: $paperWidth) {
-                    Text("80mm").tag(576)
-                    Text("58mm").tag(384)
-                }.pickerStyle(.segmented)
-                TextField("Tên shop trên tem", text: $shopName)
-            }
-        }
-        .navigationTitle("Máy in")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private func printTest() {
-        let c = LiveComment(id: "test", uniqueId: "tai_khoan_mau", userId: "123456789", nickname: "Khách thử",
-                            text: "59", ts: Date(), price: 59000)
-        printer.send(TicketRenderer.ticketBytes(comment: c))
-    }
-}
-
-// MARK: - Tôi
-
-struct SettingsView: View {
-    @EnvironmentObject var client: LiveClient
-    @EnvironmentObject var printer: PrinterManager
-
-    private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
-    }
+struct AddressEditView: View {
+    let customerId: String
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var ui: AppUI
+    @State private var address = DeliveryAddress()
+    @State private var loaded = false
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
+        SubPage(title: "Địa chỉ nhận hàng") {
+            ScrollView(showsIndicators: false) {
                 VStack(spacing: 14) {
-                    section("Tài khoản") {
-                        HStack(spacing: 12) {
-                            Avatar(text: String(client.username.prefix(2)).uppercased(), size: 44, highlighted: true)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(client.username).font(.subheadline.weight(.bold))
-                                Text(client.baseURL).font(.caption).foregroundColor(.secondary).lineLimit(1)
-                            }
-                            Spacer()
-                            Text(client.socketConnected ? "Đã nối server" : "Mất kết nối")
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(client.socketConnected ? .green : .orange)
-                        }
-                    }
-
-                    section("Cài đặt") {
-                        NavigationLink { PrinterView() } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "printer.fill").foregroundColor(Theme.orangeDeep)
-                                    .frame(width: 34, height: 34).background(Circle().fill(Theme.orangeSoft))
-                                Text("Máy in").font(.subheadline.weight(.semibold)).foregroundColor(.primary)
-                                Spacer()
-                                Text(printer.isConnected ? "Đã kết nối" : "Chưa kết nối")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundColor(printer.isConnected ? .green : .secondary)
-                                Image(systemName: "chevron.right").font(.caption).foregroundColor(.secondary)
-                            }
-                        }
-                    }
-
-                    Button { client.logout() } label: {
-                        Label("Đăng xuất", systemImage: "rectangle.portrait.and.arrow.right")
-                            .font(.subheadline.weight(.bold)).foregroundColor(.red)
-                            .frame(maxWidth: .infinity).padding(.vertical, 14)
-                            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.card))
-                    }
-
-                    Text("Phiên bản \(version)").font(.caption).foregroundColor(.secondary)
+                    LabeledField(label: "Người nhận", placeholder: "Tên người nhận", text: $address.receiver)
+                    LabeledField(label: "Số điện thoại", placeholder: "0905 123 456", text: $address.phone, keyboard: .phonePad)
+                    LabeledField(label: "Địa chỉ", placeholder: "Số nhà, tên đường", text: $address.street)
+                    LabeledField(label: "Phường / Quận / Tỉnh", placeholder: "Phường, quận, tỉnh", text: $address.region)
+                    LabeledField(label: "Ghi chú giao", placeholder: "Ví dụ: gọi trước khi giao", text: $address.note)
                 }
-                .padding(.horizontal, 16).padding(.bottom, 16)
+                .padding(16)
+                .cardStyle(20)
+                .padding(.horizontal, Metrics.gutter)
             }
-            .background(Theme.bg)
-            .navigationTitle("Tôi")
+            .scrollDismissesKeyboard(.interactively)
+            PrimaryButton(title: "Lưu địa chỉ") {
+                store.setAddress(address, customerId: customerId)
+                ui.pop()
+            }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.vertical, 12)
         }
-    }
-
-    private func section<C: View>(_ title: String, @ViewBuilder _ content: @escaping () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.footnote.weight(.semibold)).foregroundColor(.secondary).padding(.leading, 4)
-            Card { content() }
+        .onAppear {
+            guard !loaded else { return }
+            loaded = true
+            if let c = store.customers.first(where: { $0.id == customerId }) {
+                address = c.address ?? DeliveryAddress(receiver: c.nickname)
+            }
         }
     }
 }
