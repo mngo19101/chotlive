@@ -1,0 +1,10 @@
+node_modules/
+data/*
+!data/*.example.json
+ios/
+build/
+Payload/
+*.ipa
+.env
+*.log
+.DS_Store

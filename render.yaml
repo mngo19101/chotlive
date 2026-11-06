@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: susu-live-order
+    runtime: node
+    # Persistent Disk yêu cầu gói trả phí (starter trở lên); gói free sẽ mất dữ liệu khi restart
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    disk:
+      name: susu-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATA_DIR
+        value: /var/data
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: TOKEN_TTL_DAYS
+        value: "30"
+      # Tuỳ chọn: API key Euler Stream nếu bị giới hạn lượt kết nối
+      - key: SIGN_API_KEY
+        sync: false

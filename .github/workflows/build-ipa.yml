@@ -1,0 +1,87 @@
+name: Build iOS IPA (ChốtLive)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: 'Địa chỉ Web Server mặc định (VD: https://susu-live-order.onrender.com)'
+        required: false
+        default: 'https://susu-live-order.onrender.com'
+
+jobs:
+  build-ipa:
+    name: Build Unsigned iOS .ipa
+    runs-on: macos-14
+    steps:
+      - name: Checkout mã nguồn
+        uses: actions/checkout@v4
+
+      - name: Cài đặt Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Cài đặt dependencies & Capacitor iOS
+        run: |
+          npm install
+          npm install --no-save @capacitor/core@^6.0.0 @capacitor/cli@^6.0.0 @capacitor/ios@^6.0.0
+
+      - name: Cấu hình Server URL mặc định (nếu có)
+        if: ${{ github.event.inputs.server_url != '' }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            let code = fs.readFileSync("public/js/store.js", "utf8");
+            code = code.replace("serverUrl: \x27\x27", "serverUrl: \x27${{ github.event.inputs.server_url }}\x27");
+            fs.writeFileSync("public/js/store.js", code, "utf8");
+          '
+
+      - name: Khởi tạo dự án iOS qua Capacitor
+        run: |
+          npx cap add ios
+          npx cap sync ios
+
+      - name: Cấu hình quyền Bluetooth Xprinter, Mạng LAN & App Icon cho iOS
+        run: |
+          PLIST="ios/App/App/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ChốtLive" "$PLIST" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string ChốtLive" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSBluetoothAlwaysUsageDescription string 'Ứng dụng cần quyền Bluetooth để kết nối và in tem nhiệt qua máy in Xprinter.'" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSBluetoothPeripheralUsageDescription string 'Ứng dụng cần quyền Bluetooth để kết nối máy in đơn hàng.'" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Ứng dụng cần quyền mạng nội bộ để in qua máy in LAN và đồng bộ với máy chủ.'" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST" || true
+
+          # Tạo bộ icon chuẩn iOS từ public/img/icon-512.png
+          ICON_SET="ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          if [ -f "public/img/icon-512.png" ] && [ -d "$ICON_SET" ]; then
+            sips -z 1024 1024 public/img/icon-512.png --out "$ICON_SET/AppIcon-512@2x.png" || true
+          fi
+
+      - name: Biên dịch Xcode (Unsigned Release Build)
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build
+
+      - name: Đóng gói thành file ChotLive-iOS.ipa
+        run: |
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/App.app Payload/ChotLive.app
+          zip -r9 ChotLive-iOS.ipa Payload
+
+      - name: Tải lên file ChotLive-iOS.ipa (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChotLive-iOS-IPA
+          path: ChotLive-iOS.ipa
+          retention-days: 90
+
