@@ -701,8 +701,8 @@ struct AddressEditView: View {
                     LabeledField(label: "Người nhận", placeholder: "Tên người nhận", text: $address.receiver)
                     LabeledField(label: "Số điện thoại", placeholder: "0905 123 456", text: $address.phone, keyboard: .phonePad)
                     LabeledField(label: "Địa chỉ", placeholder: "Số nhà, tên đường", text: $address.street)
-                    LabeledField(label: "Phường / Quận / Tỉnh", placeholder: "Phường, quận, tỉnh", text: $address.region)
-                    LabeledField(label: "Ghi chú giao", placeholder: "Ví dụ: gọi trước khi giao", text: $address.note)
+                    LabeledField(label: "Phường / Quận / Tỉnh", placeholder: "Phường, quận, tỉnh", text: $address.region, multiline: true)
+                    LabeledField(label: "Ghi chú giao", placeholder: "Ví dụ: gọi trước khi giao", text: $address.note, multiline: true)
                 }
                 .padding(16)
                 .cardStyle(20)

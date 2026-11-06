@@ -348,8 +348,8 @@ struct HelpView: View {
                 VStack(spacing: Metrics.gap) {
                     VStack(alignment: .leading, spacing: 8) {
                         T("Tài khoản ChốtLive", 15, .bold)
-                        T(client.username, 14, .semibold).lineLimit(1)
-                        T(client.baseURL, 12, .medium, Theme.muted).lineLimit(1)
+                        if !client.username.isEmpty { T(client.username, 14, .semibold).lineLimit(1) }
+                        if !client.baseURL.isEmpty { T(client.baseURL, 12, .medium, Theme.muted).lineLimit(1) }
                         T(client.socketConnected ? "Đã nối server" : "Mất kết nối server", 12, .semibold,
                           client.socketConnected ? Theme.green : Theme.red)
                     }

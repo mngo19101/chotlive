@@ -404,7 +404,7 @@ struct ItemEditor: View {
             HStack(spacing: 10) {
                 T("Số lượng", 13, .medium, Theme.muted)
                 Button { item.qty = max(item.qty - 1, 1) } label: {
-                    Icon(name: .chevronDown, size: 16).frame(width: 34, height: 34).background(Circle().fill(Theme.field))
+                    Icon(name: .minus, size: 16).frame(width: 34, height: 34).background(Circle().fill(Theme.field))
                 }
                 .buttonStyle(.plain)
                 T("\(item.qty)", 15, .bold).frame(minWidth: 20)

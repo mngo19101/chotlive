@@ -542,19 +542,35 @@ struct LabeledField: View {
     @Binding var text: String
     var keyboard: UIKeyboardType = .default
     var capitalize = true
+    /// Nội dung dài thì tự xuống dòng (tối đa 3 dòng) thay vì bị cắt.
+    var multiline = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             T(label, 12, .medium, Theme.muted)
-            TextField(placeholder, text: $text)
+            field
                 .font(.bv(15, .semibold))
                 .foregroundColor(Theme.ink)
                 .keyboardType(keyboard)
                 .textInputAutocapitalization(capitalize ? .sentences : .never)
                 .autocorrectionDisabled(!capitalize)
                 .padding(.horizontal, 15)
-                .frame(height: 44)
+                .padding(.vertical, multiline ? 11 : 0)
+                .frame(minHeight: 44)
                 .cardStyle(14, fill: Theme.field)
+        }
+    }
+
+    @ViewBuilder private var field: some View {
+        if multiline {
+            TextField(placeholder, text: $text, axis: .vertical)
+                .lineLimit(1...3)
+                .onChange(of: text) { value in
+                    // Phím Return không tạo dòng mới để địa chỉ vẫn liền một dòng trên tem.
+                    if value.contains("\n") { text = value.replacingOccurrences(of: "\n", with: " ") }
+                }
+        } else {
+            TextField(placeholder, text: $text)
         }
     }
 }

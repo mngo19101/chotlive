@@ -226,7 +226,6 @@ struct DateFilterSheet: View {
     @State private var editingFrom: Bool? = nil
 
     private var cal: Calendar { Calendar.current }
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
 
     var body: some View {
         // Máy màn nhỏ hoặc tháng 6 hàng: nội dung không đủ chỗ thì cho cuộn.
@@ -256,15 +255,17 @@ struct DateFilterSheet: View {
                 }
             }
 
-            monthHeader.padding(.top, 21)
+            monthHeader.padding(.top, 22)
 
-            LazyVGrid(columns: columns, spacing: 0) {
-                ForEach(["T2", "T3", "T4", "T5", "T6", "T7", "CN"], id: \.self) { d in
-                    T(d, 12, .semibold, Theme.muted).frame(height: 24)
+            VStack(spacing: 0) {
+                weekRow(["T2", "T3", "T4", "T5", "T6", "T7", "CN"]) { d in
+                    T(d, 12, .semibold, Theme.muted).frame(height: 20)
                 }
-                ForEach(gridDays, id: \.self) { d in dayCell(d) }
+                ForEach(gridWeeks, id: \.self) { week in
+                    weekRow(week) { d in dayCell(d) }
+                }
             }
-            .padding(.top, 4)
+            .padding(.top, 9)
 
             T("Khung giờ trong ngày", 14, .bold).padding(.top, 12)
             HStack(spacing: 10) {
@@ -322,6 +323,17 @@ struct DateFilterSheet: View {
             .buttonStyle(.plain)
             .allowsHitTesting(canNext)
         }
+        .padding(.trailing, 9)
+    }
+
+    /// Một hàng 7 ô rộng 40pt, ô đầu và ô cuối sát hai mép như mẫu.
+    private func weekRow<Item, Cell: View>(_ items: [Item], @ViewBuilder cell: @escaping (Item) -> Cell) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                if index > 0 { Spacer(minLength: 0) }
+                cell(item).frame(width: 40)
+            }
+        }
     }
 
     private func shiftMonth(_ by: Int) {
@@ -338,6 +350,11 @@ struct DateFilterSheet: View {
         let count = cal.range(of: .day, in: .month, for: first)?.count ?? 30
         let total = Int(ceil(Double(leading + count) / 7)) * 7
         return (0..<total).compactMap { cal.date(byAdding: .day, value: $0 - leading, to: first) }
+    }
+
+    private var gridWeeks: [[Date]] {
+        let days = gridDays
+        return stride(from: 0, to: days.count, by: 7).map { Array(days[$0..<min($0 + 7, days.count)]) }
     }
 
     private func dayCell(_ d: Date) -> some View {

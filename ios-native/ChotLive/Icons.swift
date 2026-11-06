@@ -3,7 +3,7 @@ import SwiftUI
 // Hình dạng icon dựa trên bộ Lucide (giấy phép ISC, https://lucide.dev), vẽ trên lưới 24×24.
 
 enum IconName {
-    case chart, messageLines, message, users, bag, user, calendar, plus, chevronLeft, chevronRight, chevronDown, chevronUp
+    case chart, messageLines, message, users, bag, user, calendar, plus, minus, chevronLeft, chevronRight, chevronDown, chevronUp
     case radio, search, filter, printer, truck, more, check, tag, bell, help, logout, cart, trash, close, pencil, pin, stop
 
     fileprivate var paths: [String] {
@@ -25,6 +25,8 @@ enum IconName {
             return ["M8 2v4", "M16 2v4", "M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z", "M3 10h18"]
         case .plus:
             return ["M5 12h14", "M12 5v14"]
+        case .minus:
+            return ["M5 12h14"]
         case .chevronLeft:
             return ["M15 18 9 12 15 6"]
         case .chevronRight:
