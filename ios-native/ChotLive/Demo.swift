@@ -27,8 +27,11 @@ enum Demo {
         client.liveState = screen == "liveNew" ? "idle" : "connected"
         client.liveUsername = "shophoahong.live"
         client.loggedIn = true
-        let accA = AuthStorage.SavedAccount(key: "demo-a", server: "https://shop.onrender.com", user: "Chủ shop")
-        let accB = AuthStorage.SavedAccount(key: "demo-b", server: "https://khohanglinh.onrender.com", user: "Nhân viên kho")
+        func demoAccount(_ server: String, _ user: String) -> AuthStorage.SavedAccount {
+            AuthStorage.SavedAccount(key: AuthStorage.accountKey(server: server, user: user), server: server, user: user)
+        }
+        let accA = demoAccount("https://shop.onrender.com", "Chủ shop")
+        let accB = demoAccount("https://khohanglinh.onrender.com", "Nhân viên kho")
         client.setDemoAccounts([accA, accB], current: accA)
     }
 
