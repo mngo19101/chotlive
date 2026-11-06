@@ -763,7 +763,7 @@ const isPrivateIPv4 = (ip) => {
   return a === 10 || a === 127 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
 };
 
-app.post('/api/print-lan', (req, res) => {
+app.post('/api/print-lan', requireAuth, (req, res) => {
   const { ip, port = 9100, bytes } = req.body || {};
   if (!ip || !Array.isArray(bytes) || bytes.length === 0) {
     return res.status(400).json({ error: 'Thiếu ip hoặc bytes in' });
