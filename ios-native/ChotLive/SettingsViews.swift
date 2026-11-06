@@ -24,7 +24,7 @@ struct SettingsView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
                 PageHeader(subtitle: "Tài khoản và cài đặt", title: "Tôi") { EmptyView() }
-                    .padding(.bottom, 13)
+                    .padding(.bottom, 15)
 
                 sectionLabel("Tài khoản TikTok")
                 accountsCard.padding(.bottom, 15)
@@ -48,10 +48,10 @@ struct SettingsView: View {
 
                 T("Phiên bản \(version)", 12, .medium, Theme.muted)
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 14)
+                    .padding(.top, 15)
             }
             .padding(.horizontal, Metrics.gutter)
-            .padding(.top, 6)
+            .padding(.top, 2)
             .padding(.bottom, 16)
         }
         .background(Theme.bg)
@@ -99,7 +99,7 @@ struct SettingsView: View {
                 }
                 Spacer(minLength: 4)
                 if active {
-                    T("Đang dùng", 13, .semibold, Theme.green).lineLimit(1).fixedSize()
+                    T("Đang dùng", 12, .semibold, Theme.green).lineLimit(1).fixedSize().padding(.trailing, -5)
                     Icon(name: .check, size: 14, weight: 2.8)
                         .frame(width: 24, height: 24)
                         .background(Circle().fill(Theme.orange))
@@ -135,13 +135,13 @@ struct SettingsView: View {
                             route: Route) -> some View {
         Button { ui.push(route) } label: {
             HStack(spacing: 12) {
-                Icon(name: icon, size: 16, color: Theme.accent)
+                Icon(name: icon, size: 16, weight: 2.3, color: Theme.accent)
                     .frame(width: 32, height: 32)
                     .background(Circle().fill(Theme.peachSoft))
                 T(title, 15, .semibold).lineLimit(1)
                 Spacer(minLength: 4)
                 if let trailing { T(trailing, 12, .semibold, trailingColor).lineLimit(1).fixedSize() }
-                Icon(name: .chevronRight, size: 16, color: Theme.muted).padding(.leading, 8)
+                Icon(name: .chevronRight, size: 16, color: Theme.muted).padding(.leading, -2)
             }
             .padding(.horizontal, 17)
             .frame(height: 56)

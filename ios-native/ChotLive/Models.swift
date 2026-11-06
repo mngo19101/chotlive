@@ -161,8 +161,8 @@ struct TikTokAccount: Identifiable, Codable, Equatable {
 
 func initialsOf(_ name: String) -> String {
     let words = name.split(separator: " ")
-    if words.count >= 2 {
-        return String(words.prefix(2).compactMap(\.first)).uppercased()
+    if words.count >= 2, let first = words.first?.first, let last = words.last?.first {
+        return String([first, last]).uppercased()
     }
     let s = String(name.prefix(2)).uppercased()
     return s.isEmpty ? "?" : s

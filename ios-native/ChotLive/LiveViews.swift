@@ -32,9 +32,9 @@ struct LiveView: View {
 
                 statsCard
 
-                VStack(spacing: 13) {
+                VStack(spacing: 9) {
                     HStack {
-                        T("Các phiên \(filter.scopeLabel)", 14, .bold).lineLimit(1)
+                        T("Các phiên \(filter.scopeLabel)", 13, .bold).lineLimit(1)
                         Spacer()
                         T("\(sessions.count) phiên", 12, .medium, Theme.muted)
                     }
@@ -43,7 +43,7 @@ struct LiveView: View {
                             .multilineTextAlignment(.center)
                             .padding(.top, 24)
                     }
-                    VStack(spacing: 24) {
+                    VStack(spacing: 28) {
                         ForEach(sessions) { s in
                             Button { ui.push(.session(s.id)) } label: { sessionRow(s) }.buttonStyle(.plain)
                         }
@@ -51,7 +51,7 @@ struct LiveView: View {
                 }
             }
             .padding(.horizontal, Metrics.gutter)
-            .padding(.top, 6)
+            .padding(.top, 2)
             .padding(.bottom, 16)
         }
         .background(Theme.bg)
@@ -94,17 +94,17 @@ struct LiveView: View {
                 }
             }
             Timeline(sessions: sessions, showNow: filter.contains(Clock.now) && store.openSession != nil)
-                .padding(.top, 15)
+                .padding(.top, 12)
         }
         .padding(.horizontal, 17)
         .padding(.top, 16)
-        .padding(.bottom, 14)
+        .padding(.bottom, 16)
         .cardStyle(24)
     }
 
     private func statTile(_ icon: IconName, _ value: String, _ label: String) -> some View {
         HStack(spacing: 8) {
-            Icon(name: icon, size: 15, color: Theme.accent)
+            Icon(name: icon, size: 13, weight: 2.3, color: Theme.accent)
                 .frame(width: 28, height: 28)
                 .background(Circle().fill(Theme.peachSoft))
             (Text(verbatim: value).font(.bv(16, .heavy)).foregroundColor(Theme.ink)
@@ -121,7 +121,7 @@ struct LiveView: View {
 
     private func sessionRow(_ s: LiveSession) -> some View {
         HStack(alignment: .top, spacing: 13) {
-            VStack(spacing: 4) {
+            VStack(spacing: 3) {
                 T(timeText(s.start), 15, .heavy, Theme.ink, track: -0.3)
                 Rectangle().fill(Theme.bar).frame(width: 3, height: 14)
                 if let end = s.end {
@@ -133,6 +133,7 @@ struct LiveView: View {
                 }
             }
             .frame(width: 50)
+            .padding(.top, s.isLive ? 0 : 4)
 
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -166,7 +167,7 @@ struct LiveView: View {
 
     private func count(_ icon: IconName, _ value: Int) -> some View {
         HStack(spacing: 5) {
-            Icon(name: icon, size: 15, color: Theme.muted)
+            Icon(name: icon, size: 13, color: Theme.muted).frame(width: 15, height: 15)
             T("\(value)", 13, .bold)
         }
     }
@@ -183,7 +184,7 @@ struct Timeline: View {
     }
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 3) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Theme.track).frame(height: 14)
@@ -229,7 +230,7 @@ struct DateFilterSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetTitle(title: "Xem lại thời điểm")
-                .padding(.top, 6)
+                .padding(.top, 8)
                 .padding(.bottom, 15)
 
             VStack(spacing: 8) {
@@ -245,7 +246,7 @@ struct DateFilterSheet: View {
                 }
             }
 
-            monthHeader.padding(.top, 20)
+            monthHeader.padding(.top, 21)
 
             LazyVGrid(columns: columns, spacing: 0) {
                 ForEach(["T2", "T3", "T4", "T5", "T6", "T7", "CN"], id: \.self) { d in
@@ -253,20 +254,20 @@ struct DateFilterSheet: View {
                 }
                 ForEach(gridDays, id: \.self) { d in dayCell(d) }
             }
-            .padding(.top, 6)
+            .padding(.top, 4)
 
-            T("Khung giờ trong ngày", 14, .bold).padding(.top, 10)
+            T("Khung giờ trong ngày", 14, .bold).padding(.top, 12)
             HStack(spacing: 10) {
                 timeField("Từ", minute: $filter.fromMinute)
                 timeField("Đến", minute: $filter.toMinute)
             }
-            .padding(.top, 8)
+            .padding(.top, 7)
 
             PrimaryButton(title: "Áp dụng") {
                 onApply(filter)
                 ui.dismissSheet()
             }
-            .padding(.top, 17)
+            .padding(.top, 16)
         }
         .padding(.horizontal, Metrics.gutter)
         .onAppear { month = filter.endDay }
@@ -359,7 +360,7 @@ struct DateFilterSheet: View {
     }
 
     private func timeField(_ label: String, minute: Binding<Int>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             T(label, 12, .medium, Theme.muted)
             ZStack(alignment: .leading) {
                 T(minuteText(minute.wrappedValue), 15, .bold).padding(.leading, 15)
@@ -374,7 +375,7 @@ struct DateFilterSheet: View {
                     .environment(\.locale, Locale(identifier: "vi_VN"))
                     .scaleEffect(x: 2.5, y: 1.3)
                     .frame(maxWidth: .infinity)
-                    .opacity(0.02)
+                    .opacity(0.011)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: 43)

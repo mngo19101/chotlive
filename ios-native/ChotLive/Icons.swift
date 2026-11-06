@@ -9,7 +9,7 @@ enum IconName {
     fileprivate var paths: [String] {
         switch self {
         case .chart:
-            return ["M2.5 20.5h19", "M7 20.5V12", "M12 20.5V5", "M17 20.5v-7"]
+            return ["M1.5 20.5h21", "M7 20.5V12", "M12 20.5V5", "M17 20.5v-7"]
         case .messageLines:
             return ["M7.9 20A9 9 0 1 0 4 16.1L2 22Z", "M8 10h8", "M8 14h5"]
         case .message:

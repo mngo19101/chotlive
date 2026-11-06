@@ -70,7 +70,7 @@ struct OrdersView: View {
                 }
             }
             .padding(.horizontal, Metrics.gutter)
-            .padding(.top, 6)
+            .padding(.top, 2)
             .padding(.bottom, 16)
         }
         .scrollDismissesKeyboard(.interactively)
@@ -85,9 +85,10 @@ struct OrdersView: View {
         VStack(spacing: 15) {
             HStack(spacing: 12) {
                 Avatar(text: o.customer.initials, size: 40, fontSize: 14, seed: o.customer.id)
+                    .offset(y: 1)
                 VStack(spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        T(o.customer.nickname, 15, .bold).lineLimit(1)
+                        T(o.customer.nickname, 15, .bold).lineLimit(1).offset(y: 2)
                         Spacer(minLength: 0)
                         T(money(o.total), 17, .heavy, Theme.ink, track: -0.4).lineLimit(1).fixedSize()
                     }
@@ -95,8 +96,9 @@ struct OrdersView: View {
                         T("@\(o.customer.uniqueId) · \(o.productCount) sản phẩm · \(timeText(o.lastTs))", 12, .medium, Theme.muted)
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
+                            .offset(y: 1)
                         Spacer(minLength: 0)
-                        StatusBadge(status: o.status)
+                        StatusBadge(status: o.status).offset(y: 2)
                     }
                 }
             }
@@ -166,7 +168,7 @@ struct OrderActionSheet: View {
                 .padding(.horizontal, 4)
                 .padding(.top, 8)
                 .padding(.bottom, 12)
-                HairLine().padding(.bottom, 4)
+                HairLine().padding(.bottom, 12)
 
                 row(.cart, Theme.accent, Theme.peachSoft, "Sản phẩm (\(o.productCount))", Theme.ink, "Xem và sửa sản phẩm trong đơn") {
                     ui.dismissSheet()
@@ -199,7 +201,7 @@ struct OrderActionSheet: View {
                      _ subtitle: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Icon(name: icon, size: 19, color: tint)
+                Icon(name: icon, size: 17, weight: 2.3, color: tint)
                     .frame(width: 40, height: 40)
                     .background(Circle().fill(fill))
                 VStack(alignment: .leading, spacing: 3) {
@@ -280,7 +282,7 @@ struct OrderDetailView: View {
 
     private func productsCard(_ o: Order) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            T("Sản phẩm (\(o.productCount))", 14, .bold).padding(.bottom, 8)
+            T("Sản phẩm (\(o.productCount))", 14, .bold).padding(.bottom, 3)
             ForEach(Array(o.items.enumerated()), id: \.element.id) { index, it in
                 if index > 0 { HairLine() }
                 HStack(spacing: 11) {
@@ -302,7 +304,7 @@ struct OrderDetailView: View {
             .padding(.horizontal, 14)
             .frame(height: 44)
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.peachSoft))
-            .padding(.top, 10)
+            .padding(.top, 7)
         }
         .padding(.horizontal, 15)
         .padding(.top, 14)
@@ -327,7 +329,7 @@ struct OrderDetailView: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .padding(.top, 4)
-        .padding(.bottom, 10)
+        .padding(.bottom, Metrics.safeBottom > 0 ? -5 : 10)
     }
 }
 

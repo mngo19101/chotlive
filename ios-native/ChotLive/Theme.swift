@@ -15,7 +15,8 @@ enum Theme {
     static let line = Color(hex: 0xE6E8EC)
     static let ink = Color(hex: 0x14181F)
     static let muted = Color(hex: 0x5B6472)
-    static let faint = Color(hex: 0x98A0AC)
+    static let faint = Color(hex: 0x8B93A0)
+    static let placeholder = Color(hex: 0x7D8592)
     static let orange = Color(hex: 0xFF9A4C)
     static let orangeDeep = Color(hex: 0xEA6A09)
     static let accent = Color(hex: 0xB5490C)
@@ -213,18 +214,18 @@ struct SheetLayer: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if let s = ui.sheet {
-                Theme.ink.opacity(s.dim)
+                (s.dim >= 0.9 ? Color(hex: 0x2B3036) : Theme.ink.opacity(s.dim))
                     .ignoresSafeArea()
                     .onTapGesture { ui.dismissSheet() }
                     .transition(.opacity)
 
                 VStack(spacing: 0) {
                     Capsule().fill(Theme.grabber).frame(width: 40, height: 4)
-                        .padding(.top, 8).padding(.bottom, 8)
+                        .padding(.top, 10).padding(.bottom, 8)
                     s.content
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.bottom, Metrics.safeBottom > 0 ? 0 : 16)
+                .padding(.bottom, Metrics.safeBottom > 0 ? -6 : 16)
                 .background(TopRounded(radius: 28).fill(Color.white).ignoresSafeArea(.container, edges: .bottom))
                 .offset(y: max(drag, 0))
                 .gesture(
@@ -304,12 +305,13 @@ struct Badge: View {
     var fill: Color = Theme.peachSoft
     var fontSize: CGFloat = 11
     var height: CGFloat = 19
+    var hPad: CGFloat = 8
 
     var body: some View {
         T(text, fontSize, .semibold, color)
             .lineLimit(1)
             .fixedSize()
-            .padding(.horizontal, 8)
+            .padding(.horizontal, hPad)
             .frame(height: height)
             .background(Capsule().fill(fill))
     }
@@ -339,7 +341,8 @@ struct StatusBadge: View {
     var fontSize: CGFloat = 11
     var height: CGFloat = 19
     var body: some View {
-        Badge(text: status.label, color: status.badgeColor, fill: status.badgeFill, fontSize: fontSize, height: height)
+        Badge(text: status.label, color: status.badgeColor, fill: status.badgeFill, fontSize: fontSize, height: height,
+              hPad: height >= 25 ? 12 : 8)
     }
 }
 
@@ -358,6 +361,7 @@ struct PageHeader<Trailing: View>: View {
             Spacer(minLength: 0)
             trailing()
         }
+        .padding(.bottom, -1)
     }
 }
 
@@ -393,7 +397,7 @@ struct CircleButton: View {
                 .background(Circle().fill(Theme.card).overlay(Circle().strokeBorder(Theme.line, lineWidth: 1)))
         }
         .buttonStyle(.plain)
-        .disabled(!enabled)
+        .allowsHitTesting(enabled)
     }
 }
 
@@ -423,10 +427,10 @@ struct SearchField: View {
     var placeholder = "Tìm tên hoặc @tiktok"
 
     var body: some View {
-        HStack(spacing: 11) {
-            Icon(name: .search, size: 19, color: Theme.muted)
+        HStack(spacing: 13) {
+            Icon(name: .search, size: 17, weight: 2.3, color: Theme.muted)
             ZStack(alignment: .leading) {
-                if text.isEmpty { T(placeholder, 14, .medium, Theme.faint).lineLimit(1) }
+                if text.isEmpty { T(placeholder, 14, .medium, Theme.placeholder).lineLimit(1) }
                 TextField("", text: $text)
                     .font(.bv(14, .medium))
                     .foregroundColor(Theme.ink)
@@ -438,7 +442,7 @@ struct SearchField: View {
                     .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 15)
+        .padding(.horizontal, 17)
         .frame(height: 44)
         .background(Capsule().fill(Theme.card).overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1)))
     }
@@ -456,7 +460,7 @@ struct PrimaryButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                if let icon { Icon(name: icon, size: 16) }
+                if let icon { Icon(name: icon, size: 15, weight: 2.3) }
                 T(title, fontSize, .bold)
             }
             .frame(maxWidth: .infinity)
@@ -481,7 +485,7 @@ struct OutlineButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if let icon { Icon(name: icon, size: 16, color: color) }
+                if let icon { Icon(name: icon, size: 15, weight: 2.3, color: color) }
                 T(title, 14, .bold, color).lineLimit(1).minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity)
@@ -511,7 +515,6 @@ struct SubPage<Trailing: View, Content: View>: View {
                 trailing()
             }
             .padding(.horizontal, Metrics.gutter)
-            .padding(.top, 4)
             .padding(.bottom, 14)
             content()
         }

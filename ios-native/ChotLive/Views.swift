@@ -107,6 +107,7 @@ struct TabsContainer: View {
             TabBar(selection: $ui.tab)
         }
         .background(Theme.bg.ignoresSafeArea())
+        .ignoresSafeArea(.container, edges: .bottom)
         .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
@@ -126,8 +127,8 @@ struct TabBar: View {
             ForEach(AppTab.allCases, id: \.self) { t in
                 let active = selection == t
                 Button { selection = t } label: {
-                    VStack(spacing: 2) {
-                        Icon(name: t.icon, size: 24, color: active ? Theme.accent : Theme.muted)
+                    VStack(spacing: 3) {
+                        Icon(name: t.icon, size: 22, color: active ? Theme.accent : Theme.muted)
                         T(t.title, 11, .semibold, active ? Theme.accent : Theme.muted)
                             .multilineTextAlignment(.center)
                             .lineSpacing(0.5)
@@ -248,23 +249,26 @@ struct DashboardView: View {
     }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: Metrics.gap) {
-                PageHeader(subtitle: "\(longWeekday(today)), \(fullDate(today))", title: "Doanh số") {
-                    if client.liveState == "connected" { livePill }
+        GeometryReader { geo in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: Metrics.gap) {
+                    PageHeader(subtitle: "\(longWeekday(today)), \(fullDate(today))", title: "Doanh số") {
+                        if client.liveState == "connected" { livePill }
+                    }
+                    hero
+                    HStack(spacing: 12) {
+                        customersTile
+                            .frame(width: (Metrics.screenWidth - 2 * Metrics.gutter - 12) * 0.417)
+                        monthTile
+                    }
+                    .frame(height: 131)
+                    // Thẻ biểu đồ kéo dài vừa khít tới thanh tab như trong mẫu.
+                    chartCard.frame(height: max(300, geo.size.height - 382.5))
                 }
-                hero
-                HStack(spacing: 12) {
-                    customersTile
-                        .frame(width: (Metrics.screenWidth - 2 * Metrics.gutter - 12) * 0.417)
-                    monthTile
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                chartCard
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.top, 2)
+                .padding(.bottom, 12)
             }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.top, 6)
-            .padding(.bottom, 12)
         }
         .background(Theme.bg)
     }
@@ -293,7 +297,7 @@ struct DashboardView: View {
                              color: delta >= 0 ? Theme.greenBright : Theme.live)
                         T("\(delta >= 0 ? "+" : "")\(delta)%", 13, .semibold, delta >= 0 ? Theme.greenBright : Theme.live)
                     }
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 9)
                     .frame(height: 23)
                     .background(Capsule().fill(Color(hex: 0x0D1015)))
                     T("so với hôm qua", 13, .semibold)
@@ -312,37 +316,37 @@ struct DashboardView: View {
 
     private var customersTile: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 7) {
-                Icon(name: .users, size: 16, color: Theme.muted).padding(.top, 2)
-                T("Khách hôm nay", 13, .medium, Theme.muted).lineSpacing(0)
+            HStack(spacing: 9) {
+                Icon(name: .users, size: 14, color: Theme.muted)
+                T("Khách hôm\nnay", 13, .medium, Theme.muted).lineSpacing(0).fixedSize()
             }
-            T("\(store.customersToday().count)", 30, .heavy, Theme.ink, track: -1).padding(.top, 6)
+            T("\(store.customersToday().count)", 30, .heavy, Theme.ink, track: -1).padding(.top, 8)
             T("\(newCustomersToday) khách mới", 12, .semibold, Theme.accent).padding(.top, 4)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 17)
-        .padding(.top, 15)
-        .padding(.bottom, 14)
+        .padding(.top, 17)
+        .padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .cardStyle(20)
     }
 
     private var monthTile: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Icon(name: .calendar, size: 17, color: Theme.muted)
+            HStack(spacing: 9) {
+                Icon(name: .calendar, size: 16, color: Theme.muted)
                 T("Doanh thu tháng \(monthNumber)", 13, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
             }
             T(money(revenueMonth), 24, .heavy, Theme.ink, track: -0.8)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                .padding(.top, 12)
-            monthDelta.padding(.top, 5)
+                .padding(.top, 13)
+            monthDelta.padding(.top, 4)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 17)
-        .padding(.top, 15)
-        .padding(.bottom, 14)
+        .padding(.top, 17)
+        .padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .cardStyle(20)
     }
@@ -376,7 +380,7 @@ struct DashboardView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 16)
-        .frame(height: 322)
+        .frame(maxHeight: .infinity)
         .cardStyle(24)
     }
 
@@ -406,7 +410,8 @@ struct BarChart: View {
             let plot = geo.size.height - labelArea - plotTopInset
             let baseline = plotTopInset + plot
             let maxValue = max(data.map(\.1).max() ?? 0, 1)
-            let column = geo.size.width / CGFloat(max(data.count, 1))
+            let barInset: CGFloat = data.count > 10 ? 0 : 1
+            let column = (geo.size.width - 2 * barInset) / CGFloat(max(data.count, 1))
             let barWidth = data.count > 10 ? max(column - 3, 2) : min(29, column - 8)
 
             ZStack(alignment: .topLeading) {
@@ -417,7 +422,7 @@ struct BarChart: View {
                 ForEach(Array(data.enumerated()), id: \.offset) { index, item in
                     let isToday = index == data.count - 1
                     let height = max(CGFloat(item.1) / CGFloat(maxValue) * plot * 0.95, 3)
-                    let centerX = column * (CGFloat(index) + 0.5)
+                    let centerX = barInset + column * (CGFloat(index) + 0.5)
 
                     RoundedRectangle(cornerRadius: data.count > 10 ? 3 : 7, style: .continuous)
                         .fill(isToday ? Theme.orangeDeep : Theme.bar)
@@ -500,7 +505,7 @@ struct CustomersView: View {
                 }
             }
             .padding(.horizontal, Metrics.gutter)
-            .padding(.top, 6)
+            .padding(.top, 2)
             .padding(.bottom, 16)
         }
         .scrollDismissesKeyboard(.interactively)
@@ -510,21 +515,23 @@ struct CustomersView: View {
     private func row(_ c: Customer) -> some View {
         HStack(spacing: 12) {
             Avatar(text: c.initials, seed: c.id)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    T(c.nickname, 15, .bold).lineLimit(1)
+            // Hai dòng tách riêng: dòng @tài khoản được chạy dài xuống dưới cột tiền như trong mẫu.
+            VStack(spacing: 4) {
+                HStack(spacing: 0) {
+                    T(c.nickname, 15, .bold).lineLimit(1).minimumScaleFactor(0.85)
                     if c.isBigSpender {
-                        Badge(text: "Mua nhiều")
+                        Badge(text: "Mua nhiều").padding(.leading, 7)
                     } else if c.isNewToday {
-                        Badge(text: "Mới", color: Theme.green, fill: Theme.greenSoft)
+                        Badge(text: "Mới", color: Theme.green, fill: Theme.greenSoft).padding(.leading, 7)
                     }
+                    Spacer(minLength: 2)
+                    T(money(c.total), 14, .heavy).lineLimit(1).fixedSize()
                 }
-                T("@\(c.uniqueId) · \(relativeDay(c.lastTs))", 12, .medium, Theme.muted).lineLimit(1)
-            }
-            Spacer(minLength: 4)
-            VStack(alignment: .trailing, spacing: 4) {
-                T(money(c.total), 14, .heavy).lineLimit(1).fixedSize()
-                T("\(store.orders(of: c).count) đơn", 12, .medium, Theme.muted)
+                HStack(spacing: 6) {
+                    T("@\(c.uniqueId) · \(relativeDay(c.lastTs))", 12, .medium, Theme.muted).lineLimit(1)
+                    Spacer(minLength: 0)
+                    T("\(store.orders(of: c).count) đơn", 12, .medium, Theme.muted).lineLimit(1).fixedSize()
+                }
             }
         }
         .padding(.horizontal, 15)
@@ -583,12 +590,13 @@ struct CustomerDetailView: View {
             }
         }
         .padding(.horizontal, 17)
-        .padding(.vertical, 15)
+        .padding(.top, 18)
+        .padding(.bottom, 17)
         .cardStyle(20)
     }
 
     private func summary(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 2) {
             T(value, 16, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.7)
             T(label, 11, .medium, Theme.muted).lineLimit(1)
         }
@@ -598,13 +606,13 @@ struct CustomerDetailView: View {
     private func addressCard(_ c: Customer) -> some View {
         let a = c.address ?? DeliveryAddress()
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: 9) {
                 Icon(name: .pin, size: 17, color: Theme.accent)
                 T("Địa chỉ nhận hàng", 15, .bold).lineLimit(1)
                 Spacer(minLength: 4)
                 Button { ui.push(.addressEdit(c.id)) } label: {
                     HStack(spacing: 6) {
-                        Icon(name: .pencil, size: 14)
+                        Icon(name: .pencil, size: 13, weight: 2.3)
                         T("Sửa", 13, .bold)
                     }
                     .padding(.horizontal, 15)
@@ -613,14 +621,14 @@ struct CustomerDetailView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.bottom, 10)
+            .padding(.bottom, 7)
             addressRow("Người nhận", a.receiver.isEmpty ? c.nickname : a.receiver)
             HairLine()
             addressRow("Số điện thoại", a.phone)
             HairLine()
             addressRow("Địa chỉ", a.street)
             HairLine()
-            addressRow("Phường / Quận / Tỉnh", a.region)
+            addressRow("Phường / Quận\n/ Tỉnh", a.region)
             HairLine()
             addressRow("Ghi chú giao", a.note)
         }
@@ -647,7 +655,7 @@ struct CustomerDetailView: View {
                 Spacer()
                 T("\(orders.count) đơn", 12, .medium, Theme.muted)
             }
-            .padding(.bottom, 8)
+            .padding(.bottom, 5)
             ForEach(Array(orders.enumerated()), id: \.element.id) { index, o in
                 if index > 0 { HairLine() }
                 Button { ui.push(.order(o.id)) } label: { historyRow(o) }.buttonStyle(.plain)
@@ -662,8 +670,8 @@ struct CustomerDetailView: View {
     private func historyRow(_ o: Order) -> some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                T(shortDate(o.lastTs), 15, .heavy, Theme.ink, track: -0.2)
-                T(timeText(o.lastTs), 12, .medium, Theme.muted)
+                T(shortDate(o.lastTs), 15, .heavy, Theme.ink, track: -0.4)
+                T(timeText(o.lastTs), 11, .medium, Theme.muted)
             }
             .frame(width: 64, alignment: .leading)
             T("\(o.productCount) sản phẩm", 13, .medium, Theme.muted).lineLimit(1)

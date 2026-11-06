@@ -115,7 +115,7 @@ enum Demo {
         ]
 
         // Khách cũ để đủ 128 khách.
-        for i in 0..<121 {
+        for i in 0..<122 {
             customers.append(customer("khach\(i)", "Khách \(i + 1)",
                                       order("old\(i)", count: 1, total: 100_000, ts: date(8, 1 + i % 28, 10, 0), delivered: true)))
         }
@@ -126,7 +126,8 @@ enum Demo {
                 item("k2", "200", 200_000, date(10, 25, 19, 58), group: "k25", session: "s-toi"),
             ]))
             // Đơn hôm nay để đủ 50 đơn, 37 khách, doanh thu 4.860.000; xếp sau 4 đơn trong mẫu.
-            // Trạng thái: 12 đơn mới, 31 đã in, 7 đang giao; 29 đơn phiên tối, 18 đơn phiên trưa.
+            // Trạng thái: 12 đơn mới, 31 đã in, 7 đang giao. Phiên tối 31 đơn / 22 khách, phiên trưa 19 đơn / 15 khách.
+            for o in 0..<7 { customers.append(customer("moi\(o)", "Khách mới \(o + 1)", [])) } // cùng Hoa Trần, Kim Chi = 9 khách mới
             let target = 4_860_000 - 450_000 - 280_000 - 340_000 - 390_000
             let fillOrders = 46
             for i in 0..<fillOrders {
@@ -136,8 +137,9 @@ enum Demo {
                 var it = item("f\(i)", "\(price / 1000)", price, date(10, 25, 9, i % 60), group: "f\(i)",
                               session: i < 28 ? "s-toi" : "s-trua", printed: !isNew, shipping: isShipping)
                 it.delivered = false
-                let owner = i % 33
-                if let idx = customers.firstIndex(where: { $0.id == "khach\(owner)" }) {
+                let owner = i < 28 ? i % 19 : 19 + (i - 28) % 14
+                let ownerId = owner < 7 ? "moi\(owner)" : "khach\(owner)"
+                if let idx = customers.firstIndex(where: { $0.id == ownerId }) {
                     customers[idx].items.append(it)
                 }
             }
