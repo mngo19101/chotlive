@@ -220,14 +220,23 @@ final class AppUI: ObservableObject {
 struct SheetLayer: View {
     @ObservedObject var ui: AppUI
     @State private var drag: CGFloat = 0
+    /// Sheet đang vẽ: còn giữ trong lúc trượt xuống, sau khi `ui.sheet` đã về nil.
+    @State private var shown: SheetItem?
+    @State private var isUp = false
+
+    private static let slide = Animation.spring(response: 0.32, dampingFraction: 0.92)
+    /// Đợi sheet dựng xong ở ngoài màn hình rồi mới trượt lên.
+    private static let mountDelay: UInt64 = 30_000_000
+    /// Spring đã tắt hẳn, sheet nằm ngoài màn hình nên gỡ lúc này không thấy giật.
+    private static let removeDelay: UInt64 = 450_000_000
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            if let s = ui.sheet {
+            if let s = shown {
                 (s.dim >= 0.9 ? Color(hex: 0x2B3036) : Theme.ink.opacity(s.dim))
                     .ignoresSafeArea()
+                    .opacity(isUp ? 1 : 0)
                     .onTapGesture { ui.dismissSheet() }
-                    .transition(.opacity)
 
                 VStack(spacing: 0) {
                     // Chỉ kéo ở vùng tay nắm để không tranh cử chỉ với bánh xe chọn giờ và danh sách cuộn.
@@ -249,12 +258,51 @@ struct SheetLayer: View {
                 .padding(.bottom, Metrics.safeBottom > 0 ? -6 : 16)
                 .background(TopRounded(radius: 28).fill(Color.white).ignoresSafeArea(.container, edges: .bottom))
                 .offset(y: max(drag, 0))
-                .transition(.move(edge: .bottom))
+                .modifier(SheetSlide(progress: isUp ? 1 : 0))
                 .id(s.id)
             }
         }
-        .animation(.spring(response: 0.32, dampingFraction: 0.92), value: ui.sheet?.id)
+        .allowsHitTesting(isUp)
         .animation(.spring(response: 0.25, dampingFraction: 0.9), value: drag)
+        .onAppear { sync() }
+        .onChange(of: ui.sheet?.id) { _ in sync() }
+    }
+
+    /// Không dùng `.transition` cho sheet: nội dung chèn cùng lúc với chuyển động có thể không đi theo nền
+    /// (`ViewThatFits` của lịch đứng yên trong khi nền trượt lên), nên dựng xong mới cho trượt.
+    private func sync() {
+        guard let next = ui.sheet else {
+            guard let closing = shown else { return }
+            withAnimation(Self.slide) { isUp = false }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: Self.removeDelay)
+                if ui.sheet == nil, shown?.id == closing.id { shown = nil }
+            }
+            return
+        }
+        isUp = false
+        shown = next
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.mountDelay)
+            guard ui.sheet?.id == next.id else { return }
+            withAnimation(Self.slide) { isUp = true }
+        }
+    }
+}
+
+/// Trượt sheet như một khối. `progress` 0 là nằm hẳn dưới đáy màn hình: nền trắng phủ xuống vùng an toàn
+/// nên quãng trượt phải cộng thêm phần đó, nếu không sẽ còn một dải trắng đè lên thanh tab.
+struct SheetSlide: GeometryEffect {
+    var progress: CGFloat
+    var safeBottom: CGFloat = Metrics.safeBottom
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(CGAffineTransform(translationX: 0, y: (1 - progress) * (size.height + safeBottom)))
     }
 }
 
