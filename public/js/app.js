@@ -37,6 +37,7 @@ import {
   onAccountAccess,
   onOfflineChanges
 } from './sync.js?v=2';
+import { countdownClock, countdownText } from './countdown.js';
 import {
   parsePrice,
   parsePriceInput,
@@ -2236,31 +2237,78 @@ function showAccessExpired(message) {
   }
 }
 
-/** Thẻ tài khoản ở màn Tôi và dòng nhắc ở màn Bình luận. Thời gian còn lại chỉ để xem, server mới là nơi chặn. */
+let trialCountdownTimer = null;
+let trialCheckedAt = 0;
+
+/** Tới 0 thì hỏi lại server thay vì tự kết luận: đồng hồ máy có thể lệch, và server chỉ báo hết hạn cho máy đang theo dõi live. */
+async function recheckAccessFromServer() {
+  try {
+    const res = await apiFetch('/api/auth/me');
+    const data = await res.json();
+    if (res.ok && data.user && getAuthToken()) {
+      setAuthSession(getAuthToken(), data.user);
+      renderOwnAccess(data.user.access);
+    }
+  } catch {}
+}
+
+function tickTrialCountdown(access) {
+  const remaining = access.endsAt - Date.now();
+  if ($('#current-auth-access')) $('#current-auth-access').textContent = `Dùng thử miễn phí còn ${countdownText(remaining)}`;
+  if ($('#sidebar-access-value')) $('#sidebar-access-value').textContent = countdownClock(remaining);
+  if (remaining <= 0 && Date.now() - trialCheckedAt >= 5000) {
+    trialCheckedAt = Date.now();
+    recheckAccessFromServer();
+  }
+}
+
+function renderSidebarAccess(access) {
+  const badge = $('#btn-sidebar-access');
+  if (!badge) return;
+  const show = access?.status === 'trial' || access?.status === 'expired';
+  badge.style.display = show ? 'block' : 'none';
+  badge.classList.toggle('expired', access?.status === 'expired');
+  if (access?.status === 'trial') {
+    $('#sidebar-access-label').textContent = 'Dùng thử miễn phí còn';
+  } else if (access?.status === 'expired') {
+    $('#sidebar-access-label').textContent = 'Hết hạn sử dụng';
+    $('#sidebar-access-value').textContent = access.code === 'PLAN_EXPIRED' ? 'Gói đã hết hạn' : 'Đã hết dùng thử';
+  }
+}
+
+/** Thẻ tài khoản ở màn Tôi, ô ở thanh bên và dòng nhắc ở màn Bình luận. Thời gian còn lại chỉ để xem, server mới là nơi chặn. */
 function renderOwnAccess(access) {
   const line = $('#current-auth-access');
   const notice = $('#live-access-notice');
-  const remaining = access?.endsAt ? Math.max(0, access.endsAt - Date.now()) : 0;
   const text =
     access?.status === 'expired'
       ? access.message
-      : access?.status === 'trial'
-        ? `Dùng thử còn ${remainingText(remaining)}`
-        : access?.status === 'plan'
-          ? `Gói còn hiệu lực đến ${accessDate(access.endsAt)} (còn ${remainingText(remaining)})`
-          : '';
+      : access?.status === 'plan'
+        ? `Gói còn hiệu lực đến ${accessDate(access.endsAt)} (còn ${remainingText(Math.max(0, access.endsAt - Date.now()))})`
+        : '';
+  const isTrial = access?.status === 'trial';
   if (line) {
     line.textContent = text;
     line.className = `auth-user-access ${access?.status || ''}`;
-    line.style.display = text ? 'block' : 'none';
+    line.style.display = text || isTrial ? 'block' : 'none';
   }
   if (notice) {
     notice.textContent = access?.status === 'expired' ? access.message : '';
     notice.style.display = access?.status === 'expired' ? 'block' : 'none';
   }
+  renderSidebarAccess(access);
+
+  clearInterval(trialCountdownTimer);
+  trialCountdownTimer = null;
+  if (isTrial) {
+    tickTrialCountdown(access);
+    trialCountdownTimer = setInterval(() => tickTrialCountdown(access), 1000);
+  }
 }
 
 onAccountAccess(renderOwnAccess);
+
+$('#btn-sidebar-access')?.addEventListener('click', () => switchTab('settings', false));
 
 function applyAuthUserToUI(user) {
   const overlay = $('#auth-screen-overlay');

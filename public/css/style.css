@@ -206,6 +206,38 @@ input, select, textarea {
   background: #fff;
 }
 
+.sidebar-access-badge {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #fed7aa;
+  border-radius: var(--radius-sm);
+  background: #fff7ed;
+  color: #c2410c;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-access-badge.expired {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.sidebar-access-label {
+  display: block;
+  font-size: 11.5px;
+}
+
+.sidebar-access-value {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .printer-dot {
   width: 7px;
   height: 7px;
@@ -3017,6 +3049,7 @@ input, select, textarea {
   margin-top: 6px;
   font-size: 13px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   color: #c2410c;
 }
 
