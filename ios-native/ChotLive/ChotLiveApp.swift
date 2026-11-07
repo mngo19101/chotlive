@@ -107,33 +107,35 @@ enum CommentAlert {
 }
 
 /// Chốt 1 bình luận: luôn lưu vào khách/đơn hàng, rồi in tem nếu đã nối máy in.
-/// Trả về thông báo (nil nếu in thành công).
+/// Chỉ đánh dấu đã in sau khi gửi hết dữ liệu tem. Trả về thông báo (nil nếu thành công).
 @MainActor
-func printComment(_ c: LiveComment, store: Store, printer: PrinterManager) -> String? {
+func printComment(_ c: LiveComment, store: Store, printer: PrinterManager) async -> String? {
     let items = store.saveToCustomer(c)
     guard printer.isConnected else {
         return "Đã lưu đơn của \(c.nickname). Chưa kết nối máy in nên chưa in tem — vào Tôi › Máy in để kết nối."
     }
-    let ok = printer.send(TicketRenderer.liveTicketBytes(comment: c))
-    if ok { items.forEach { store.markPrinted(itemId: $0.id) } }
-    return ok ? nil : "Đã lưu đơn nhưng gửi lệnh in thất bại."
+    if let error = await printer.sendAndWait(TicketRenderer.liveTicketBytes(comment: c)) {
+        return "Đã lưu đơn của \(c.nickname) nhưng chưa in được tem. \(error)"
+    }
+    items.forEach { store.markPrinted(itemId: $0.id) }
+    return nil
 }
 
-/// In tem cho tất cả sản phẩm của đơn. Trả về thông báo (nil nếu in thành công).
+/// In tem cho tất cả sản phẩm của đơn, dừng ở tem lỗi đầu tiên. Trả về thông báo (nil nếu thành công).
 @MainActor
-func printOrder(_ o: Order, store: Store, printer: PrinterManager) -> String? {
+func printOrder(_ o: Order, store: Store, printer: PrinterManager) async -> String? {
     guard printer.isConnected else {
         return "Chưa kết nối máy in — vào Tôi › Máy in để kết nối."
     }
-    var failed = false
+    var done = 0
     for it in o.items {
         let c = LiveComment(id: it.id, uniqueId: o.customer.uniqueId, userId: o.customer.userId,
                             nickname: o.customer.nickname, text: it.ticketText, ts: it.ts, price: it.lineTotal)
-        if printer.send(TicketRenderer.ticketBytes(comment: c)) {
-            store.markPrinted(itemId: it.id)
-        } else {
-            failed = true
+        if let error = await printer.sendAndWait(TicketRenderer.ticketBytes(comment: c)) {
+            return "Mới gửi được \(done)/\(o.items.count) tem. \(error)"
         }
+        store.markPrinted(itemId: it.id)
+        done += 1
     }
-    return failed ? "Gửi lệnh in thất bại với một số sản phẩm." : nil
+    return nil
 }

@@ -57,6 +57,10 @@ App cài bằng Apple ID miễn phí sẽ hết hạn sau 7 ngày và phải cà
 
 Mở App và đăng nhập. Nếu bản IPA chưa gắn sẵn địa chỉ server, nhập địa chỉ ở màn đăng nhập, ví dụ `https://ten-mien-cua-ban.vn` hoặc `http://192.168.1.x:3000`.
 
+### Kết nối máy in
+
+Vào **Tôi › Máy in › Tìm máy in**, chọn máy rồi bấm **In thử**. App trên iPhone chỉ nối được máy in có **Bluetooth LE**, không dùng được máy chỉ có Bluetooth Classic (SPP). Hãy kiểm tra thông số máy trước khi mua.
+
 ---
 
 ## 4. Sao lưu

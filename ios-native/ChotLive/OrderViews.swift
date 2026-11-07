@@ -107,7 +107,9 @@ struct OrdersView: View {
 
             HStack(spacing: 8) {
                 OutlineButton(title: "In đơn", icon: .printer, filled: !o.isPrinted) {
-                    ui.notify(printOrder(o, store: store, printer: printer))
+                    Task { @MainActor in
+                        ui.notify(await printOrder(o, store: store, printer: printer))
+                    }
                 }
                 OutlineButton(title: deliveryLabel(o), icon: .truck, color: o.status == .delivered ? Theme.green : Theme.ink) {
                     store.advanceDelivery(o)
@@ -320,7 +322,9 @@ struct OrderDetailView: View {
                     store.advanceDelivery(o)
                 }
                 OutlineButton(title: "In đơn", icon: .printer, height: 48) {
-                    ui.notify(printOrder(o, store: store, printer: printer))
+                    Task { @MainActor in
+                        ui.notify(await printOrder(o, store: store, printer: printer))
+                    }
                 }
                 OutlineButton(title: "Xoá đơn", icon: .trash, color: Theme.red, height: 48) {
                     confirmDelete(o, store: store, ui: ui) { ui.pop() }

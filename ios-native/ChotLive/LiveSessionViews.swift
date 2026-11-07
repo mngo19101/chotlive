@@ -417,7 +417,9 @@ struct SessionDetailView: View {
                             ForEach(shown) { c in
                                 let owner = customer(of: c, in: map)
                                 CommentRow(c: c, closing: store.isClosingComment(c), customer: owner, isNew: isNew(owner)) {
-                                    ui.notify(printComment(c, store: store, printer: printer))
+                                    Task { @MainActor in
+                                        ui.notify(await printComment(c, store: store, printer: printer))
+                                    }
                                 }
                                 .id(c.id)
                             }

@@ -26,6 +26,9 @@ targets:
           - BeVietnamPro-ExtraBold.ttf
         NSBluetoothAlwaysUsageDescription: Ứng dụng cần Bluetooth để kết nối và in tem qua máy in nhiệt.
         NSBluetoothPeripheralUsageDescription: Ứng dụng cần Bluetooth để kết nối máy in.
+        # Giữ kết nối máy in khi người bán chuyển sang TikTok trong lúc live.
+        UIBackgroundModes:
+          - bluetooth-central
         NSLocalNetworkUsageDescription: Ứng dụng cần mạng nội bộ để nối server ChốtLive chạy trên máy tính cùng Wi-Fi.
         # Ra Internet bắt buộc HTTPS để mật khẩu không đi dạng rõ; chỉ mạng nội bộ (thử nghiệm) mới được dùng http.
         NSAppTransportSecurity:

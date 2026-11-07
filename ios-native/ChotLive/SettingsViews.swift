@@ -222,6 +222,7 @@ struct AddAppAccountSheet: View {
 
 struct PrinterView: View {
     @EnvironmentObject var printer: PrinterManager
+    @EnvironmentObject var ui: AppUI
     @AppStorage("paperWidth") private var paperWidth = 576
     @AppStorage("shopName") private var shopName = "ChốtLive"
 
@@ -250,17 +251,15 @@ struct PrinterView: View {
                             printer.startScan()
                         }
                         .disabled(printer.isScanning)
-                        ForEach(printer.devices, id: \.identifier) { p in
-                            Button { printer.connect(p) } label: {
-                                HStack {
-                                    T(p.name ?? p.identifier.uuidString, 14, .semibold).lineLimit(1)
-                                    Spacer()
-                                    Icon(name: .chevronRight, size: 16, color: Theme.muted)
-                                }
-                                .frame(height: 40)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
+                        ForEach(printer.devices.filter(\.likelyPrinter)) { deviceRow($0) }
+                        let others = printer.devices.filter { !$0.likelyPrinter }
+                        if !others.isEmpty {
+                            T("Thiết bị khác, có thể không phải máy in", 13, .medium, Theme.muted)
+                            ForEach(others) { deviceRow($0) }
+                        }
+                        if printer.hasScanned && !printer.isScanning && !printer.devices.contains(where: \.likelyPrinter) {
+                            T("Không thấy máy in? Kiểm tra máy đã bật và không nối với điện thoại khác. iPhone chỉ nối được máy có Bluetooth LE, không dùng được máy chỉ có Bluetooth Classic (SPP).",
+                              13, .medium, Theme.muted)
                         }
                     }
                     .padding(16)
@@ -286,10 +285,26 @@ struct PrinterView: View {
         }
     }
 
+    private func deviceRow(_ d: NearbyDevice) -> some View {
+        Button { printer.connect(d.peripheral) } label: {
+            HStack {
+                T(d.name, 14, .semibold).lineLimit(1)
+                Spacer()
+                Icon(name: .chevronRight, size: 16, color: Theme.muted)
+            }
+            .frame(height: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func printTest() {
         let c = LiveComment(id: "test", uniqueId: "tai_khoan_mau", userId: "123456789", nickname: "Khách thử",
                             text: "59", ts: Date(), price: 59000)
-        printer.send(TicketRenderer.ticketBytes(comment: c))
+        Task { @MainActor in
+            let error = await printer.sendAndWait(TicketRenderer.ticketBytes(comment: c))
+            ui.notify(error ?? "Đã gửi xong tem thử. Nếu không ra giấy, kiểm tra giấy và xem đã chọn đúng máy in chưa.")
+        }
     }
 }
 
