@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { countdownClock, countdownText } from '../public/js/countdown.js';
+import { countdownClock, countdownText, remainingText } from '../public/js/countdown.js';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -26,4 +26,12 @@ test('dạng đồng hồ ngắn cho thanh bên', () => {
   assert.equal(countdownClock(5 * HOUR + 7 * SECOND), '05:00:07');
   assert.equal(countdownClock(1), '00:00:01');
   assert.equal(countdownClock(-1), '00:00:00');
+});
+
+test('thời gian còn của gói tính theo giờ, hết hạn thì không ra số âm', () => {
+  assert.equal(remainingText(30 * DAY), '30 ngày');
+  assert.equal(remainingText(20 * DAY + 3 * HOUR + 59 * MINUTE), '20 ngày 3 giờ');
+  assert.equal(remainingText(5 * HOUR + 30 * MINUTE), '5 giờ');
+  assert.equal(remainingText(59 * MINUTE), 'dưới 1 giờ');
+  assert.equal(remainingText(-DAY), 'dưới 1 giờ');
 });

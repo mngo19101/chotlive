@@ -28,3 +28,12 @@ export function countdownClock(ms) {
   const clock = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
   return days ? `${days} ngày ${clock}` : clock;
 }
+
+/** Thời gian còn lại của gói, tính theo giờ: "20 ngày 3 giờ", "5 giờ", "dưới 1 giờ". */
+export function remainingText(ms) {
+  const hours = Math.floor(Math.max(0, ms) / 3600000);
+  if (hours < 1) return 'dưới 1 giờ';
+  const days = Math.floor(hours / 24);
+  if (days < 1) return `${hours} giờ`;
+  return hours % 24 ? `${days} ngày ${hours % 24} giờ` : `${days} ngày`;
+}

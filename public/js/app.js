@@ -37,7 +37,7 @@ import {
   onAccountAccess,
   onOfflineChanges
 } from './sync.js?v=2';
-import { countdownClock, countdownText } from './countdown.js';
+import { countdownClock, countdownText, remainingText } from './countdown.js';
 import {
   parsePrice,
   parsePriceInput,
@@ -2218,14 +2218,7 @@ $('#nav-btn-admin-shortcut')?.addEventListener('click', () => {
   }, 80);
 });
 
-function remainingText(ms) {
-  const hours = Math.floor(ms / 3600000);
-  if (hours < 1) return 'dưới 1 giờ';
-  const days = Math.floor(hours / 24);
-  if (days < 1) return `${hours} giờ`;
-  return hours % 24 ? `${days} ngày ${hours % 24} giờ` : `${days} ngày`;
-}
-
+const timeLeft = (access) => remainingText(access.endsAt - Date.now());
 const accessDate = (ms) => new Date(ms).toLocaleDateString('vi-VN');
 
 function showAccessExpired(message) {
@@ -2284,7 +2277,7 @@ function renderOwnAccess(access) {
     access?.status === 'expired'
       ? access.message
       : access?.status === 'plan'
-        ? `Gói còn hiệu lực đến ${accessDate(access.endsAt)} (còn ${remainingText(Math.max(0, access.endsAt - Date.now()))})`
+        ? `Gói còn hiệu lực đến ${accessDate(access.endsAt)} (còn ${timeLeft(access)})`
         : '';
   const isTrial = access?.status === 'trial';
   if (line) {
@@ -2506,9 +2499,8 @@ async function loadAdminUsers() {
 }
 
 function adminAccessText(access) {
-  const remaining = access?.endsAt ? Math.max(0, access.endsAt - Date.now()) : 0;
-  if (access?.status === 'plan') return `Có gói đến ${accessDate(access.endsAt)} (còn ${remainingText(remaining)})`;
-  if (access?.status === 'trial') return `Dùng thử còn ${remainingText(remaining)}`;
+  if (access?.status === 'plan') return `Có gói đến ${accessDate(access.endsAt)} (còn ${timeLeft(access)})`;
+  if (access?.status === 'trial') return `Dùng thử còn ${timeLeft(access)}`;
   if (access?.status === 'expired') return access.code === 'PLAN_EXPIRED' ? 'Gói đã hết hạn' : 'Đã hết dùng thử';
   return '';
 }
@@ -2516,12 +2508,7 @@ function adminAccessText(access) {
 function adminAccessBadge(access) {
   if (!access || access.status === 'admin') return '';
   const icon = { plan: '🎫', trial: '⏳', expired: '⛔' }[access.status];
-  const short =
-    access.status === 'plan'
-      ? `Gói đến ${accessDate(access.endsAt)}`
-      : access.status === 'trial'
-        ? `Dùng thử còn ${remainingText(Math.max(0, access.endsAt - Date.now()))}`
-        : adminAccessText(access);
+  const short = access.status === 'plan' ? `Gói đến ${accessDate(access.endsAt)}` : adminAccessText(access);
   return `<span class="status-pill-badge ${access.status === 'expired' ? 'locked' : access.status}">${icon} ${esc(short)}</span>`;
 }
 
