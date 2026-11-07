@@ -60,7 +60,7 @@ final class LiveClient: ObservableObject {
         }
     }
 
-    static func normalize(_ raw: String) -> String {
+    nonisolated static func normalize(_ raw: String) -> String {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         while s.hasSuffix("/") { s.removeLast() }
         if s.isEmpty { return s }
