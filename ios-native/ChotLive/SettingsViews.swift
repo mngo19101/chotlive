@@ -95,8 +95,9 @@ struct SettingsView: View {
         let active = a.key == currentAccountKey
         return Button {
             guard !active else { return }
-            if ["connected", "connecting"].contains(client.liveState) {
-                ui.confirm = ConfirmItem(title: "Đổi tài khoản?", message: "Phiên live đang đọc sẽ dừng lại.",
+            if ["connected", "connecting", "reconnecting"].contains(client.liveState) {
+                ui.confirm = ConfirmItem(title: "Đổi tài khoản?",
+                                         message: "Server vẫn ghi tiếp live của tài khoản này. Máy sẽ chuyển sang dữ liệu của tài khoản kia.",
                                          action: "Đổi tài khoản") { client.switchAccount(to: a.key) }
             } else {
                 client.switchAccount(to: a.key)
@@ -400,6 +401,12 @@ struct HelpView: View {
                         if !client.baseURL.isEmpty { T(client.baseURL, 12, .medium, Theme.muted).lineLimit(1) }
                         T(client.socketConnected ? "Đã nối server" : "Mất kết nối server", 12, .semibold,
                           client.socketConnected ? Theme.green : Theme.red)
+                        if client.socketConnected {
+                            T(client.serverSupportsSync
+                              ? "\(client.clientsCount) thiết bị đang đồng bộ. Web và điện thoại phải cùng server và cùng tài khoản này mới thấy dữ liệu của nhau."
+                              : "Server này là bản cũ nên chưa đồng bộ đơn và khách.", 12, .medium, Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)

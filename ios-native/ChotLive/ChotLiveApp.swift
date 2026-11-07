@@ -21,9 +21,27 @@ struct ChotLiveApp: App {
                         if store.isClosingComment(c) { CommentAlert.play() }
                     }
                     client.onAccountChange = { [store] account in store.switchAccount(account) }
+                    client.onSnapshot = { [store] snap in store.applyServer(snap) }
+                    client.onSyncAck = { [store, client] id in
+                        if store.acknowledgeSync(id: id) { client.flushSync(store) }
+                    }
+                    client.onSocketClosed = { [store] in store.syncInterrupted() }
+                    store.onLocalChange = { [store, client] in
+                        Task { @MainActor in client.scheduleSync(store) }
+                    }
+                    // Đặt sau cùng: có thể chạy ngay nếu server đã trả lời trước khi giao diện mở.
+                    client.onHello = { [store, client] snap in
+                        store.applyServer(snap)
+                        client.flushSync(store)
+                        Task { @MainActor in await client.catchUpComments(into: store) }
+                    }
                 }
                 .onChange(of: scenePhase) { phase in
-                    if phase != .active { store.save() }
+                    if phase == .active {
+                        client.checkSocket()
+                    } else {
+                        store.save()
+                    }
                 }
         }
     }

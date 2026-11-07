@@ -1,6 +1,6 @@
 import Foundation
 
-/// Lưu bình luận, khách hàng, phiên live... ngay trên máy.
+/// Lưu bình luận, khách hàng, phiên live... trên máy và đồng bộ với server (xem ServerSync.swift).
 /// Mỗi tài khoản có một file riêng: Documents/accounts/<mã tài khoản>/chotlive.json.
 final class Store: ObservableObject {
     @Published var comments: [LiveComment] = []
@@ -18,8 +18,20 @@ final class Store: ObservableObject {
     /// ID vừa bắt đầu live với "Lưu ID này cho lần sau" đang tắt.
     var unsavedLiveId: String?
 
+    /// Có thay đổi cần gửi lên server.
+    var onLocalChange: (() -> Void)?
+    var syncState = SyncState()
+    /// Gói đang chờ server xác nhận.
+    private var sending: (id: Int, customers: Set<String>, items: Set<String>, accounts: Set<String>, accountsDirty: Bool, initial: Bool)?
+    /// Đổi tiếp trong lúc chờ xác nhận thì vẫn phải gửi lại.
+    private var touchedWhileSending: Set<String> = []
+    private var accountsTouchedWhileSending = false
+    private var nextUpdateId = 1
+    private var knownCommentIds: Set<String> = []
+
     private static let defaultKeywords = ["chốt", "lấy"]
-    private static let commentLimit = 2000
+    /// Trên máy giữ chừng này bình luận mới nhất; toàn bộ lịch sử nằm trên server.
+    static let commentLimit = 5000
     private static let fileName = "chotlive.json"
 
     private var saveWork: DispatchWorkItem?
@@ -62,6 +74,11 @@ final class Store: ObservableObject {
         keywords = Self.defaultKeywords
         storageWarning = nil
         unsavedLiveId = nil
+        syncState = SyncState()
+        sending = nil
+        touchedWhileSending = []
+        accountsTouchedWhileSending = false
+        knownCommentIds = []
         saveBlocked = false
         saveFailed = false
         accountKey = account
@@ -72,17 +89,44 @@ final class Store: ObservableObject {
 
     var openSession: LiveSession? { sessions.first(where: \.isLive) }
 
+    private func refreshKnownCommentIds() {
+        if knownCommentIds.count != comments.count { knownCommentIds = Set(comments.map(\.id)) }
+    }
+
+    private func trimComments() {
+        if comments.count > Self.commentLimit {
+            comments.removeLast(comments.count - Self.commentLimit)
+            knownCommentIds = Set(comments.map(\.id))
+        }
+    }
+
     func addComment(_ c: LiveComment, tiktok: String) {
-        guard !comments.contains(where: { $0.id == c.id }) else { return }
-        if openSession == nil { beginSession(tiktok: tiktok) }
+        refreshKnownCommentIds()
+        guard !knownCommentIds.contains(c.id) else { return }
         var comment = c
-        comment.sessionId = openSession?.id
+        if comment.sessionId == nil {
+            // Server chưa gắn phiên (server bản cũ): tự ghi phiên trên máy như trước.
+            if openSession == nil { beginSession(tiktok: tiktok) }
+            comment.sessionId = openSession?.id
+        }
         comments.insert(comment, at: 0)
-        if comments.count > Self.commentLimit { comments.removeLast(comments.count - Self.commentLimit) }
+        knownCommentIds.insert(comment.id)
+        trimComments()
         if let i = sessions.firstIndex(where: { $0.id == comment.sessionId }) {
             sessions[i].commentCount += 1
             sessions[i].lastActivity = comment.ts
         }
+        scheduleSave()
+    }
+
+    /// Bình luận lấy bù từ server (lúc máy mất mạng hoặc khoá màn hình). Bộ đếm phiên do server gửi.
+    func addComments(_ batch: [LiveComment]) {
+        refreshKnownCommentIds()
+        let fresh = batch.filter { !knownCommentIds.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+        comments = (comments + fresh).sorted { $0.ts > $1.ts }
+        knownCommentIds.formUnion(fresh.map(\.id))
+        trimComments()
         scheduleSave()
     }
 
@@ -129,11 +173,13 @@ final class Store: ObservableObject {
     }
 
     private func closeOpenSession() {
-        guard let i = sessions.firstIndex(where: \.isLive) else { return }
+        guard sessions.contains(where: \.isLive) else { return }
         let now = Clock.now
-        // App bị tắt giữa phiên: lấy mốc hoạt động cuối thay vì lúc mở lại app.
-        let last = sessions[i].lastActivity ?? sessions[i].start
-        sessions[i].end = now.timeIntervalSince(last) > 600 ? last : now
+        for i in sessions.indices where sessions[i].isLive {
+            // App bị tắt giữa phiên: lấy mốc hoạt động cuối thay vì lúc mở lại app.
+            let last = sessions[i].lastActivity ?? sessions[i].start
+            sessions[i].end = now.timeIntervalSince(last) > 600 ? last : now
+        }
         save()
     }
 
@@ -187,6 +233,7 @@ final class Store: ObservableObject {
         } else {
             customers.append(Customer(id: key, uniqueId: c.uniqueId, userId: c.userId, nickname: c.nickname, items: items))
         }
+        touchCustomer(customers.first { $0.items.contains { $0.commentId == c.id || $0.id == c.id } }?.id ?? key)
         save()
         return items
     }
@@ -195,6 +242,7 @@ final class Store: ObservableObject {
         guard let idx = customers.firstIndex(where: { $0.id == customerId }) else { return }
         customers[idx].items.removeAll { $0.id == itemId }
         if customers[idx].items.isEmpty { customers.remove(at: idx) }
+        touchCustomer(customerId, deletedItems: [itemId])
         save()
     }
 
@@ -203,6 +251,7 @@ final class Store: ObservableObject {
         let ids = Set(o.items.map(\.id))
         customers[idx].items.removeAll { ids.contains($0.id) }
         if customers[idx].items.isEmpty { customers.remove(at: idx) }
+        touchCustomer(o.customer.id, deletedItems: ids)
         save()
     }
 
@@ -213,6 +262,7 @@ final class Store: ObservableObject {
         customers[idx].items.removeAll { ids.contains($0.id) }
         customers[idx].items.append(contentsOf: edited)
         if customers[idx].items.isEmpty { customers.remove(at: idx) }
+        touchCustomer(o.customer.id, deletedItems: ids.subtracting(edited.map(\.id)))
         save()
     }
 
@@ -236,6 +286,7 @@ final class Store: ObservableObject {
         } else {
             customers.append(Customer(id: cid, uniqueId: handle, userId: "", nickname: name.isEmpty ? handle : name, items: items))
         }
+        touchCustomer(cid)
         save()
         return cid + "|" + group
     }
@@ -243,6 +294,7 @@ final class Store: ObservableObject {
     func setAddress(_ a: DeliveryAddress, customerId: String) {
         guard let idx = customers.firstIndex(where: { $0.id == customerId }) else { return }
         customers[idx].address = a
+        touchCustomer(customerId)
         save()
     }
 
@@ -250,6 +302,7 @@ final class Store: ObservableObject {
         for ci in customers.indices {
             if let ii = customers[ci].items.firstIndex(where: { $0.id == itemId }) {
                 customers[ci].items[ii].printed = true
+                touchCustomer(customers[ci].id)
             }
         }
         save()
@@ -274,6 +327,7 @@ final class Store: ObservableObject {
                 }
             }
         }
+        touchCustomer(o.customer.id)
         save()
     }
 
@@ -343,17 +397,22 @@ final class Store: ObservableObject {
             accounts.append(TikTokAccount(id: id, uniqueId: handle, displayName: name.isEmpty ? handle : name))
         }
         if activate || activeAccountId == nil { activeAccountId = id }
+        syncState.deletedAccounts.remove(id)
+        touchAccounts()
         save()
     }
 
     func selectAccount(_ id: String) {
         activeAccountId = id
+        touchAccounts()
         save()
     }
 
     func removeAccount(_ id: String) {
         accounts.removeAll { $0.id == id }
         if activeAccountId == id { activeAccountId = accounts.first?.id }
+        syncState.deletedAccounts.insert(id)
+        touchAccounts()
         save()
     }
 
@@ -361,6 +420,60 @@ final class Store: ObservableObject {
         keywords = list
         save()
     }
+
+    // MARK: - Theo dõi thay đổi để gửi lên server
+
+    private func touchCustomer(_ id: String, deletedItems: Set<String> = []) {
+        syncState.dirtyCustomers.insert(id)
+        syncState.deletedItems.formUnion(deletedItems)
+        if sending != nil { touchedWhileSending.insert(id) }
+        onLocalChange?()
+    }
+
+    private func touchAccounts() {
+        syncState.accountsDirty = true
+        if sending != nil { accountsTouchedWhileSending = true }
+        onLocalChange?()
+    }
+
+    var isAwaitingAck: Bool { sending != nil }
+    var inFlightCustomerIds: Set<String> { sending?.customers ?? [] }
+
+    /// Đánh dấu gói sắp gửi; trả về mã gói. Thay đổi chỉ được xoá khi server xác nhận.
+    func beginSending() -> Int {
+        let id = nextUpdateId
+        nextUpdateId += 1
+        sending = (id, syncState.dirtyCustomers, syncState.deletedItems, syncState.deletedAccounts,
+                   syncState.accountsDirty, !syncState.syncedOnce)
+        touchedWhileSending = []
+        accountsTouchedWhileSending = false
+        return id
+    }
+
+    /// Server đã nhận gói. Nếu vẫn còn thay đổi mới thì trả về true để gửi tiếp.
+    @discardableResult
+    func acknowledgeSync(id: Int) -> Bool {
+        guard let sent = sending, sent.id == id else { return syncState.hasChanges }
+        syncState.dirtyCustomers.subtract(sent.customers.subtracting(touchedWhileSending))
+        syncState.deletedItems.subtract(sent.items)
+        syncState.deletedAccounts.subtract(sent.accounts)
+        if sent.accountsDirty && !accountsTouchedWhileSending { syncState.accountsDirty = false }
+        if sent.initial { syncState.syncedOnce = true }
+        sending = nil
+        touchedWhileSending = []
+        accountsTouchedWhileSending = false
+        saveSoon()
+        return syncState.hasChanges
+    }
+
+    /// Mất kết nối trước khi được xác nhận: thay đổi vẫn còn nguyên, gửi lại khi nối lại.
+    func syncInterrupted() {
+        sending = nil
+        touchedWhileSending = []
+        accountsTouchedWhileSending = false
+    }
+
+    func saveSoon() { scheduleSave() }
 
     // MARK: - Lưu trữ
 
@@ -396,6 +509,8 @@ final class Store: ObservableObject {
         accounts = snap.accounts
         activeAccountId = snap.activeAccountId
         if let k = snap.keywords { keywords = k }
+        syncState = snap.sync ?? SyncState()
+        knownCommentIds = Set(snap.comments.map(\.id))
     }
 
     private func quarantine(_ url: URL) {
@@ -468,7 +583,7 @@ final class Store: ObservableObject {
         saveWork = nil
         guard persistEnabled, !saveBlocked, let url = fileURL else { return }
         let snap = Snapshot(comments: comments, customers: customers, sessions: sessions, accounts: accounts,
-                            activeAccountId: activeAccountId, keywords: keywords)
+                            activeAccountId: activeAccountId, keywords: keywords, sync: syncState)
         do {
             let data = try JSONEncoder().encode(snap)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

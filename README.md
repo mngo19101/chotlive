@@ -16,6 +16,10 @@ npm.cmd start
 ```
 Mở http://localhost:3000 trên trình duyệt máy tính hoặc mở trên điện thoại qua địa chỉ IP mạng LAN (ví dụ `http://192.168.1.x:3000`).
 
+Web và điện thoại chỉ đồng bộ khi dùng **cùng một server và cùng một tài khoản**. `localhost` chỉ mở được trên chính máy tính đó; trên điện thoại phải nhập IP LAN (xem trong Tôi › Đồng bộ trên web) hoặc địa chỉ server đã đưa lên mạng.
+
+Chạy test: `npm test` (dùng TikTok giả trong `test/fake-tiktok`, không gọi mạng thật).
+
 ---
 
 ## 2. Đưa Web & Server Đồng Bộ lên mạng (Render / Railway)

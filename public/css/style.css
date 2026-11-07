@@ -3207,3 +3207,122 @@ input, select, textarea {
     border-top: 1px dashed #ece7df;
   }
 }
+
+/* Các live đang theo dõi cùng lúc */
+.active-lives-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 0 12px;
+  scrollbar-width: none;
+}
+.active-lives-strip::-webkit-scrollbar {
+  display: none;
+}
+.live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 38px;
+  padding: 0 6px 0 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-light);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  cursor: pointer;
+}
+.live-chip.all {
+  padding: 0 14px;
+}
+.live-chip.active {
+  background: #fff1e6;
+  border-color: #f4a56f;
+}
+.live-chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #16a34a;
+  flex: 0 0 auto;
+}
+.live-chip-dot.connecting,
+.live-chip-dot.reconnecting {
+  background: #f59e0b;
+}
+.live-chip-meta {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+.live-chip-stop {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: #f4f1ec;
+  color: var(--text-sub);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.comment-live-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-sub);
+}
+.btn-load-older-comments {
+  width: 100%;
+  margin-top: 12px;
+  padding: 11px 16px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-pill);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  cursor: pointer;
+}
+.btn-load-older-comments:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.saved-live-following {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #15803d;
+  white-space: nowrap;
+}
+.sync-phone-guide {
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  background: #fbf9f6;
+  font-size: 13px;
+}
+.sync-guide-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  color: var(--text-sub);
+}
+.sync-guide-row b {
+  color: var(--text-main);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.sync-guide-note {
+  margin-top: 8px;
+  color: var(--text-sub);
+  line-height: 1.45;
+}
+.sync-guide-url {
+  margin-top: 6px;
+  font-weight: 700;
+  color: var(--text-main);
+  overflow-wrap: anywhere;
+}

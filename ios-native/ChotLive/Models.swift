@@ -312,11 +312,14 @@ struct Snapshot: Codable {
     var accounts: [TikTokAccount] = []
     var activeAccountId: String?
     var keywords: [String]?
+    /// nil: file của bản chưa đồng bộ, toàn bộ dữ liệu trên máy sẽ được gửi lên ở lần nối đầu tiên.
+    var sync: SyncState?
 
     init(comments: [LiveComment], customers: [Customer], sessions: [LiveSession], accounts: [TikTokAccount],
-         activeAccountId: String?, keywords: [String]?) {
+         activeAccountId: String?, keywords: [String]?, sync: SyncState? = nil) {
         self.comments = comments; self.customers = customers; self.sessions = sessions
         self.accounts = accounts; self.activeAccountId = activeAccountId; self.keywords = keywords
+        self.sync = sync
     }
 
     // Tương thích file lưu của phiên bản cũ (chỉ có comments + customers)
@@ -328,5 +331,6 @@ struct Snapshot: Codable {
         accounts = try c.decodeIfPresent([TikTokAccount].self, forKey: .accounts) ?? []
         activeAccountId = try c.decodeIfPresent(String.self, forKey: .activeAccountId)
         keywords = try c.decodeIfPresent([String].self, forKey: .keywords)
+        sync = try c.decodeIfPresent(SyncState.self, forKey: .sync)
     }
 }

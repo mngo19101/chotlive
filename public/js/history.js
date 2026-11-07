@@ -58,17 +58,34 @@ export async function endSession() {
   try { await tx(['sessions'], 'readwrite', (t) => t.objectStore('sessions').put(s)); } catch {}
 }
 
-export function saveComment(c) {
-  if (!current) {
-    // Chưa có phiên (vd. mất kết nối rồi tự nối lại) -> tạo phiên ngầm
-    startSession(c.live || 'live');
+/** Phiên do server tạo: nhiều live ghi cùng lúc, mỗi bình luận vào đúng phiên của nó. */
+const serverSessions = new Map();
+
+function serverSessionOf(c, ts) {
+  let s = serverSessions.get(c.sessionId);
+  if (!s) {
+    s = { id: c.sessionId, username: c.live || 'live', startTs: ts, endTs: ts, count: 0, priceCount: 0 };
+    serverSessions.set(c.sessionId, s);
   }
-  const s = current;
-  if (!s) return;
+  return s;
+}
+
+export function saveComment(c) {
   const ts = c.ts || Date.now();
+  let s;
+  if (c.sessionId) {
+    s = serverSessionOf(c, ts);
+  } else {
+    if (!current) {
+      // Chưa có phiên (vd. mất kết nối rồi tự nối lại) -> tạo phiên ngầm
+      startSession(c.live || 'live');
+    }
+    s = current;
+  }
+  if (!s) return;
   s.count += 1;
   if (c.price) s.priceCount += 1;
-  s.endTs = ts;
+  s.endTs = Math.max(s.endTs || 0, ts);
   pending.push({
     key: s.id + '|' + (c.id || ts + Math.random()),
     sessionId: s.id,
@@ -92,13 +109,42 @@ async function flush() {
   const batch = pending;
   pending = [];
   const s = current;
+  const touched = [...serverSessions.values()].map((x) => ({ ...x }));
+  for (const x of serverSessions.values()) {
+    x.count = 0;
+    x.priceCount = 0;
+  }
   try {
     await tx(['comments', 'sessions'], 'readwrite', (t) => {
       const cs = t.objectStore('comments');
       batch.forEach((r) => cs.put(r));
-      if (s) t.objectStore('sessions').put(s);
+      const ss = t.objectStore('sessions');
+      if (s) ss.put(s);
+      // Mở lại trang vẫn cộng dồn vào phiên đã có, không ghi đè số đếm cũ.
+      touched.forEach((x) => {
+        const req = ss.get(x.id);
+        req.onsuccess = () => {
+          const old = req.result;
+          ss.put({
+            ...x,
+            startTs: old ? Math.min(old.startTs, x.startTs) : x.startTs,
+            endTs: old ? Math.max(old.endTs, x.endTs) : x.endTs,
+            count: (old?.count || 0) + x.count,
+            priceCount: (old?.priceCount || 0) + x.priceCount
+          });
+        };
+      });
     });
-  } catch { pending = batch.concat(pending); }
+  } catch {
+    pending = batch.concat(pending);
+    for (const x of touched) {
+      const live = serverSessions.get(x.id);
+      if (live) {
+        live.count += x.count;
+        live.priceCount += x.priceCount;
+      }
+    }
+  }
 }
 
 window.addEventListener('beforeunload', () => { flush(); });

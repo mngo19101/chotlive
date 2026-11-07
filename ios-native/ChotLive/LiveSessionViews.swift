@@ -18,10 +18,22 @@ struct LiveNewSheet: View {
     @EnvironmentObject var ui: AppUI
     @State private var input = ""
     @State private var remember = true
+    /// ID vừa bấm theo dõi, đang chờ server nối xong.
+    @State private var pendingId: String?
 
-    private var isConnecting: Bool { client.liveState == "connecting" }
-    private var isConnected: Bool { client.liveState == "connected" }
-    private var hasError: Bool { ["error", "ended", "disconnected"].contains(client.liveState) && !client.liveMessage.isEmpty }
+    private var isConnecting: Bool {
+        guard client.serverSupportsSync else { return client.liveState == "connecting" }
+        guard let pendingId else { return false }
+        return client.live(for: pendingId)?.state != "connected"
+    }
+    private var errorMessage: String? {
+        if client.serverSupportsSync {
+            guard let e = client.lastLiveEvent, e.state == "error" || e.state == "ended", !e.message.isEmpty else { return nil }
+            return e.username.isEmpty ? e.message : "@\(e.username): \(e.message)"
+        }
+        let failed = ["error", "ended", "disconnected"].contains(client.liveState) && !client.liveMessage.isEmpty
+        return failed ? client.liveMessage : nil
+    }
     private var liveId: String? { LiveId.parse(input) }
     private var inputEmpty: Bool { input.trimmingCharacters(in: .whitespaces).isEmpty }
     private var inputInvalid: Bool { !inputEmpty && liveId == nil }
@@ -37,29 +49,63 @@ struct LiveNewSheet: View {
     }
 
     var body: some View {
-        Group {
-            if isConnected { connectedBody } else { startBody }
-        }
-        .onChange(of: client.liveState) { state in
-            if state == "connected" {
+        startBody
+            .onChange(of: client.lives) { lives in
+                guard let id = pendingId, let live = lives.first(where: { $0.id == id.lowercased() }),
+                      live.state == "connected" else { return }
+                pendingId = nil
+                ui.dismissSheet()
+                if !live.sessionId.isEmpty { ui.push(.session(live.sessionId)) }
+            }
+            .onChange(of: client.lastLiveEvent?.message) { message in
+                // Live vừa bấm không vào được: mở lại nút để người dùng thử ID khác.
+                if message != nil, let e = client.lastLiveEvent, e.username.lowercased() == pendingId?.lowercased() {
+                    pendingId = nil
+                }
+            }
+            .onChange(of: client.liveState) { state in
+                // Server bản cũ: mỗi tài khoản chỉ một live.
+                guard !client.serverSupportsSync, state == "connected" else { return }
                 ui.dismissSheet()
                 if let open = store.openSession { ui.push(.session(open.id)) }
             }
-        }
     }
 
-    /// PDF chưa có mẫu cho trường hợp đang live; giữ tạm để vẫn dừng được phiên.
-    private var connectedBody: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SheetTitle(title: "Live mới", size: 23).padding(.top, 6)
-            T("Đang đọc live @\(client.liveUsername) · \(client.viewers) người xem", 14, .medium, Theme.muted)
-            PrimaryButton(title: "Xem phiên đang live") {
-                ui.dismissSheet()
-                if let open = store.openSession { ui.push(.session(open.id)) }
+    /// Các live đang theo dõi; thêm live mới không làm dừng các live này.
+    private var followingSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                T("Đang theo dõi", 15, .bold)
+                Spacer()
+                T("\(client.lives.count) live", 12.5, .medium, Theme.muted)
             }
-            OutlineButton(title: "Dừng phiên live", color: Theme.red, height: 52) { client.disconnectLive() }
+            ForEach(client.lives) { live in
+                HStack(spacing: 10) {
+                    Circle().fill(live.state == "connected" ? Theme.green : Theme.orange).frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 1) {
+                        T("@" + live.username, 14.5, .bold).lineLimit(1)
+                        T(live.state == "connected" ? "\(live.viewers) người xem" : "Đang nối lại...", 12.5, .medium, Theme.muted)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Button { client.disconnectLive(live.username) } label: {
+                        T("Dừng", 13.5, .bold, Theme.red)
+                            .frame(width: 64, height: 34)
+                            .background(Capsule().fill(Theme.card).overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1)))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 58)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard !live.sessionId.isEmpty else { return }
+                    ui.dismissSheet()
+                    ui.push(.session(live.sessionId))
+                }
+                .cardStyle(18)
+            }
         }
-        .padding(.horizontal, Metrics.gutter)
     }
 
     private var startBody: some View {
@@ -68,6 +114,9 @@ struct LiveNewSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     SheetTitle(title: "Live mới", subtitle: "Chọn ID đã lưu hoặc nhập ID TikTok Live mới", size: 23)
                         .padding(.top, 7)
+                    if !client.lives.isEmpty {
+                        followingSection.padding(.top, 17.8)
+                    }
                     if !saved.isEmpty {
                         HStack {
                             T("ID đã lưu", 15, .bold)
@@ -89,8 +138,8 @@ struct LiveNewSheet: View {
                     } else {
                         T("Nhập tên tài khoản đang live hoặc dán link phiên live.", 12.5, .medium, Theme.muted).padding(.top, 5.6)
                     }
-                    if hasError {
-                        T(client.liveMessage, 12.5, .medium, Theme.red).padding(.top, 4)
+                    if let errorMessage {
+                        T(errorMessage, 12.5, .medium, Theme.red).padding(.top, 4)
                     }
                     rememberRow.padding(.top, 16.5)
                 }
@@ -100,7 +149,8 @@ struct LiveNewSheet: View {
             .scrollDismissesKeyboard(.interactively)
 
             HairLine()
-            PrimaryButton(title: isConnecting ? "Đang kết nối..." : "Bắt đầu live", fontSize: 18, height: 55.5,
+            PrimaryButton(title: isConnecting ? "Đang kết nối..." : (client.lives.isEmpty ? "Bắt đầu live" : "Theo dõi thêm live này"),
+                          fontSize: 18, height: 55.5,
                           enabled: canStart) {
                 if let id = liveId {
                     startNew(id)
@@ -117,17 +167,26 @@ struct LiveNewSheet: View {
     private func start(_ account: TikTokAccount) {
         guard !isConnecting else { return }
         store.unsavedLiveId = nil
-        store.selectAccount(account.id)
+        // Đang theo dõi live khác thì giữ nguyên ID đang chọn.
+        if client.lives.isEmpty { store.selectAccount(account.id) }
+        pendingId = account.uniqueId
         client.connectLive(tiktok: account.uniqueId)
     }
 
     private func startNew(_ id: String) {
+        // Live này đang được theo dõi rồi: mở luôn phiên của nó.
+        if let running = client.live(for: id), running.state == "connected", !running.sessionId.isEmpty {
+            ui.dismissSheet()
+            ui.push(.session(running.sessionId))
+            return
+        }
         if remember {
             store.unsavedLiveId = nil
             store.addAccount(uniqueId: id, displayName: "", activate: true)
         } else {
             store.unsavedLiveId = id.lowercased()
         }
+        pendingId = id
         client.connectLive(tiktok: id)
     }
 
@@ -141,12 +200,22 @@ struct LiveNewSheet: View {
 
     /// Không cho xoá ID đang live hoặc đang kết nối, tránh mất dấu phiên đang mở.
     private func isLive(_ account: TikTokAccount) -> Bool {
-        (isConnecting || isConnected) && account.uniqueId.lowercased() == client.liveUsername.lowercased()
+        client.live(for: account.uniqueId) != nil
+            || (!client.serverSupportsSync && client.liveState != "idle" && account.uniqueId.lowercased() == client.liveUsername.lowercased())
     }
 
     private func savedCard(_ account: TikTokAccount) -> some View {
         let active = account.id == store.activeAccountId
-        return Button { start(account) } label: {
+        let following = client.live(for: account.uniqueId)
+        return Button {
+            if let following {
+                guard !following.sessionId.isEmpty else { return }
+                ui.dismissSheet()
+                ui.push(.session(following.sessionId))
+            } else {
+                start(account)
+            }
+        } label: {
             HStack(spacing: 0) {
                 Avatar(text: account.initials, size: 44, fontSize: 15, seed: account.id)
                 VStack(alignment: .leading, spacing: 1) {
@@ -158,7 +227,7 @@ struct LiveNewSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 12)
                 .padding(.trailing, 8)
-                T("Bắt đầu", 15, .bold)
+                T(following == nil ? "Bắt đầu" : "Đang live", 15, .bold)
                     .fixedSize()
                     .frame(width: 88, height: 36)
                     .background(
@@ -241,6 +310,7 @@ struct LiveNewSheet: View {
 struct SessionDetailView: View {
     let sessionId: String
     @EnvironmentObject var store: Store
+    @EnvironmentObject var client: LiveClient
     @EnvironmentObject var printer: PrinterManager
     @EnvironmentObject var ui: AppUI
     @State private var tab = 0 // 0 tất cả, 1 chốt đơn, 2 khách mới
@@ -304,6 +374,11 @@ struct SessionDetailView: View {
                         if searching { SearchField(text: $search) }
                         if let s = session { summaryCard(s) }
                         tabs(total: session?.commentCount ?? comments.count, count)
+                        if let total = session?.commentCount, total > comments.count, tab == 0, search.isEmpty {
+                            T("Điện thoại đang hiện \(comments.count) bình luận mới nhất. Xem đủ \(total) bình luận trên web.", 12.5, .medium, Theme.muted)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         if shown.isEmpty {
                             T(session?.isLive == true ? "Đang chờ bình luận..." : "Không có bình luận phù hợp.", 13, .medium, Theme.muted)
                                 .padding(.top, 24)
@@ -391,6 +466,21 @@ struct SessionDetailView: View {
             HStack(spacing: 8) {
                 if s.isLive { Circle().fill(Theme.live).frame(width: 8, height: 8) }
                 T(s.tiktok.isEmpty ? "Tài khoản TikTok" : "@\(s.tiktok)", 13.5, .medium, Theme.muted).lineLimit(1)
+                if s.isLive, client.live(for: s.tiktok)?.state == "reconnecting" {
+                    T("· đang nối lại", 12.5, .medium, Theme.accent).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if s.isLive, client.live(for: s.tiktok) != nil {
+                    Button {
+                        let tiktok = s.tiktok
+                        ui.confirm = ConfirmItem(title: "Dừng theo dõi live này?", message: "@\(tiktok) sẽ không được ghi bình luận nữa. Các live khác vẫn chạy.",
+                                                 action: "Dừng") { client.disconnectLive(tiktok) }
+                    } label: {
+                        T("Dừng", 13, .bold, Theme.red)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 13)
+                }
             }
             .padding(.leading, 13)
             HStack(spacing: 0) {

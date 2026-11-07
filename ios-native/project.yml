@@ -26,6 +26,7 @@ targets:
           - BeVietnamPro-ExtraBold.ttf
         NSBluetoothAlwaysUsageDescription: Ứng dụng cần Bluetooth để kết nối và in tem qua máy in nhiệt.
         NSBluetoothPeripheralUsageDescription: Ứng dụng cần Bluetooth để kết nối máy in.
+        NSLocalNetworkUsageDescription: Ứng dụng cần mạng nội bộ để nối server ChốtLive chạy trên máy tính cùng Wi-Fi.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:

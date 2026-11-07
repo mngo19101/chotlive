@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -26,11 +27,26 @@ import {
 } from './public/js/store.js';
 import * as sqlite from './db.js';
 import { snapCollections, diffCollections, snapScalars, diffScalars } from './delta.js';
+import { parsePrice, extractProductInfo } from './public/js/price.js';
+import { LiveManager, liveKey } from './live-manager.js';
+import {
+  applyNativeUpdate,
+  durationText,
+  mergeNativeSessions,
+  nativeComment,
+  sessionName,
+  timeOf,
+  toNativeSnapshot
+} from './native-sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 const SIGN_API_KEY = process.env.SIGN_API_KEY || undefined;
 const TOKEN_TTL_MS = (Number(process.env.TOKEN_TTL_DAYS) || 30) * 24 * 60 * 60 * 1000;
+/** Số bình luận mới nhất giữ sẵn trong dữ liệu đồng bộ. Toàn bộ nằm trong bảng live_comments. */
+const COMMENT_WINDOW = 500;
+const MAX_LIVES_PER_USER = 10;
+const SESSION_RESUME_MS = 5 * 60 * 1000;
 
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
@@ -309,6 +325,10 @@ function loadAllStatesByUser() {
 
 const statesByUserId = loadAllStatesByUser();
 
+for (const [uid, st] of Object.entries(statesByUserId)) {
+  if (Array.isArray(st.comments)) sqlite.insertComments(db, uid, st.comments);
+}
+
 function getStateForUser(userId) {
   const key = userId || 'u_admin';
   const u = usersDb.users.find((x) => x.id === key);
@@ -320,7 +340,9 @@ function getStateForUser(userId) {
       : createEmptyUserState(u?.displayName || u?.username || 'Shop mới');
     persistAllStates(key);
   } else if (!isDefaultAdmin && !statesByUserId[key].isCleanAccount) {
-    statesByUserId[key] = createEmptyUserState(u?.displayName || u?.username || 'Shop mới');
+    // Chỉ đánh dấu cờ, KHÔNG xoá dữ liệu thật của người dùng (trước đây xoá nhầm dữ liệu
+    // của các tài khoản được migrate từ file JSON cũ, do thiếu cờ isCleanAccount).
+    statesByUserId[key].isCleanAccount = true;
     persistAllStates(key);
   }
   return statesByUserId[key];
@@ -333,12 +355,13 @@ let dirtyAllStates = false;
 function persistAllStates(userId) {
   if (userId) dirtyStates.add(userId);
   else dirtyAllStates = true;
-  clearTimeout(saveStateTimer);
-  saveStateTimer = setTimeout(flushStates, 150);
+  // Hẹn giờ một lần: bình luận về liên tục không được đẩy lùi việc ghi mãi.
+  if (!saveStateTimer) saveStateTimer = setTimeout(flushStates, 150);
 }
 
 function flushStates() {
   clearTimeout(saveStateTimer);
+  saveStateTimer = null;
   const ids = dirtyAllStates ? Object.keys(statesByUserId) : [...dirtyStates];
   dirtyAllStates = false;
   dirtyStates.clear();
@@ -354,6 +377,7 @@ function flushStates() {
 }
 
 function flushAllAndExit() {
+  liveManager.stopAll();
   flushStates();
   flushUsersDb();
   process.exit(0);
@@ -614,6 +638,7 @@ app.post('/api/admin/users/:id/lock', requireAdmin, (req, res) => {
 
   target.locked = Boolean(locked);
   if (target.locked) {
+    liveManager.stop(target.id);
     revokeUserTokens(target.id);
     // Đẩy thông báo khoá tài khoản tức thì tới mọi thiết bị của user đó đang mở
     broadcastToUser(target.id, {
@@ -679,6 +704,7 @@ app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Không thể xoá tài khoản Admin gốc.' });
   }
 
+  liveManager.stop(target.id);
   revokeUserTokens(target.id);
   broadcastToUser(target.id, {
     type: 'account_locked',
@@ -715,8 +741,39 @@ app.get('/api/state', requireAuth, (req, res) => {
     rev: userState.rev,
     clientsCount: countOnlineClientsForUser(userId),
     liveStatus: getLiveStatus(userId),
+    lives: liveManager.list(userId),
     state: userState
   });
+});
+
+/** Lịch sử bình luận: `before` lấy dần về quá khứ, `since` lấy phần mới hơn một mốc (app nối lại). */
+app.get('/api/comments', requireAuth, (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 1000);
+  const rows = sqlite.listComments(db, req.user.id, {
+    sessionId: req.query.sessionId ? String(req.query.sessionId) : '',
+    before: Number(req.query.before) || 0,
+    since: Number(req.query.since) || 0,
+    limit: limit + 1
+  });
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  res.json({ ok: true, hasMore, comments: req.query.format === 'native' ? page.map(nativeComment) : page });
+});
+
+/** Địa chỉ trong mạng nội bộ để nhập trên điện thoại khi chạy server ở máy tính. */
+function lanAddresses() {
+  const out = [];
+  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
+    if (/vmware|virtual|vethernet|vbox|wsl|docker|loopback|hyper-v|tailscale|zerotier/i.test(name)) continue;
+    for (const a of addrs || []) {
+      if (a.family === 'IPv4' && !a.internal && isPrivateIPv4(a.address)) out.push(`http://${a.address}:${PORT}`);
+    }
+  }
+  return out;
+}
+
+app.get('/api/server-info', requireAuth, (req, res) => {
+  res.json({ ok: true, lanUrls: lanAddresses(), account: req.user.displayName || req.user.username });
 });
 
 app.post('/api/sync', requireAuth, (req, res) => {
@@ -737,6 +794,8 @@ app.post('/api/reset', requireAuth, (req, res) => {
   const user = req.user;
   const userId = user.id;
   const { clientId = '' } = req.body || {};
+  liveManager.stop(userId);
+  sqlite.clearComments(db, userId);
   statesByUserId[userId] = isDefaultAdminUser(userId)
     ? createDefaultSharedState(user?.displayName || 'Shop Hoa Hồng')
     : createEmptyUserState(user?.displayName || user?.username || 'Shop mới');
@@ -837,7 +896,7 @@ function broadcastAdminUsersUpdate() {
 
 function broadcastStateUpdate(userId, payloadFull, delta, scalars, baseRev, excludeWs = null) {
   if (!userId) return;
-  const fullMsg = JSON.stringify(payloadFull);
+  let fullMsg = null;
   const deltaMsg = delta
     ? JSON.stringify({
         type: 'state_delta',
@@ -850,11 +909,46 @@ function broadcastStateUpdate(userId, payloadFull, delta, scalars, baseRev, excl
       })
     : null;
   wss.clients.forEach((client) => {
-    if (client === excludeWs || client.readyState !== 1 || client.userId !== userId) return;
+    if (client === excludeWs || client.readyState !== 1 || client.userId !== userId || client.native) return;
     try {
-      client.send(client.delta && deltaMsg ? deltaMsg : fullMsg);
+      if (client.delta && deltaMsg) {
+        client.send(deltaMsg);
+      } else {
+        fullMsg ??= JSON.stringify(payloadFull);
+        client.send(fullMsg);
+      }
     } catch {}
   });
+}
+
+/* App iOS nhận dữ liệu đã chuyển sang định dạng của app. */
+const nativeStateTimers = new Map();
+
+function nativeStateMessage(userId) {
+  const st = getStateForUser(userId);
+  return { type: 'native_state', rev: st.rev, snapshot: toNativeSnapshot(st) };
+}
+
+function sendNativeStateNow(userId) {
+  let msg = null;
+  wss.clients.forEach((client) => {
+    if (client.readyState !== 1 || client.userId !== userId || !client.native) return;
+    try {
+      msg ??= JSON.stringify(nativeStateMessage(userId));
+      client.send(msg);
+    } catch {}
+  });
+}
+
+function scheduleNativeState(userId) {
+  if (nativeStateTimers.has(userId)) return;
+  nativeStateTimers.set(
+    userId,
+    setTimeout(() => {
+      nativeStateTimers.delete(userId);
+      sendNativeStateNow(userId);
+    }, 150)
+  );
 }
 
 function broadcastClientCountForUser(userId) {
@@ -868,52 +962,14 @@ function broadcastClientCountForUser(userId) {
   broadcastAdminUsersUpdate();
 }
 
-function applyIncomingStateForUser(userId, incoming, action = 'update', clientId = '', excludeWs = null) {
+/** Thay đổi dữ liệu của một tài khoản rồi báo cho mọi thiết bị của tài khoản đó. */
+function mutateState(userId, action, clientId, excludeWs, fn) {
   const targetState = getStateForUser(userId);
   const beforeCols = snapCollections(targetState);
   const beforeScalars = snapScalars(targetState);
   const baseRev = targetState.rev;
-  const isClean = !isDefaultAdminUser(userId);
-  const demoOrderIds = new Set(initialOrders.map((o) => o.id));
-  const demoCustIds = new Set(initialCustomers.map((c) => c.id));
-  const demoCommentIds = new Set(initialComments.map((c) => c.id));
-  const demoSessionIds = new Set(initialSessions.map((s) => s.id));
-  const demoAccIds = new Set((DEFAULT_SETTINGS.accounts || []).map((a) => a.id));
 
-  if (Array.isArray(incoming.orders)) {
-    targetState.orders = isClean ? incoming.orders.filter((o) => !demoOrderIds.has(o.id)) : incoming.orders;
-  }
-  if (Array.isArray(incoming.customers)) {
-    targetState.customers = isClean ? incoming.customers.filter((c) => !demoCustIds.has(c.id)) : incoming.customers;
-  }
-  if (Array.isArray(incoming.comments)) {
-    const cmts = isClean ? incoming.comments.filter((c) => !demoCommentIds.has(c.id)) : incoming.comments;
-    targetState.comments = cmts.slice(0, 100);
-  }
-  if (Array.isArray(incoming.sessions)) {
-    targetState.sessions = isClean ? incoming.sessions.filter((s) => !demoSessionIds.has(s.id)) : incoming.sessions;
-  }
-  if (Array.isArray(incoming.accounts)) {
-    targetState.accounts = isClean ? incoming.accounts.filter((a) => !demoAccIds.has(a.id)) : incoming.accounts;
-  }
-  if (Array.isArray(incoming.prints)) targetState.prints = incoming.prints.slice(0, 100);
-  if (incoming.settings && typeof incoming.settings === 'object') {
-    targetState.settings = { ...targetState.settings, ...incoming.settings };
-    if (isClean && Array.isArray(targetState.settings.accounts)) {
-      targetState.settings.accounts = targetState.accounts;
-    }
-  }
-  if (incoming.salesMetrics && typeof incoming.salesMetrics === 'object') {
-    targetState.salesMetrics = { ...targetState.salesMetrics, ...incoming.salesMetrics };
-  }
-  if (typeof incoming.seq === 'number') targetState.seq = Math.max(targetState.seq || 0, incoming.seq);
-  if (typeof incoming.selectedCustomerUniqueId === 'string') {
-    targetState.selectedCustomerUniqueId = incoming.selectedCustomerUniqueId;
-  }
-  if (typeof incoming.activeSessionId === 'string') {
-    targetState.activeSessionId = incoming.activeSessionId;
-  }
-  targetState.isCleanAccount = isClean;
+  fn(targetState);
 
   targetState.rev = (targetState.rev || 1) + 1;
   targetState.updatedAt = Date.now();
@@ -934,16 +990,140 @@ function applyIncomingStateForUser(userId, incoming, action = 'update', clientId
     baseRev,
     excludeWs
   );
-
+  scheduleNativeState(userId);
   return targetState;
+}
+
+function trimCommentWindow(st) {
+  st.comments.sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0));
+  if (st.comments.length > COMMENT_WINDOW) st.comments.length = COMMENT_WINDOW;
+}
+
+/**
+ * Bình luận do thiết bị gửi lên chỉ được thêm hoặc đánh dấu "đã in", không bao giờ xoá:
+ * trước đây mỗi thiết bị ghi đè cả danh sách nên mất bình luận của nhau.
+ */
+function mergeIncomingComments(userId, st, incoming) {
+  if (!Array.isArray(st.comments)) st.comments = [];
+  const byId = new Map(st.comments.map((c) => [String(c.id), c]));
+  let added = false;
+  // Lần đồng bộ đầu của app có thể gửi hàng nghìn bình luận: ghi gộp một lần cho nhanh.
+  sqlite.tx(db, () => {
+    for (const c of incoming) {
+      if (!c || c.id == null) continue;
+      const id = String(c.id);
+      const known = byId.get(id);
+      if (known) {
+        if (c.printed && !known.printed) {
+          known.printed = true;
+          sqlite.updateComment(db, userId, known);
+        }
+        continue;
+      }
+      if (sqlite.insertComment(db, userId, c)) {
+        st.comments.push(c);
+        byId.set(id, c);
+        added = true;
+      } else if (c.printed) {
+        sqlite.markCommentPrinted(db, userId, id);
+      }
+    }
+  });
+  if (added) trimCommentWindow(st);
+}
+
+function markCommentsPrinted(userId, st, ids) {
+  for (const id of ids) {
+    const known = st.comments?.find((c) => String(c.id) === String(id));
+    if (known) {
+      if (!known.printed) {
+        known.printed = true;
+        sqlite.updateComment(db, userId, known);
+      }
+    } else {
+      sqlite.markCommentPrinted(db, userId, String(id));
+    }
+  }
+}
+
+function applyIncomingStateForUser(userId, incoming, action = 'update', clientId = '', excludeWs = null) {
+  const isClean = !isDefaultAdminUser(userId);
+  const demoOrderIds = new Set(initialOrders.map((o) => o.id));
+  const demoCustIds = new Set(initialCustomers.map((c) => c.id));
+  const demoCommentIds = new Set(initialComments.map((c) => c.id));
+  const demoAccIds = new Set((DEFAULT_SETTINGS.accounts || []).map((a) => a.id));
+
+  return mutateState(userId, action, clientId, excludeWs, (targetState) => {
+    if (Array.isArray(incoming.orders)) {
+      targetState.orders = isClean ? incoming.orders.filter((o) => !demoOrderIds.has(o.id)) : incoming.orders;
+    }
+    if (Array.isArray(incoming.customers)) {
+      targetState.customers = isClean ? incoming.customers.filter((c) => !demoCustIds.has(c.id)) : incoming.customers;
+    }
+    if (Array.isArray(incoming.comments)) {
+      mergeIncomingComments(userId, targetState, isClean ? incoming.comments.filter((c) => !demoCommentIds.has(c?.id)) : incoming.comments);
+    }
+    // Phiên live do server ghi. Chỉ tài khoản demo mới có phiên mẫu từ thiết bị.
+    if (Array.isArray(incoming.sessions) && !isClean) {
+      targetState.sessions = incoming.sessions;
+    }
+    if (Array.isArray(incoming.accounts)) {
+      targetState.accounts = isClean ? incoming.accounts.filter((a) => !demoAccIds.has(a.id)) : incoming.accounts;
+    }
+    if (Array.isArray(incoming.prints)) targetState.prints = incoming.prints.slice(0, 100);
+    if (incoming.settings && typeof incoming.settings === 'object') {
+      // Địa chỉ server là của riêng từng thiết bị, đồng bộ đi sẽ làm thiết bị khác nối nhầm server.
+      const { serverUrl: _deviceOnly, ...settings } = incoming.settings;
+      targetState.settings = { ...targetState.settings, ...settings };
+      if (isClean && Array.isArray(targetState.settings.accounts)) {
+        targetState.settings.accounts = targetState.accounts;
+      }
+    }
+    if (incoming.salesMetrics && typeof incoming.salesMetrics === 'object') {
+      targetState.salesMetrics = { ...targetState.salesMetrics, ...incoming.salesMetrics };
+    }
+    if (typeof incoming.seq === 'number') targetState.seq = Math.max(targetState.seq || 0, incoming.seq);
+    if (typeof incoming.selectedCustomerUniqueId === 'string') {
+      targetState.selectedCustomerUniqueId = incoming.selectedCustomerUniqueId;
+    }
+    if (typeof incoming.activeSessionId === 'string') {
+      targetState.activeSessionId = incoming.activeSessionId;
+    }
+    targetState.isCleanAccount = isClean;
+  });
+}
+
+/** Thay đổi từ app iOS: chỉ gồm những khách vừa đổi và các món đã xoá. */
+function applyNativeUpdateForUser(userId, update, excludeWs) {
+  return mutateState(userId, 'native_update', '', excludeWs, (st) => {
+    applyNativeUpdate(st, update);
+    if (Array.isArray(update.sessions)) mergeNativeSessions(st, update.sessions);
+    if (Array.isArray(update.comments)) {
+      const incoming = update.comments
+        .filter((c) => c && c.id != null)
+        .map((c) => toServerComment(st, { ...c, comment: c.text ?? c.comment ?? '' }));
+      mergeIncomingComments(userId, st, incoming);
+    }
+    const printed = [];
+    for (const c of update.customers || []) {
+      for (const it of c?.items || []) {
+        const id = it?.commentId || it?.id;
+        if (id && it.printed) printed.push(id);
+      }
+    }
+    if (Array.isArray(update.printedCommentIds)) printed.push(...update.printedCommentIds);
+    markCommentsPrinted(userId, st, printed);
+  });
 }
 
 /** Chuẩn hoá username: bỏ @, bỏ link */
 function normalizeUsername(input = '') {
-  let u = String(input).trim();
-  const m = u.match(/(?:tiktok\.com\/)?@?([^/?#&]+)/i);
-  if (m) u = m[1];
-  return u.replace(/^@/, '').trim();
+  const u = String(input).trim();
+  // Link phiên live: lấy phần sau dấu @.
+  const inLink = u.match(/@([\w.-]+)/);
+  if (inLink) return inLink[1];
+  const plain = u.match(/^[^/?#&\s]+$/);
+  return plain ? plain[0] : '';
 }
 
 function slugify(str = '') {
@@ -955,17 +1135,10 @@ function slugify(str = '') {
     .replace(/^_+|_+$/g, '');
 }
 
-function mapChat(data) {
+function mapChat(data, kind = 'chat') {
   const user = data.user || {};
-  const pic = user.profilePicture || user.avatarThumb || user.avatarMedium || user.avatarLarge || {};
-  const avatar =
-    (Array.isArray(pic.url) && pic.url[0]) ||
-    (Array.isArray(pic.urlList) && pic.urlList[0]) ||
-    data.profilePictureUrl ||
-    '';
-
   const displayId = (user.displayId || data.displayId || user.uniqueId || data.uniqueId || '').toString().trim();
-  const userId = (user.idStr || user.id || data.userId || '').toString().trim();
+  const userId = (user.idStr || user.userId || user.id || data.userId || '').toString().trim();
   const nickname = (user.nickname || data.nickname || displayId || '').toString().trim();
 
   const uniqueId =
@@ -973,18 +1146,53 @@ function mapChat(data) {
     (userId ? `user_${userId.slice(-6)}` : '') ||
     (nickname ? slugify(nickname) : '') ||
     `khach_${Math.random().toString(36).slice(2, 7)}`;
-  const secUid = (user.secUid || '').toString();
 
+  const rawTs = Number(data.common?.createTime) || 0;
+  const created = rawTs > 0 && rawTs < 1e12 ? rawTs * 1000 : rawTs;
+  // Đồng hồ TikTok lệch quá xa thì dùng giờ server.
+  const ts = Math.abs(Date.now() - created) < 6 * 60 * 60 * 1000 ? created : Date.now();
+
+  const text = data.comment || data.content || '';
+  const isSticker = kind === 'emote' || (!text && (data.emotes?.length || data.emoteList?.length));
+  const comment = text || (isSticker ? '[Sticker]' : '');
+
+  // Có mã tin của TikTok thì nối lại không bị trùng; không có thì dựng mã ổn định từ nội dung.
+  const msgId = data.common?.msgId || data.msgId;
+  const id = String(
+    msgId && String(msgId) !== '0'
+      ? msgId
+      : crypto.createHash('sha1').update(`${userId}|${uniqueId}|${comment}|${rawTs}`).digest('hex').slice(0, 24)
+  );
+
+  return { id, userId, uniqueId, nickname: nickname || uniqueId, comment, ts };
+}
+
+function priceOptionsOf(st) {
+  const s = st.settings || {};
+  return { multiplier: Number(s.multiplier) || 1000, minPrice: 1, maxPrice: Number(s.maxPrice) || 1e12 };
+}
+
+/** Đủ các trường web cần để hiện bình luận. */
+function toServerComment(st, c) {
+  const ts = Number(c.ts) || Date.now();
+  const text = c.comment || '';
+  const price = parsePrice(text, priceOptionsOf(st)) || 0;
+  const info = extractProductInfo(text, price);
   return {
-    id: String(data.common?.msgId || data.msgId || `${Date.now()}-${Math.random().toString(36).slice(2)}`),
-    userId: userId || '',
-    secUid,
-    uniqueId,
-    nickname: nickname || uniqueId,
-    avatar,
-    profileUrl: `https://www.tiktok.com/@${uniqueId}`,
-    comment: data.comment || data.content || '',
-    ts: Date.now()
+    id: String(c.id),
+    uniqueId: c.uniqueId || '',
+    userId: String(c.userId || ''),
+    nickname: c.nickname || c.uniqueId || '',
+    comment: text,
+    price,
+    productName: info.productName,
+    qty: info.quantity || 1,
+    time: timeOf(ts),
+    ts,
+    tag: price ? 'Mới' : '',
+    sessionId: c.sessionId || '',
+    live: c.live || '',
+    ...(c.printed ? { printed: true } : {})
   };
 }
 
@@ -999,74 +1207,173 @@ function friendlyError(err) {
   return 'Không kết nối được: ' + msg.slice(0, 160);
 }
 
-const liveSessions = new Map();
+/* ============================================================
+   Theo dõi TikTok Live (nhiều live cùng lúc cho mỗi tài khoản)
+   Server tự lưu bình luận và phiên, thiết bị nào mất mạng cũng không mất dữ liệu.
+   ============================================================ */
+function openSessionFor(userId, entry) {
+  const st = getStateForUser(userId);
+  if (entry.sessionId && st.sessions?.some((s) => s.id === entry.sessionId)) return;
+  const now = Date.now();
+  const key = liveKey(entry.username);
+  mutateState(userId, 'session_started', '', null, (state) => {
+    if (!Array.isArray(state.sessions)) state.sessions = [];
+    // Vừa dừng hoặc rớt hẳn rồi quay lại: nối tiếp phiên cũ thay vì tạo phiên mới.
+    const recent = state.sessions.find(
+      (s) => liveKey(s.tiktok) === key && (s.isLive || (s.endTs && now - s.endTs < SESSION_RESUME_MS))
+    );
+    if (recent) {
+      recent.isLive = true;
+      recent.endTs = null;
+      recent.endStr = '';
+      recent.duration = '';
+      entry.sessionId = recent.id;
+      return;
+    }
+    const session = {
+      id: 's_' + now.toString(36) + crypto.randomBytes(2).toString('hex'),
+      tiktok: entry.username,
+      name: sessionName(now),
+      startTs: now,
+      endTs: null,
+      isLive: true,
+      timeStr: timeOf(now),
+      endStr: '',
+      duration: '',
+      commentCount: 0,
+      priceCount: 0,
+      lastActivityTs: now
+    };
+    state.sessions.unshift(session);
+    entry.sessionId = session.id;
+  });
+}
+
+function closeSessionFor(userId, entry) {
+  if (!entry.sessionId) return;
+  mutateState(userId, 'session_ended', '', null, (state) => {
+    const s = state.sessions?.find((x) => x.id === entry.sessionId);
+    if (!s || !s.isLive) return;
+    const now = Date.now();
+    const last = s.lastActivityTs || s.startTs;
+    // Server tắt lâu rồi mới chạy lại: lấy mốc hoạt động cuối thay vì lúc này.
+    const end = now - last > 10 * 60 * 1000 ? last : now;
+    s.isLive = false;
+    s.endTs = end;
+    s.endStr = timeOf(end);
+    s.duration = durationText(s.startTs, end);
+  });
+}
+
+function recordLiveComment(userId, entry, data, kind) {
+  const mapped = mapChat(data, kind);
+  if (!mapped.comment) return;
+  const st = getStateForUser(userId);
+  if (!st.sessions?.some((s) => s.id === entry.sessionId)) {
+    // Lô bình luận đầu về trước khi kết nối xong, hoặc dữ liệu vừa bị đặt lại.
+    entry.sessionId = '';
+    openSessionFor(userId, entry);
+  }
+  const comment = toServerComment(st, { ...mapped, sessionId: entry.sessionId, live: entry.username });
+  // Bảng có khoá chính nên nối lại nhận lại tin cũ cũng không bị trùng.
+  if (!sqlite.insertComment(db, userId, comment)) return;
+
+  if (!Array.isArray(st.comments)) st.comments = [];
+  const at = st.comments.findIndex((c) => (Number(c.ts) || 0) <= comment.ts);
+  if (at < 0) st.comments.push(comment);
+  else st.comments.splice(at, 0, comment);
+  if (st.comments.length > COMMENT_WINDOW) st.comments.length = COMMENT_WINDOW;
+
+  const session = st.sessions.find((s) => s.id === entry.sessionId);
+  if (session) {
+    session.commentCount = (session.commentCount || 0) + 1;
+    if (comment.price) session.priceCount = (session.priceCount || 0) + 1;
+    session.lastActivityTs = Math.max(session.lastActivityTs || 0, comment.ts);
+  }
+  persistAllStates(userId);
+  broadcastToUser(userId, { type: 'chat', ...comment });
+}
+
+function broadcastLives(userId) {
+  broadcastToUser(userId, { type: 'lives', lives: liveManager.list(userId) });
+}
+
+const liveManager = new LiveManager({
+  createConnection: (username) =>
+    new TikTokLiveConnection(username, {
+      // Lấy cả lô bình luận TikTok gửi kèm lúc kết nối, để nối lại vẫn vớt được phần vừa bị lỡ.
+      processInitialData: true,
+      fetchRoomInfoOnConnect: true,
+      ...(SIGN_API_KEY ? { signApiKey: SIGN_API_KEY } : {})
+    }),
+  events: {
+    chat: WebcastEvent.CHAT,
+    emote: WebcastEvent.EMOTE,
+    roomUser: WebcastEvent.ROOM_USER,
+    streamEnd: WebcastEvent.STREAM_END,
+    disconnected: ControlEvent.DISCONNECTED,
+    error: ControlEvent.ERROR,
+    rawData: 'decodedData'
+  },
+  friendlyError,
+  log: (...args) => console.warn(...args),
+  onComment: recordLiveComment,
+  onViewers: (userId, entry) => {
+    broadcastToUser(userId, { type: 'viewers', username: entry.username, count: entry.viewers });
+  },
+  onSessionNeeded: openSessionFor,
+  onChange: (userId, entry) => {
+    broadcastToUser(userId, {
+      type: 'status',
+      state: entry.state,
+      username: entry.username,
+      message: entry.message || '',
+      roomId: entry.roomId || '',
+      sessionId: entry.sessionId || ''
+    });
+    broadcastLives(userId);
+    if (entry.state === 'connected') console.log(`[live] ${userId} theo dõi @${entry.username} room=${entry.roomId}`);
+  },
+  onEnded: (userId, entry, reason) => {
+    closeSessionFor(userId, entry);
+    broadcastToUser(userId, {
+      type: 'status',
+      state: reason === 'stopped' ? 'idle' : reason,
+      username: entry.username,
+      message: entry.message || '',
+      sessionId: entry.sessionId || ''
+    });
+    broadcastLives(userId);
+  }
+});
 
 function getLiveStatus(userId) {
-  const sess = userId ? liveSessions.get(userId) : null;
-  return sess ? sess.status : { state: 'idle', username: '', mode: 'idle' };
+  const first = userId ? liveManager.list(userId)[0] : null;
+  return first ? { state: first.state, username: first.username, mode: 'real' } : { state: 'idle', username: '', mode: 'idle' };
 }
 
-function stopUserLive(userId) {
-  const sess = liveSessions.get(userId);
-  if (!sess) return;
-  liveSessions.delete(userId);
-  try {
-    sess.conn.removeAllListeners?.();
-    sess.conn.disconnect();
-  } catch {}
-}
-
-async function startUserLive(userId, username) {
-  stopUserLive(userId);
-  const status = { state: 'connecting', username, mode: 'real' };
-  const conn = new TikTokLiveConnection(username, {
-    processInitialData: false,
-    fetchRoomInfoOnConnect: true,
-    ...(SIGN_API_KEY ? { signApiKey: SIGN_API_KEY } : {})
-  });
-  const sess = { conn, status };
-  liveSessions.set(userId, sess);
-  const isCurrent = () => liveSessions.get(userId) === sess;
-  const emit = (payload) => broadcastToUser(userId, payload);
-
-  emit({ type: 'status', state: 'connecting', username });
-
-  conn.on(WebcastEvent.CHAT, (data) => {
-    if (!isCurrent()) return;
-    emit({ type: 'chat', ...mapChat(data) });
-  });
-
-  conn.on(WebcastEvent.ROOM_USER, (data) => {
-    if (!isCurrent()) return;
-    emit({ type: 'viewers', count: Number(data.viewerCount ?? data.totalUser ?? 0) });
-  });
-
-  conn.on(WebcastEvent.STREAM_END, () => {
-    if (!isCurrent()) return;
-    emit({ type: 'status', state: 'ended', username, message: 'Phiên live đã kết thúc.' });
-    stopUserLive(userId);
-  });
-
-  conn.on(ControlEvent.DISCONNECTED, () => {
-    if (!isCurrent()) return;
-    emit({ type: 'status', state: 'disconnected', username, message: 'Mất kết nối với TikTok.' });
-  });
-
-  conn.on(ControlEvent.ERROR, (err) => {
-    console.warn('[live error]', username, err?.message || err);
-  });
-
-  try {
-    const state = await conn.connect();
-    if (!isCurrent()) return;
-    status.state = 'connected';
-    emit({ type: 'status', state: 'connected', username, roomId: state?.roomId || '' });
-    console.log(`[live] ${userId} connected @${username} room=${state?.roomId}`);
-  } catch (err) {
-    if (!isCurrent()) return;
-    console.warn('[live] connect failed', username, err?.message || err);
-    emit({ type: 'status', state: 'error', username, message: friendlyError(err) });
-    stopUserLive(userId);
+/** Server khởi động lại giữa phiên: nối lại những live đang theo dõi. */
+function resumeLivesAfterRestart() {
+  let delay = 0;
+  for (const [userId, st] of Object.entries(statesByUserId)) {
+    const user = usersDb.users.find((u) => u.id === userId);
+    for (const s of st.sessions || []) {
+      if (!s.isLive || !s.tiktok || !s.startTs) continue;
+      if (!user || user.locked) {
+        s.isLive = false;
+        s.endTs = s.lastActivityTs || s.startTs;
+        s.endStr = timeOf(s.endTs);
+        s.duration = durationText(s.startTs, s.endTs);
+        persistAllStates(userId);
+        continue;
+      }
+      setTimeout(() => {
+        console.log(`[live] nối lại @${s.tiktok} của ${userId} sau khi khởi động`);
+        const entry = liveManager.start(userId, s.tiktok);
+        if (entry) entry.sessionId = s.id;
+      }, delay).unref?.();
+      delay += 1500;
+    }
   }
 }
 
@@ -1081,6 +1388,10 @@ wss.on('connection', (ws, req) => {
 
   ws.userId = initialUser?.id || null;
   ws.userRole = initialUser?.role || 'user';
+  ws.native = false;
+  try {
+    ws.native = new URL(req.url, 'http://localhost').searchParams.get('native') === '1';
+  } catch {}
 
   const send = (obj) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
@@ -1101,16 +1412,17 @@ wss.on('connection', (ws, req) => {
     send({
       type: 'hello',
       server: 'susu',
-      version: 3,
+      version: 4,
       rev: currentUserState.rev,
       clientsCount: countOnlineClientsForUser(ws.userId),
       liveStatus: getLiveStatus(ws.userId),
-      state: currentUserState,
+      lives: liveManager.list(ws.userId),
+      ...(ws.native ? { snapshot: toNativeSnapshot(currentUserState) } : { state: currentUserState }),
       user: sanitizeUser(initialUser)
     });
     broadcastClientCountForUser(ws.userId);
   } else {
-    send({ type: 'hello', server: 'susu', version: 3, liveStatus: getLiveStatus(null), user: null });
+    send({ type: 'hello', server: 'susu', version: 4, liveStatus: getLiveStatus(null), lives: [], user: null });
   }
 
   ws.on('message', (raw) => {
@@ -1139,11 +1451,12 @@ wss.on('connection', (ws, req) => {
       send({
         type: 'hello',
         server: 'susu',
-        version: 3,
+        version: 4,
         rev: st.rev,
         clientsCount: countOnlineClientsForUser(u.id),
         liveStatus: getLiveStatus(u.id),
-        state: st,
+        lives: liveManager.list(u.id),
+        ...(ws.native ? { snapshot: toNativeSnapshot(st) } : { state: st }),
         user: sanitizeUser(u)
       });
       broadcastClientCountForUser(prevUid);
@@ -1168,7 +1481,10 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-    if (msg.type === 'sync_update' && msg.state) {
+    if (msg.type === 'native_update') {
+      applyNativeUpdateForUser(ws.userId, msg, ws);
+      send({ type: 'native_ack', id: msg.id ?? null, clientsCount: countOnlineClientsForUser(ws.userId) });
+    } else if (msg.type === 'sync_update' && msg.state) {
       const updated = applyIncomingStateForUser(
         ws.userId,
         msg.state,
@@ -1200,10 +1516,22 @@ wss.on('connection', (ws, req) => {
     } else if (msg.type === 'connect') {
       const u = normalizeUsername(msg.username);
       if (!u) return send({ type: 'status', state: 'error', message: 'Vui lòng nhập tên TikTok.' });
-      startUserLive(ws.userId, u);
+      const running = liveManager.list(ws.userId);
+      if (!running.some((l) => liveKey(l.username) === liveKey(u)) && running.length >= MAX_LIVES_PER_USER) {
+        return send({
+          type: 'status',
+          state: 'error',
+          username: u,
+          message: `Chỉ theo dõi tối đa ${MAX_LIVES_PER_USER} live cùng lúc.`
+        });
+      }
+      liveManager.start(ws.userId, u);
+      broadcastLives(ws.userId);
     } else if (msg.type === 'disconnect') {
-      stopUserLive(ws.userId);
-      broadcastToUser(ws.userId, { type: 'status', state: 'idle' });
+      // Có tên thì chỉ dừng live đó; không có tên thì dừng tất cả (app bản cũ).
+      const u = normalizeUsername(msg.username || '');
+      liveManager.stop(ws.userId, u);
+      if (!u) broadcastToUser(ws.userId, { type: 'status', state: 'idle' });
     } else if (msg.type === 'ping') {
       const st = getStateForUser(ws.userId);
       send({
@@ -1232,4 +1560,5 @@ setInterval(() => {
 
 server.listen(PORT, () => {
   console.log(`Susu Live Order đang chạy: http://localhost:${PORT}`);
+  resumeLivesAfterRestart();
 });

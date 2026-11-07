@@ -297,6 +297,9 @@
           </div>
         </header>
 
+        <!-- Các live đang theo dõi cùng lúc -->
+        <div class="active-lives-strip" id="active-lives-strip" style="display:none"></div>
+
         <!-- KHỐI 1: TỔNG QUAN CÁC PHIÊN LIVE & TIMELINE 24H (SCREEN 2 CHUẨN MOBILE & WEB) -->
         <div class="sessions-overview-wrapper" id="sessions-timeline-overview">
           <!-- Hàng chọn ngày: <  [ Hôm nay · CN 25/10 v ]  > -->
@@ -488,6 +491,7 @@
             <div class="comment-list-stream" id="comment-stream-container">
               <!-- Render động từ JavaScript -->
             </div>
+            <button type="button" class="btn-load-older-comments" id="btn-load-older-comments" style="display:none">Xem thêm bình luận cũ hơn</button>
           </div>
 
           <!-- Cột 2: Thẻ Panel "Bình luận chốt đơn" -->
@@ -999,7 +1003,7 @@
       <div class="sheet-drag-handle"></div>
       <button class="btn-modal-close" data-close-dialog>×</button>
       <h2 class="modal-title-main">Live mới</h2>
-      <p class="modal-subtitle-text">Chọn ID đã lưu hoặc nhập ID TikTok Live mới</p>
+      <p class="modal-subtitle-text">Thêm một live để theo dõi. Các live đang theo dõi vẫn chạy tiếp.</p>
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <span style="font-size:14px;font-weight:700">ID đã lưu</span>
@@ -1032,7 +1036,7 @@
       </label>
 
       <button type="button" class="btn-orange-pill" style="width:100%;height:46px" id="btn-confirm-start-live">
-        Bắt đầu live
+        Theo dõi live này
       </button>
     </div>
   </dialog>
@@ -1250,7 +1254,7 @@
       <div class="sheet-drag-handle"></div>
       <button class="btn-modal-close" data-close-dialog>×</button>
       <h2 class="modal-title-main">Đồng bộ Web &amp; App (IPA)</h2>
-      <p class="modal-subtitle-text">Dữ liệu và thao tác giữa bản Web trên mạng và App iPhone (IPA) được đồng bộ 2 chiều theo thời gian thực.</p>
+      <p class="modal-subtitle-text">Web và điện thoại chỉ đồng bộ khi cùng <b>một server</b> và cùng <b>một tài khoản</b>.</p>
 
       <div style="padding:14px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between">
         <div>
@@ -1258,6 +1262,15 @@
           <div style="font-size:12.5px;color:#166534;margin-top:2px" id="modal-sync-devices-sub">Số thiết bị đang mở cùng lúc: 1</div>
         </div>
         <button type="button" class="btn-outline-pill" id="btn-sync-pull-now" style="padding:5px 12px;font-size:12px">Đồng bộ ngay</button>
+      </div>
+
+      <div class="sync-phone-guide" id="sync-phone-guide">
+        <div class="sync-guide-row"><span>Tài khoản trên máy này</span><b id="sync-guide-account">—</b></div>
+        <div class="sync-guide-row"><span>Server đang dùng</span><b id="sync-guide-server">—</b></div>
+        <div id="sync-guide-lan" style="display:none">
+          <div class="sync-guide-note"><b>localhost</b> chỉ mở được trên máy tính này. Trên điện thoại (cùng Wi-Fi), hãy đăng nhập server:</div>
+          <div class="sync-guide-url" id="sync-guide-lan-urls"></div>
+        </div>
       </div>
 
       <div class="form-field-group">

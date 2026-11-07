@@ -69,12 +69,15 @@ export function clearAuthSession() {
 }
 
 export function getServerBaseUrl() {
+  const onWeb = window.location.protocol === 'http:' || window.location.protocol === 'https:';
   try {
-    const saved = (localStorage.getItem(SERVER_URL_KEY) || state.settings?.serverUrl || '').trim();
+    // Trên web chỉ tin địa chỉ người dùng tự nhập trên chính máy này. settings.serverUrl từng bị
+    // đồng bộ qua lại giữa các thiết bị nên có thể là địa chỉ của máy khác.
+    const saved = (localStorage.getItem(SERVER_URL_KEY) || (onWeb ? '' : state.settings?.serverUrl) || '').trim();
     if (saved) return saved.replace(/\/+$/, '');
   } catch {}
 
-  if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+  if (onWeb) {
     return window.location.origin;
   }
 
@@ -194,6 +197,15 @@ export function onAdminUsersSync(fn) {
   adminUsersListeners.push(fn);
 }
 
+function notifyLives(lives) {
+  if (!Array.isArray(lives)) return;
+  liveEventListeners.forEach((fn) => {
+    try {
+      fn({ type: 'lives', lives });
+    } catch {}
+  });
+}
+
 function notifyStatus() {
   statusListeners.forEach((fn) => {
     try {
@@ -220,15 +232,18 @@ function buildWsUrl(baseUrl) {
 export async function pushStateToServer(currentState, action = 'update') {
   if (!getAuthToken()) return;
 
+  // Bình luận và phiên live do server ghi. Thiết bị chỉ báo bình luận nào vừa được in;
+  // gửi cả danh sách như trước sẽ ghi đè và làm mất bình luận của thiết bị khác.
+  const { serverUrl: _deviceOnly, ...settings } = currentState.settings || {};
   const payload = {
     isCleanAccount: currentState.isCleanAccount,
     orders: currentState.orders,
     customers: currentState.customers,
-    comments: currentState.comments,
+    comments: (currentState.comments || []).filter((c) => c.printed),
     sessions: currentState.sessions,
     accounts: currentState.accounts,
     prints: currentState.prints,
-    settings: currentState.settings,
+    settings,
     salesMetrics: currentState.salesMetrics,
     seq: currentState.seq,
     selectedCustomerUniqueId: currentState.selectedCustomerUniqueId,
@@ -282,6 +297,7 @@ export function sendUiEvent(eventData = {}) {
   }
 }
 
+/** Có tên live thì chỉ tác động lên live đó, không có tên thì tác động tất cả. */
 export function sendLiveCommand(type, username = '') {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
@@ -301,6 +317,7 @@ export async function fetchInitialStateFromServer() {
       syncStatus.clientsCount = data.clientsCount || 1;
       syncStatus.lastSyncTime = Date.now();
       applyRemoteState(data.state, 'initial_fetch');
+      notifyLives(data.lives);
       notifyStatus();
       return true;
     }
@@ -375,6 +392,7 @@ export function connectSync() {
       syncStatus.clientsCount = msg.clientsCount || 1;
       syncStatus.lastSyncTime = Date.now();
       applyRemoteState(msg.state, 'hello');
+      notifyLives(msg.lives);
       notifyStatus();
     } else if (msg.type === 'state_sync' && msg.state) {
       if (msg.clientId && msg.clientId === clientId) return;
@@ -399,6 +417,11 @@ export function connectSync() {
         const cur = Array.isArray(state[coll]) ? state[coll] : [];
         const byId = new Map(cur.map((x) => [String(x.id), x]));
         for (const o of c.upsert || []) byId.set(String(o.id), o);
+        if (coll === 'comments') {
+          // Bình luận chỉ thêm và cập nhật, thiết bị đang giữ cái nào thì không mất cái đó.
+          patch[coll] = [...byId.values()].sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0));
+          continue;
+        }
         patch[coll] = c.ids
           ? c.ids.map((id) => byId.get(String(id))).filter(Boolean)
           : cur.map((x) => byId.get(String(x.id)));
@@ -421,7 +444,7 @@ export function connectSync() {
           fn(msg);
         } catch {}
       });
-    } else if (msg.type === 'chat' || msg.type === 'status' || msg.type === 'viewers') {
+    } else if (msg.type === 'chat' || msg.type === 'status' || msg.type === 'viewers' || msg.type === 'lives') {
       liveEventListeners.forEach((fn) => {
         try {
           fn(msg);

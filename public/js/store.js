@@ -433,9 +433,9 @@ export function applyRemoteState(remote, action = 'remote') {
     if (Array.isArray(remote.accounts)) state.accounts = remote.accounts;
     if (Array.isArray(remote.prints)) state.prints = remote.prints;
     if (remote.settings && typeof remote.settings === 'object') {
+      // Địa chỉ server là của riêng thiết bị này.
       const keepServerUrl = state.settings?.serverUrl || '';
-      state.settings = { ...state.settings, ...remote.settings };
-      if (keepServerUrl) state.settings.serverUrl = keepServerUrl;
+      state.settings = { ...state.settings, ...remote.settings, serverUrl: keepServerUrl };
     }
     if (Array.isArray(remote.accounts) && state.settings) {
       state.settings.accounts = remote.accounts;
@@ -663,7 +663,8 @@ export function addOrMergeOrder(data) {
     price = 0,
     qty = 1,
     comment = '',
-    commentId = ''
+    commentId = '',
+    sessionId = ''
   } = data;
 
   mergeDuplicateOrders();
@@ -683,6 +684,7 @@ export function addOrMergeOrder(data) {
     const newItem = {
       id: 'it_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       commentId: commentId || '',
+      sessionId: sessionId || null,
       name: productName,
       price: Number(price) || 0,
       qty: Number(qty) || 1,
@@ -733,6 +735,7 @@ export function addOrMergeOrder(data) {
     const newItem = {
       id: 'it_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       commentId: commentId || '',
+      sessionId: sessionId || null,
       name: productName,
       price: Number(price) || 0,
       qty: Number(qty) || 1,

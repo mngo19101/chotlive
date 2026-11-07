@@ -59,11 +59,12 @@ struct MainShell: View {
             Text(item.message)
         }
         .onReceive(client.$liveState.dropFirst()) { state in
-            guard !isDemo else { return }
+            // Server mới tự ghi phiên; chỉ server bản cũ mới cần máy tự ghi.
+            guard !isDemo, !client.serverSupportsSync else { return }
             store.syncLive(state: state, username: client.liveUsername)
         }
         .onAppear {
-            if !isDemo && client.liveState == "connected" {
+            if !isDemo && !client.serverSupportsSync && client.liveState == "connected" {
                 store.syncLive(state: "connected", username: client.liveUsername)
             }
             #if DEBUG

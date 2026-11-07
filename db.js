@@ -26,6 +26,14 @@ export function openDb(file) {
       PRIMARY KEY (user_id, id)
     )`);
   }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS live_comments (
+      user_id TEXT NOT NULL, id TEXT NOT NULL, session_id TEXT, ts INTEGER NOT NULL, data TEXT NOT NULL,
+      PRIMARY KEY (user_id, id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_live_comments_ts ON live_comments (user_id, ts);
+    CREATE INDEX IF NOT EXISTS idx_live_comments_session ON live_comments (user_id, session_id, ts);
+  `);
   return db;
 }
 
@@ -113,5 +121,63 @@ export function deleteUserData(db, userId) {
   tx(db, () => {
     db.prepare('DELETE FROM settings WHERE user_id = ?').run(userId);
     for (const t of Object.values(TABLE_OF)) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
+    db.prepare('DELETE FROM live_comments WHERE user_id = ?').run(userId);
   });
+}
+
+/* Lịch sử bình luận: mỗi bình luận một dòng, trùng mã thì bỏ qua. */
+const commentRow = (c) => [String(c.id), c.sessionId ? String(c.sessionId) : null, Number(c.ts) || 0, JSON.stringify(c)];
+
+/** Trả về true nếu là bình luận mới. */
+export function insertComment(db, userId, c) {
+  const r = db
+    .prepare('INSERT OR IGNORE INTO live_comments (user_id, id, session_id, ts, data) VALUES (?, ?, ?, ?, ?)')
+    .run(userId, ...commentRow(c));
+  return Number(r.changes) > 0;
+}
+
+export function insertComments(db, userId, comments) {
+  tx(db, () => {
+    for (const c of comments) if (c && c.id != null) insertComment(db, userId, c);
+  });
+}
+
+export function updateComment(db, userId, c) {
+  db.prepare('UPDATE live_comments SET data = ? WHERE user_id = ? AND id = ?').run(JSON.stringify(c), userId, String(c.id));
+}
+
+export function markCommentPrinted(db, userId, id) {
+  const row = db.prepare('SELECT data FROM live_comments WHERE user_id = ? AND id = ?').get(userId, id);
+  if (!row) return;
+  const c = JSON.parse(row.data);
+  if (c.printed) return;
+  c.printed = true;
+  updateComment(db, userId, c);
+}
+
+export function listComments(db, userId, { sessionId = '', before = 0, since = 0, limit = 200 } = {}) {
+  const where = ['user_id = ?'];
+  const args = [userId];
+  if (sessionId) {
+    where.push('session_id = ?');
+    args.push(sessionId);
+  }
+  if (before) {
+    where.push('ts < ?');
+    args.push(before);
+  }
+  if (since) {
+    where.push('ts >= ?');
+    args.push(since);
+  }
+  // `since` đi từ cũ tới mới để app lấy dần phần còn thiếu; còn lại đi từ mới về cũ.
+  const order = since ? 'ASC' : 'DESC';
+  return db
+    .prepare(`SELECT data FROM live_comments WHERE ${where.join(' AND ')} ORDER BY ts ${order}, id ${order} LIMIT ?`)
+    .all(...args, limit)
+    .map((r) => JSON.parse(r.data));
+}
+
+export function clearComments(db, userId) {
+  db.prepare('DELETE FROM live_comments WHERE user_id = ?').run(userId);
 }
