@@ -17,11 +17,17 @@ const dmyFormat = new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, day: '
 const hourFormat = new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', hour12: false });
 const dateKeyFormat = new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: '2-digit', month: '2-digit', day: '2-digit' });
 
-export const timeOf = (ts) => hmFormat.format(new Date(ts));
-export const dayMonthOf = (ts) => dmFormat.format(new Date(ts));
+/** Mốc thời gian sai (quá lớn, không phải số) làm Intl báo lỗi: dùng giờ hiện tại thay thế. */
+function safeDate(ts) {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+}
+
+export const timeOf = (ts) => hmFormat.format(safeDate(ts));
+export const dayMonthOf = (ts) => dmFormat.format(safeDate(ts));
 
 export function sessionName(ts) {
-  const h = Number(hourFormat.format(new Date(ts))) % 24;
+  const h = Number(hourFormat.format(safeDate(ts))) % 24;
   if (h >= 5 && h < 11) return 'Phiên sáng';
   if (h >= 11 && h < 14) return 'Phiên trưa';
   if (h >= 14 && h < 18) return 'Phiên chiều';
@@ -158,7 +164,7 @@ export function toNativeSnapshot(state) {
 
   return {
     customers: [...byKey.values()],
-    sessions: (state.sessions || []).filter((s) => s.startTs).map(nativeSession),
+    sessions: (state.sessions || []).filter((s) => Number(s.startTs) > 0).map(nativeSession),
     accounts,
     activeAccountId: active ? nativeAccount(active).id : null,
     printedCommentIds: (state.comments || []).filter((c) => c.printed).map((c) => String(c.id))
@@ -178,7 +184,7 @@ function stableOrderId(customerId, groupId) {
 
 function nextOrderCode(state, ts) {
   state.seq = (Number(state.seq) || 0) + 1;
-  const [yy, mm, dd] = dateKeyFormat.format(new Date(ts)).split('-');
+  const [yy, mm, dd] = dateKeyFormat.format(safeDate(ts)).split('-');
   return `HD${yy}${mm}${dd}${String(state.seq).padStart(2, '0')}`;
 }
 
@@ -309,7 +315,7 @@ function applyNativeCustomer(state, c) {
         ts,
         timeStr: timeOf(ts),
         dateStr: dayMonthOf(ts),
-        createdDesc: `Tạo lúc ${timeOf(ts)} · ${dmyFormat.format(new Date(ts))}`,
+        createdDesc: `Tạo lúc ${timeOf(ts)} · ${dmyFormat.format(safeDate(ts))}`,
         printCount: 0,
         avatarWarm: true,
         items: [],

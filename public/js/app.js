@@ -5,7 +5,6 @@ import {
   updateOrderStatus,
   removeOrder,
   addPrint,
-  mergeDuplicateOrders,
   areSameCustomer,
   updateCustomerInfo,
   getActiveAccount,
@@ -14,7 +13,8 @@ import {
   initialComments,
   initialSalesMetrics,
   applyRemoteState,
-  onRemoteStateApplied
+  onRemoteStateApplied,
+  pendingChangeCount
 } from './store.js';
 import {
   connectSync,
@@ -33,7 +33,8 @@ import {
   clearAuthSession,
   apiFetch,
   onForceLogout,
-  onAdminUsersSync
+  onAdminUsersSync,
+  onOfflineChanges
 } from './sync.js?v=2';
 import {
   parsePrice,
@@ -59,6 +60,7 @@ import {
 import { startSession, saveComment } from './history.js';
 import { fakeLiveComment } from './demo.js';
 import { exportOrdersToCSV } from './export.js';
+import { computeSales } from './sales.js';
 
 /* ============================================================
    Helper & DOM Utilities
@@ -96,6 +98,9 @@ function toast(msg, icon = '✓', ms = 2400) {
     setTimeout(() => el.remove(), 200);
   }, ms);
 }
+
+/** Chỉ nói "đồng bộ" khi đang nối server; mất mạng thì thay đổi mới nằm trên máy. */
+const syncedWord = () => (syncStatus.connected ? ' & đồng bộ' : '');
 
 /* ============================================================
    Micro-interaction helpers
@@ -613,7 +618,6 @@ $('#active-lives-strip')?.addEventListener('click', (e) => {
 });
 
 function renderLiveView() {
-  mergeDuplicateOrders();
   renderSessionsOverview();
   renderCommentStream();
   renderClosedOrderPanel(getSelectedCustomerUid());
@@ -1337,12 +1341,12 @@ function renderCustomersView() {
                 <span class="cust-name">${esc(c.name || c.uniqueId)}</span>
                 ${tagBadge}
               </div>
-              <div class="cust-handle-time">@${esc(c.uniqueId)} · ${esc(c.timeDesc || '20:42 nay')}</div>
+              <div class="cust-handle-time">@${esc(c.uniqueId)}${c.timeDesc ? ` · ${esc(c.timeDesc)}` : ''}</div>
             </div>
           </div>
           <div class="cust-row-right">
             <span class="cust-total-spent">${formatVNDHtml(c.totalSpent || 0)}</span>
-            <span class="cust-orders-count">${c.orderCount || 1} đơn</span>
+            <span class="cust-orders-count">${Number(c.orderCount) || 0} đơn</span>
           </div>
         </div>
       `;
@@ -1357,11 +1361,14 @@ $('#customers-list-container')?.addEventListener('click', (e) => {
   }
 });
 
+const findCustomerByUid = (uniqueId) =>
+  state.customers.find((c) => (c.uniqueId || '').toLowerCase() === (uniqueId || '').toLowerCase());
+
+const joinRegion = ({ ward, district, province } = {}) => [ward, district, province].filter(Boolean).join(', ');
+
 function openCustomerProfileView(uniqueId) {
   currentProfileUniqueId = uniqueId;
-  const cust = state.customers.find(
-    (c) => (c.uniqueId || '').toLowerCase() === (uniqueId || '').toLowerCase()
-  );
+  const cust = findCustomerByUid(uniqueId);
   if (!cust) return;
 
   $('#subview-customers-list').style.display = 'none';
@@ -1381,22 +1388,23 @@ function openCustomerProfileView(uniqueId) {
     tagEl.style.display = cust.tag ? 'inline-flex' : 'none';
   }
 
-  $('#prof-total-spent').innerHTML = formatVNDHtml(cust.totalSpent || 0);
-  $('#prof-order-count').textContent = cust.orderCount || 1;
-  $('#prof-last-buy').textContent = cust.lastBuy || '25/10';
+  const custOrders = state.orders.filter((o) => areSameCustomer(o, cust));
 
+  $('#prof-total-spent').innerHTML = formatVNDHtml(cust.totalSpent || 0);
+  $('#prof-order-count').textContent = cust.orderCount || custOrders.length;
+  $('#prof-last-buy').textContent = cust.lastBuy || '—';
+
+  // Thiếu thông tin thì nói thiếu, không hiện dữ liệu mẫu trông như thật.
+  const region = joinRegion(cust);
   $('#prof-addr-receiver').textContent = cust.name;
-  $('#prof-addr-phone').textContent = cust.phone ? formatPhone(cust.phone) : '0905 123 456';
-  $('#prof-addr-street').textContent = cust.street || '25 Lê Lợi';
-  $('#prof-addr-region').textContent = cust.ward
-    ? `${cust.ward}, ${cust.district || 'Quận 1'}, ${cust.province || 'TP. Hồ Chí Minh'}`
-    : cust.address || 'Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh';
+  $('#prof-addr-phone').textContent = cust.phone ? formatPhone(cust.phone) : 'Chưa có số điện thoại';
+  $('#prof-addr-street').textContent = cust.street || (region ? '' : cust.address) || 'Chưa có địa chỉ';
+  $('#prof-addr-region').textContent = region;
   if ($('#prof-addr-note')) {
-    $('#prof-addr-note').textContent = cust.deliveryNote || 'Giao giờ hành chính, gọi trước khi giao';
+    $('#prof-addr-note').textContent = cust.deliveryNote || 'Không có ghi chú';
   }
 
-  const custOrders = state.orders.filter((o) => areSameCustomer(o, cust));
-  $('#prof-hist-count').textContent = `${cust.orderCount || custOrders.length || 12} đơn`;
+  $('#prof-hist-count').textContent = `${cust.orderCount || custOrders.length} đơn`;
 
   const histContainer = $('#prof-history-orders-list');
   if (histContainer) {
@@ -1454,72 +1462,81 @@ $('#input-search-customers')?.addEventListener('input', (e) => {
   renderCustomersView();
 });
 
+/** Khu vực đang sửa trong form địa chỉ; chỉ ghi vào khách khi bấm Lưu. */
+let editingArea = { ward: '', district: '', province: '' };
+
+function showEditingArea() {
+  $('#edit-addr-display-area').textContent = joinRegion(editingArea) || 'Chọn khu vực';
+}
+
+function readAreaInputs() {
+  return {
+    ward: $('#area-input-ward').value.trim(),
+    district: $('#area-input-district').value.trim(),
+    province: $('#area-input-province').value.trim()
+  };
+}
+
 $('#btn-open-edit-address')?.addEventListener('click', () => {
-  const cust =
-    state.customers.find((c) => c.uniqueId === currentProfileUniqueId) || state.customers[0];
+  const cust = findCustomerByUid(currentProfileUniqueId);
   if (!cust) return;
 
+  editingArea = { ward: cust.ward || '', district: cust.district || '', province: cust.province || '' };
   $('#edit-addr-subtitle').textContent = `${cust.name} · @${cust.uniqueId}`;
-  $('#edit-addr-input-phone').value = cust.phone || '0905 123 456';
-  $('#edit-addr-input-name').value = cust.name;
-  $('#edit-addr-input-street').value = cust.street || '25 Lê Lợi';
+  $('#edit-addr-input-phone').value = cust.phone || '';
+  $('#edit-addr-input-name').value = cust.name || '';
+  // Địa chỉ cũ chỉ có một dòng, chưa tách khu vực: đưa cả dòng vào ô địa chỉ để không mất.
+  $('#edit-addr-input-street').value = cust.street || (joinRegion(editingArea) ? '' : cust.address || '');
   if ($('#edit-addr-input-note')) {
-    $('#edit-addr-input-note').value = cust.deliveryNote || 'Giao giờ hành chính, gọi trước khi giao';
+    $('#edit-addr-input-note').value = cust.deliveryNote || '';
   }
-  $('#edit-addr-display-area').textContent = cust.ward
-    ? `${cust.ward}, ${cust.district || 'Quận 1'}, ${cust.province || 'TP. Hồ Chí Minh'}`
-    : 'Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh';
+  showEditingArea();
 
   $('#modal-edit-address')?.showModal();
 });
 
 $('#edit-addr-trigger-area')?.addEventListener('click', () => {
+  $('#area-input-province').value = editingArea.province;
+  $('#area-input-district').value = editingArea.district;
+  $('#area-input-ward').value = editingArea.ward;
+  $('#area-summary-text').textContent = joinRegion(editingArea) || 'Chưa nhập';
   $('#modal-select-area')?.showModal();
 });
 
-let selectedWard = 'Phường Bến Nghé';
-$('#area-ward-list-box')?.addEventListener('click', (e) => {
-  const item = e.target.closest('.area-ward-item');
-  if (item) {
-    $$('.area-ward-item').forEach((w) => {
-      w.classList.remove('selected');
-      const chk = w.querySelector('span:nth-child(2)');
-      if (chk) chk.remove();
-    });
-    item.classList.add('selected');
-    item.innerHTML = `<span>${esc(item.dataset.ward)}</span><span style="color:var(--primary-orange);font-weight:bold">✓</span>`;
-    selectedWard = item.dataset.ward;
-    $('#area-summary-text').textContent = `${selectedWard}, Quận 1, TP. Hồ Chí Minh`;
-  }
+$$('#area-input-province, #area-input-district, #area-input-ward').forEach((input) => {
+  input.addEventListener('input', () => {
+    $('#area-summary-text').textContent = joinRegion(readAreaInputs()) || 'Chưa nhập';
+  });
 });
 
 $('#btn-confirm-area')?.addEventListener('click', () => {
+  editingArea = readAreaInputs();
+  showEditingArea();
   $('#modal-select-area')?.close();
-  $('#edit-addr-display-area').textContent = `${selectedWard}, Quận 1, TP. Hồ Chí Minh`;
 });
 
 $('#btn-save-address-changes')?.addEventListener('click', () => {
   const name = $('#edit-addr-input-name').value.trim();
   const phone = $('#edit-addr-input-phone').value.trim();
   const street = $('#edit-addr-input-street').value.trim();
-  const note = $('#edit-addr-input-note')?.value.trim() || 'Giao giờ hành chính, gọi trước khi giao';
-  const area = $('#edit-addr-display-area').textContent.trim();
+  const note = $('#edit-addr-input-note')?.value.trim() || '';
+  if (!name) return toast('Vui lòng nhập họ tên người nhận', '⚠️');
 
   if (currentProfileUniqueId) {
     updateCustomerInfo(currentProfileUniqueId, {
       name,
       phone,
       street,
-      ward: selectedWard,
-      district: 'Quận 1',
-      province: 'TP. Hồ Chí Minh',
+      ward: editingArea.ward,
+      district: editingArea.district,
+      province: editingArea.province,
       deliveryNote: note,
-      address: `${street}, ${area}`
+      address: [street, joinRegion(editingArea)].filter(Boolean).join(', ')
     });
     openCustomerProfileView(currentProfileUniqueId);
   }
   $('#modal-edit-address')?.close();
-  toast('Đã lưu & đồng bộ địa chỉ khách hàng!', '✓');
+  toast(`Đã lưu${syncedWord()} địa chỉ khách hàng!`, '✓');
 });
 
 /* ============================================================
@@ -1725,7 +1742,7 @@ function openOrderDetailView(orderId) {
   $('#detail-cust-name').textContent = ord.nickname || ord.uniqueId;
 
   const cust = state.customers.find((c) => areSameCustomer(c, ord));
-  const orderCount = cust?.orderCount || 12;
+  const orderCount = cust?.orderCount || state.orders.filter((o) => areSameCustomer(o, ord)).length;
   $('#detail-cust-meta').textContent = `@${ord.uniqueId} · ${orderCount} đơn`;
 
   const tagEl = $('#detail-cust-tag');
@@ -1891,7 +1908,7 @@ $('#btn-save-order-items')?.addEventListener('click', () => {
     save('order_items_edited');
     openOrderDetailView(currentDetailOrderId);
     $('#modal-edit-order-items')?.close();
-    toast('Đã cập nhật & đồng bộ sản phẩm trong đơn!', '✓');
+    toast(`Đã cập nhật${syncedWord()} sản phẩm trong đơn!`, '✓');
   }
 });
 
@@ -1912,9 +1929,9 @@ $('#btn-create-order-pill')?.addEventListener('click', () => {
   if ($('#new-ord-handle')) $('#new-ord-handle').value = '';
   if ($('#new-ord-phone')) $('#new-ord-phone').value = '';
   if ($('#new-ord-address')) $('#new-ord-address').value = '';
-  if ($('#new-ord-product-name')) $('#new-ord-product-name').value = 'Mã 150';
-  if ($('#new-ord-price')) $('#new-ord-price').value = '150';
-  if ($('#new-ord-note')) $('#new-ord-note').value = 'Giao giờ hành chính, gọi trước khi giao';
+  if ($('#new-ord-product-name')) $('#new-ord-product-name').value = '';
+  if ($('#new-ord-price')) $('#new-ord-price').value = '';
+  if ($('#new-ord-note')) $('#new-ord-note').value = '';
   $('#modal-create-order')?.showModal();
 });
 
@@ -1923,12 +1940,13 @@ $('#btn-submit-create-order')?.addEventListener('click', () => {
   if (!name) return toast('Vui lòng nhập tên khách hàng', '⚠️');
 
   const handle = ($('#new-ord-handle')?.value.trim() || name.toLowerCase().replace(/\s+/g, '')).replace(/^@/, '');
-  const phone = $('#new-ord-phone')?.value.trim() || '0905 123 456';
-  const address = $('#new-ord-address')?.value.trim() || '25 Lê Lợi, TP. Hồ Chí Minh';
-  const prodName = $('#new-ord-product-name')?.value.trim() || 'Mã 150';
-  const priceRaw = $('#new-ord-price')?.value.trim() || '150';
+  const phone = $('#new-ord-phone')?.value.trim() || '';
+  const address = $('#new-ord-address')?.value.trim() || '';
+  const prodName = $('#new-ord-product-name')?.value.trim() || 'Sản phẩm';
+  const priceRaw = $('#new-ord-price')?.value.trim() || '';
   const price = parsePriceInput(priceRaw, Number(S().multiplier || 1000));
   const note = $('#new-ord-note')?.value.trim() || '';
+  if (!price) return toast('Vui lòng nhập giá sản phẩm', '⚠️');
 
   const { order } = addOrMergeOrder({
     uniqueId: handle,
@@ -1939,24 +1957,25 @@ $('#btn-submit-create-order')?.addEventListener('click', () => {
   });
 
   if (order) {
-    order.phone = phone;
-    order.address = address;
-    order.note = note;
+    if (phone) order.phone = phone;
+    if (address) order.address = address;
+    if (note) order.note = note;
   }
 
+  // Ô bỏ trống không được xoá thông tin đã có của khách quen.
   updateCustomerInfo(handle, {
     uniqueId: handle,
     name,
-    phone,
-    deliveryNote: note,
-    address
+    ...(phone ? { phone } : {}),
+    ...(note ? { deliveryNote: note } : {}),
+    ...(address ? { address } : {})
   });
 
   if (S().sound !== false) playCashChime(0.5);
 
   $('#modal-create-order')?.close();
   renderOrdersView();
-  toast(`Đã tạo & đồng bộ đơn ${order.code} cho ${name}!`, '✓');
+  toast(`Đã tạo${syncedWord()} đơn ${order.code} cho ${name}!`, '✓');
 });
 
 $('#btn-order-filter-icon')?.addEventListener('click', () => {
@@ -2048,7 +2067,7 @@ $('#btn-save-new-account')?.addEventListener('click', () => {
   renderSettingsView();
   updateSidebarShopUI();
   $('#modal-add-account')?.close();
-  toast('Đã thêm & đồng bộ tài khoản TikTok mới!', '✓');
+  toast(`Đã thêm${syncedWord()} tài khoản TikTok mới!`, '✓');
 });
 
 $('#menu-row-printer')?.addEventListener('click', () => $('#modal-printer-setup')?.showModal());
@@ -2674,28 +2693,42 @@ function renderSalesView() {
   const labelsContainer = $('#barchart-labels-container');
 
   if (!isDemo) {
-    const realOrders = state.orders || [];
-    const realRev = realOrders.reduce((s, o) => s + (Number(o.total) || 0), 0);
-    const guestsCount = (state.customers || []).length;
-    const newGuestsCount = (state.customers || []).filter((c) => c.tag === 'Mới').length;
+    const sales = computeSales(state.orders, { sessions: state.sessions });
+    const signed = (pct) => `${pct > 0 ? '+' : ''}${pct}%`;
 
+    if ($('#sales-header-date')) {
+      const dateText = new Date().toLocaleDateString('vi-VN', {
+        weekday: 'long',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+      $('#sales-header-date').textContent = dateText.charAt(0).toUpperCase() + dateText.slice(1);
+    }
     if ($('#sales-live-badge')) {
       const hasLive = Array.isArray(state.sessions) && state.sessions.some((s) => s.isLive);
       $('#sales-live-badge').style.display = hasLive ? 'inline-flex' : 'none';
     }
-    if ($('#sales-hero-revenue')) $('#sales-hero-revenue').innerHTML = formatVNDHtml(realRev);
-    if ($('#sales-today-growth-pct')) $('#sales-today-growth-pct').textContent = '0%';
-    if ($('#sales-today-guests')) $('#sales-today-guests').textContent = String(guestsCount);
-    if ($('#sales-new-guests-sub')) $('#sales-new-guests-sub').textContent = `${newGuestsCount} khách mới`;
-    if ($('#sales-month-revenue')) $('#sales-month-revenue').innerHTML = formatVNDHtml(realRev);
-    if ($('#sales-month-growth')) $('#sales-month-growth').textContent = '0% so với tháng trước';
+    if ($('#sales-hero-revenue')) $('#sales-hero-revenue').innerHTML = formatVNDHtml(sales.todayRevenue);
+    if ($('#sales-today-growth-pct')) {
+      $('#sales-today-growth-pct').textContent = sales.todayGrowthPct === null ? '—' : signed(sales.todayGrowthPct);
+      const arrow = $('#sales-today-growth-pct').parentElement?.querySelector('svg');
+      if (arrow) arrow.style.transform = sales.todayGrowthPct < 0 ? 'rotate(180deg)' : '';
+    }
+    if ($('#sales-today-guests')) $('#sales-today-guests').textContent = String(sales.todayGuests);
+    if ($('#sales-new-guests-sub')) $('#sales-new-guests-sub').textContent = `${sales.newGuests} khách mới`;
+    if ($('#sales-month-label')) $('#sales-month-label').textContent = `Doanh thu tháng ${sales.monthNumber}`;
+    if ($('#sales-month-revenue')) $('#sales-month-revenue').innerHTML = formatVNDHtml(sales.monthRevenue);
+    if ($('#sales-month-growth')) {
+      $('#sales-month-growth').textContent =
+        sales.monthGrowthPct === null
+          ? 'Chưa có số liệu tháng trước'
+          : `${signed(sales.monthGrowthPct)} so với cùng kỳ tháng ${sales.prevMonthNumber}`;
+      $('#sales-month-growth').className = `stat-box-sub ${sales.monthGrowthPct < 0 ? 'orange' : 'green'}`;
+    }
 
-    const cntNew = realOrders.filter((o) => o.status === 'new').length;
-    const cntPrinted = realOrders.filter((o) => o.status === 'printed').length;
-    const cntShipping = realOrders.filter((o) => o.status === 'shipping').length;
-    const cntDone = realOrders.filter((o) => o.status === 'done').length;
-    const totalOrd = realOrders.length;
-    const pctNew = totalOrd > 0 ? Math.round((cntNew / totalOrd) * 100) : 0;
+    const { new: cntNew, printed: cntPrinted, shipping: cntShipping, done: cntDone } = sales.statusCounts;
+    const pctNew = sales.todayOrderCount > 0 ? Math.round((cntNew / sales.todayOrderCount) * 100) : 0;
 
     if ($('#sales-donut-pct')) $('#sales-donut-pct').textContent = `${pctNew}%`;
     if ($('#sales-donut-circle')) {
@@ -2705,71 +2738,48 @@ function renderSalesView() {
     if ($('#sales-cnt-printed')) $('#sales-cnt-printed').textContent = String(cntPrinted);
     if ($('#sales-cnt-shipping')) $('#sales-cnt-shipping').textContent = String(cntShipping);
     if ($('#sales-cnt-done')) $('#sales-cnt-done').textContent = String(cntDone);
-    if ($('#sales-rate-pct')) $('#sales-rate-pct').textContent = totalOrd > 0 ? '100%' : '0%';
-    if ($('#sales-aov-val')) {
-      $('#sales-aov-val').textContent = totalOrd > 0 ? formatVND(Math.round(realRev / totalOrd)) : '0 ₫';
+    if ($('#sales-rate-pct')) {
+      $('#sales-rate-pct').textContent = sales.closeRatePct === null ? '—' : `${sales.closeRatePct}%`;
     }
+    if ($('#sales-aov-val')) $('#sales-aov-val').textContent = formatVND(sales.averageOrderValue);
 
-    if (salesChartMode === '30days') {
-      const weeksData = [
-        { day: 'Tuần 1', height: 4, text: '' },
-        { day: 'Tuần 2', height: 4, text: '' },
-        { day: 'Tuần 3', height: 4, text: '' },
-        { day: 'Tuần 4', height: realRev > 0 ? 45 : 4, text: realRev > 0 ? formatVND(realRev) : '0đ', highlight: true }
-      ];
-      if (barsContainer) {
-        barsContainer.innerHTML = weeksData
-          .map(
-            (d) => `
-            <div class="barchart-col ${d.highlight ? 'highlight' : ''}" style="width:20%">
-              ${d.text ? `<span class="barchart-tooltip-val">${d.text}</span>` : ''}
-              <div class="barchart-pill-bar" style="height:${d.height}%"></div>
+    const bars = salesChartMode === '30days' ? sales.periods : sales.days;
+    const colStyle = salesChartMode === '30days' ? ' style="width:20%"' : '';
+    const maxAmount = Math.max(...bars.map((b) => b.amount), 0);
+    if (barsContainer) {
+      barsContainer.innerHTML = bars
+        .map((b) => {
+          const height = b.amount > 0 && maxAmount > 0 ? Math.max(4, Math.round((b.amount / maxAmount) * 80)) : 4;
+          const amountText = formatVND(b.amount);
+          return `
+            <div class="barchart-col ${b.isCurrent ? 'highlight' : ''}"${colStyle} title="${esc(b.label)}: ${esc(amountText)}">
+              ${b.isCurrent ? `<span class="barchart-tooltip-val">${esc(amountText)}</span>` : ''}
+              <div class="barchart-pill-bar" style="height:${height}%"></div>
             </div>
-          `
-          )
-          .join('');
-      }
-      if (labelsContainer) {
-        labelsContainer.innerHTML = weeksData
-          .map(
-            (d) => `
-            <span class="barchart-day-label ${d.highlight ? 'highlight' : ''}" style="width:20%">${d.day}</span>
-          `
-          )
-          .join('');
-      }
-    } else {
-      const days = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
-      if (barsContainer) {
-        barsContainer.innerHTML = days
-          .map((day, idx) => {
-            const isToday = idx === 6;
-            const h = isToday && realRev > 0 ? 50 : 4;
-            const txt = isToday ? (realRev > 0 ? formatVND(realRev) : '0đ') : '';
-            return `
-              <div class="barchart-col ${isToday ? 'highlight' : ''}">
-                ${txt ? `<span class="barchart-tooltip-val">${txt}</span>` : ''}
-                <div class="barchart-pill-bar" style="height:${h}%"></div>
-              </div>
-            `;
-          })
-          .join('');
-      }
-      if (labelsContainer) {
-        labelsContainer.innerHTML = days
-          .map(
-            (day, idx) => `
-            <span class="barchart-day-label ${idx === 6 ? 'highlight' : ''}">${day}</span>
-          `
-          )
-          .join('');
-      }
+          `;
+        })
+        .join('');
+    }
+    if (labelsContainer) {
+      labelsContainer.innerHTML = bars
+        .map(
+          (b) => `
+          <span class="barchart-day-label ${b.isCurrent ? 'highlight' : ''}"${colStyle}>${esc(b.label)}</span>
+        `
+        )
+        .join('');
     }
     return;
   }
 
   if ($('#sales-live-badge')) $('#sales-live-badge').style.display = 'inline-flex';
-  if ($('#sales-today-growth-pct')) $('#sales-today-growth-pct').textContent = '+18%';
+  if ($('#sales-header-date')) $('#sales-header-date').textContent = 'Chủ nhật, 25/10/2026';
+  if ($('#sales-month-label')) $('#sales-month-label').textContent = 'Doanh thu tháng 10';
+  if ($('#sales-today-growth-pct')) {
+    $('#sales-today-growth-pct').textContent = '+18%';
+    const arrow = $('#sales-today-growth-pct').parentElement?.querySelector('svg');
+    if (arrow) arrow.style.transform = '';
+  }
   if ($('#sales-donut-pct')) $('#sales-donut-pct').textContent = '75%';
   if ($('#sales-donut-circle')) $('#sales-donut-circle').setAttribute('stroke-dashoffset', '60');
   if ($('#sales-cnt-new')) $('#sales-cnt-new').textContent = '12';
@@ -3063,21 +3073,31 @@ onRemoteUiEvent((msg) => {
   }
 });
 
+onOfflineChanges((kind, count) => {
+  if (kind === 'saved') {
+    toast('Mất kết nối: thay đổi được giữ trên máy, có mạng sẽ tự gửi. Đừng xoá dữ liệu trình duyệt.', '📴', 5000);
+  } else {
+    toast(`Đã gửi ${count} thay đổi lúc mất mạng lên server`, '✓', 3500);
+  }
+});
+
 function updateSyncUI(st) {
   const connected = st.connected;
   const count = st.clientsCount || 1;
+  const waiting = connected ? 0 : pendingChangeCount();
+  const waitingText = waiting ? ` (${waiting} thay đổi chờ gửi)` : '';
   if ($('#sidebar-sync-led')) {
     $('#sidebar-sync-led').style.background = connected ? '#16a34a' : '#f59e0b';
   }
   if ($('#sidebar-sync-text')) {
     $('#sidebar-sync-text').textContent = connected
       ? `Đồng bộ Live (${count} thiết bị)`
-      : 'Đang kết nối lại...';
+      : `Đang kết nối lại...${waitingText}`;
   }
   if ($('#lbl-sync-conn-state')) {
     $('#lbl-sync-conn-state').textContent = connected
       ? `Đang đồng bộ (${count})`
-      : 'Đang kết nối...';
+      : `Đang kết nối...${waitingText}`;
   }
   if ($('#modal-sync-status-title')) {
     $('#modal-sync-status-title').textContent = connected

@@ -29,6 +29,7 @@ import * as sqlite from './db.js';
 import { snapCollections, diffCollections, snapScalars, diffScalars } from './delta.js';
 import { parsePrice, extractProductInfo } from './public/js/price.js';
 import { LiveManager, liveKey } from './live-manager.js';
+import { cleanNativeUpdate, cleanState, isObject } from './validate.js';
 import {
   applyNativeUpdate,
   durationText,
@@ -59,6 +60,23 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const db = sqlite.openDb(path.join(DATA_DIR, 'susu.db'));
+
+/**
+ * Lỗi khi xử lý một tin nhắn hay một sự kiện chỉ được ảnh hưởng tới chính nó:
+ * server chạy chung cho mọi shop, không thể để một gói dữ liệu sai làm ngắt tất cả.
+ */
+function safely(label, fn, onError) {
+  return (...args) => {
+    try {
+      return fn(...args);
+    } catch (err) {
+      console.error(`[${label}]`, err);
+      try {
+        onError?.(...args);
+      } catch {}
+    }
+  };
+}
 
 function readLegacyJson(file) {
   try {
@@ -305,7 +323,11 @@ const savedSnaps = {};
 function loadAllStatesByUser() {
   const fromDb = sqlite.loadStates(db);
   if (Object.keys(fromDb).length) {
-    for (const [uid, st] of Object.entries(fromDb)) savedSnaps[uid] = snapCollections(st);
+    // Dữ liệu sai đã lưu từ trước không được làm sập server mỗi lần có thiết bị mở tài khoản đó.
+    for (const [uid, st] of Object.entries(fromDb)) {
+      savedSnaps[uid] = snapCollections(st);
+      fromDb[uid] = cleanState(st);
+    }
     return fromDb;
   }
 
@@ -384,6 +406,16 @@ function flushAllAndExit() {
 }
 process.on('SIGTERM', flushAllAndExit);
 process.on('SIGINT', flushAllAndExit);
+process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', err));
+process.on('uncaughtException', (err) => {
+  // Lỗi lọt qua mọi lớp chặn: ghi nốt dữ liệu rồi thoát để nền tảng khởi động lại server sạch.
+  console.error('[uncaughtException]', err);
+  try {
+    flushStates();
+    flushUsersDb();
+  } catch {}
+  process.exit(1);
+});
 
 /* ============================================================
    Express Server & Middleware
@@ -945,10 +977,13 @@ function scheduleNativeState(userId) {
   if (nativeStateTimers.has(userId)) return;
   nativeStateTimers.set(
     userId,
-    setTimeout(() => {
-      nativeStateTimers.delete(userId);
-      sendNativeStateNow(userId);
-    }, 150)
+    setTimeout(
+      safely('native state', () => {
+        nativeStateTimers.delete(userId);
+        sendNativeStateNow(userId);
+      }),
+      150
+    )
   );
 }
 
@@ -1047,7 +1082,8 @@ function markCommentsPrinted(userId, st, ids) {
   }
 }
 
-function applyIncomingStateForUser(userId, incoming, action = 'update', clientId = '', excludeWs = null) {
+function applyIncomingStateForUser(userId, rawIncoming, action = 'update', clientId = '', excludeWs = null) {
+  const incoming = cleanState(rawIncoming);
   const isClean = !isDefaultAdminUser(userId);
   const demoOrderIds = new Set(initialOrders.map((o) => o.id));
   const demoCustIds = new Set(initialCustomers.map((c) => c.id));
@@ -1095,7 +1131,8 @@ function applyIncomingStateForUser(userId, incoming, action = 'update', clientId
 }
 
 /** Thay đổi từ app iOS: chỉ gồm những khách vừa đổi và các món đã xoá. */
-function applyNativeUpdateForUser(userId, update, excludeWs) {
+function applyNativeUpdateForUser(userId, rawUpdate, excludeWs) {
+  const update = cleanNativeUpdate(rawUpdate);
   return mutateState(userId, 'native_update', '', excludeWs, (st) => {
     applyNativeUpdate(st, update);
     if (Array.isArray(update.sessions)) mergeNativeSessions(st, update.sessions);
@@ -1318,12 +1355,12 @@ const liveManager = new LiveManager({
   },
   friendlyError,
   log: (...args) => console.warn(...args),
-  onComment: recordLiveComment,
-  onViewers: (userId, entry) => {
+  onComment: safely('live comment', recordLiveComment),
+  onViewers: safely('live viewers', (userId, entry) => {
     broadcastToUser(userId, { type: 'viewers', username: entry.username, count: entry.viewers });
-  },
-  onSessionNeeded: openSessionFor,
-  onChange: (userId, entry) => {
+  }),
+  onSessionNeeded: safely('live session', openSessionFor),
+  onChange: safely('live change', (userId, entry) => {
     broadcastToUser(userId, {
       type: 'status',
       state: entry.state,
@@ -1334,8 +1371,8 @@ const liveManager = new LiveManager({
     });
     broadcastLives(userId);
     if (entry.state === 'connected') console.log(`[live] ${userId} theo dõi @${entry.username} room=${entry.roomId}`);
-  },
-  onEnded: (userId, entry, reason) => {
+  }),
+  onEnded: safely('live ended', (userId, entry, reason) => {
     closeSessionFor(userId, entry);
     broadcastToUser(userId, {
       type: 'status',
@@ -1345,7 +1382,7 @@ const liveManager = new LiveManager({
       sessionId: entry.sessionId || ''
     });
     broadcastLives(userId);
-  }
+  })
 });
 
 function getLiveStatus(userId) {
@@ -1368,17 +1405,20 @@ function resumeLivesAfterRestart() {
         persistAllStates(userId);
         continue;
       }
-      setTimeout(() => {
-        console.log(`[live] nối lại @${s.tiktok} của ${userId} sau khi khởi động`);
-        const entry = liveManager.start(userId, s.tiktok);
-        if (entry) entry.sessionId = s.id;
-      }, delay).unref?.();
+      setTimeout(
+        safely('live resume', () => {
+          console.log(`[live] nối lại @${s.tiktok} của ${userId} sau khi khởi động`);
+          const entry = liveManager.start(userId, s.tiktok);
+          if (entry) entry.sessionId = s.id;
+        }),
+        delay
+      ).unref?.();
       delay += 1500;
     }
   }
 }
 
-wss.on('connection', (ws, req) => {
+wss.on('connection', safely('ws connection', (ws, req) => {
   // Đọc token từ query string nếu có
   let initialUser = null;
   try {
@@ -1426,13 +1466,14 @@ wss.on('connection', (ws, req) => {
     send({ type: 'hello', server: 'susu', version: 4, liveStatus: getLiveStatus(null), lives: [], user: null });
   }
 
-  ws.on('message', (raw) => {
+  ws.on('message', safely('ws message', (raw) => {
     let msg;
     try {
       msg = JSON.parse(raw.toString());
     } catch {
       return;
     }
+    if (!isObject(msg)) return;
 
     if (msg.type === 'auth' && msg.token) {
       const u = getUserByToken(msg.token);
@@ -1541,15 +1582,15 @@ wss.on('connection', (ws, req) => {
         clientsCount: countOnlineClientsForUser(ws.userId)
       });
     }
-  });
+  }));
 
   ws.on('close', () => {
-    setTimeout(() => broadcastClientCountForUser(ws.userId), 50);
+    setTimeout(safely('ws close', () => broadcastClientCountForUser(ws.userId)), 50);
   });
   ws.on('error', () => {
-    setTimeout(() => broadcastClientCountForUser(ws.userId), 50);
+    setTimeout(safely('ws error', () => broadcastClientCountForUser(ws.userId)), 50);
   });
-});
+}, (ws) => ws.close(1011)));
 
 setInterval(() => {
   wss.clients.forEach((c) => {

@@ -111,6 +111,118 @@ after(async () => {
   fs.rmSync(DATA_DIR, { recursive: true, force: true });
 });
 
+async function stillAlive() {
+  await sleep(150);
+  assert.equal(server.exitCode, null, 'server không được thoát');
+  assert.ok((await fetch(`${BASE}/healthz`)).ok);
+}
+
+test('khách chưa đăng nhập gửi dữ liệu sai không làm sập server', async () => {
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+  await new Promise((r) => ws.once('open', r));
+  for (const bad of ['null', '5', '"chuoi"', '[]', 'true', '{khong-phai-json', '{"type":null}']) ws.send(bad);
+  await stillAlive();
+  ws.terminate();
+});
+
+test('tài khoản gửi dữ liệu sai không làm sập server; dữ liệu đúng đi kèm vẫn được giữ', async (t) => {
+  // Tài khoản riêng để dữ liệu thử không lẫn vào các test khác.
+  const mainToken = token;
+  t.after(() => {
+    token = mainToken;
+  });
+  token = '';
+  const reg = await api('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username: 'shop.loi', password: 'mat-khau', confirmPassword: 'mat-khau' })
+  });
+  token = reg.body.token;
+
+  const web = await device().opened;
+  const good = { id: 'don_tot', uniqueId: 'khach_tot', status: 'new', items: [{ id: 'mon_tot', price: 1000, qty: 1 }], total: 1000 };
+  const badUpdates = [
+    { type: 'sync_update', state: { orders: [null, 5, 'x', [], good] } },
+    { type: 'sync_update', state: { orders: [{ id: 'hong', uniqueId: 'a', items: 5 }, { id: 'hong2', uniqueId: 'a', items: [null] }] } },
+    { type: 'sync_update', state: { customers: [null], accounts: [null, 5], sessions: [null], comments: [null, 7], settings: 5 } },
+    { type: 'native_update', id: 1, deletedItemIds: 5 },
+    { type: 'native_update', id: 2, customers: 5, comments: 5, sessions: 5, accounts: 5, deletedAccountIds: 5, printedCommentIds: 5 },
+    { type: 'native_update', id: 3, customers: [null, { uniqueId: 'k', items: 5 }, { uniqueId: 'k2', items: [{ id: 'm', ts: 1e30 }] }] },
+    { type: 'native_update', id: 4, comments: [{ id: 'c_loi', ts: 1e30, text: 'x' }], sessions: [{ id: 's_loi', start: 1e30 }] },
+    { type: 'connect', username: { a: 1 } },
+    { type: 'disconnect', username: 5 },
+    { type: 'ui_event', selectedCustomerUniqueId: 5 }
+  ];
+  for (const m of badUpdates) web.send(m);
+  await stillAlive();
+
+  // App iOS nối vào lúc dữ liệu đã từng nhận gói sai vẫn nhận được bản đầy đủ.
+  const app = await device({ native: true }).opened;
+  assert.ok(Array.isArray(app.snapshot.customers));
+  await stillAlive();
+
+  web.send({ type: 'sync_update', state: { orders: [null, good] } });
+  await until(async () => {
+    const st = (await api('/api/state')).body.state;
+    return st.orders.length === 1 && st.orders[0].id === 'don_tot';
+  }, 'giữ lại đơn đúng, bỏ phần tử sai');
+
+  const http = await api('/api/sync', { method: 'POST', body: JSON.stringify({ state: { orders: [null], customers: [5] } }) });
+  assert.equal(http.status, 200, 'gửi qua HTTP cũng không lỗi');
+  await stillAlive();
+
+  web.close();
+  app.close();
+});
+
+test('dữ liệu sai đã lưu từ bản cũ không làm sập server khi app iOS mở tài khoản đó', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'susu-test-old-'));
+  const sqlite = await import('../db.js');
+  const db = sqlite.openDb(path.join(dir, 'susu.db'));
+  const uid = 'u_cu';
+  const tk = 'token-du-lieu-cu';
+  sqlite.saveUsers(db, {
+    users: [
+      { id: 'u_admin', username: 'admin', displayName: 'admin', passwordHash: 'a:b', role: 'admin' },
+      { id: uid, username: 'shopcu', displayName: 'shopcu', passwordHash: 'a:b', role: 'user' }
+    ],
+    tokens: { [tk]: { userId: uid, createdAt: Date.now() } }
+  });
+  sqlite.saveUserState(db, uid, { rev: 1, orders: [{ id: 'hong', uniqueId: 'a', items: 5 }, { id: 'tot', uniqueId: 'b', items: [{ id: 'm', price: 1, qty: 1 }, null] }], customers: [], comments: [], sessions: [], accounts: [] }, null);
+  db.close();
+
+  const port = PORT + 100;
+  const old = spawn(process.execPath, ['--no-warnings', '--import', './test/fake-tiktok/register.js', 'server.js'], {
+    cwd: ROOT,
+    env: { ...process.env, PORT: String(port), DATA_DIR: dir, ADMIN_PASSWORD: 'admin-test' },
+    stdio: 'ignore'
+  });
+  try {
+    await until(async () => {
+      try {
+        return (await fetch(`http://127.0.0.1:${port}/healthz`)).ok;
+      } catch {
+        return false;
+      }
+    }, 'server dữ liệu cũ khởi động');
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${tk}&native=1`);
+    const hello = await new Promise((resolve, reject) => {
+      ws.once('error', reject);
+      ws.on('message', (raw) => {
+        const m = JSON.parse(raw.toString());
+        if (m.type === 'hello') resolve(m);
+      });
+    });
+    await sleep(150);
+    assert.equal(old.exitCode, null, 'server không được thoát');
+    const items = hello.snapshot.customers.flatMap((c) => c.items).map((i) => i.id);
+    assert.deepEqual(items, ['m'], 'đơn đúng vẫn còn nguyên');
+    ws.terminate();
+  } finally {
+    await stopServer(old);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('web và app nhận cùng bình luận; server giữ được nhiều hơn giới hạn 60 cũ, không trùng', async () => {
   const web = await device().opened;
   const app = await device({ native: true }).opened;
