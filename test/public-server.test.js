@@ -394,3 +394,53 @@ test('sao lưu khi server đang chạy: bản sao mở được, chỉ giữ s�
     fs.rmSync(backups, { recursive: true, force: true });
   }
 });
+
+test('chat hỗ trợ: khách nhắn, Admin nhận ngay và trả lời, khách nhận thông báo; người khác không đọc được', async () => {
+  const get = async (url, token) => {
+    const res = await fetch(BASE + url, { headers: { Authorization: `Bearer ${token}` } });
+    return { status: res.status, body: await res.json().catch(() => ({})) };
+  };
+  const admin = (await post('/api/auth/login', { username: 'admin', password: ADMIN_PASSWORD }, { ip: newIp() })).body.token;
+  const a = (await register('chat.khach.a', 'mat-khau-tot', newIp())).body.token;
+  const b = (await register('chat.khach.b', 'mat-khau-tot', newIp())).body.token;
+
+  const adminWs = openSocket(admin);
+  const userWs = openSocket(a);
+  await Promise.all([adminWs.opened, userWs.opened]);
+
+  assert.equal((await post('/api/support/messages', { text: '   ' }, { token: a })).status, 400);
+  assert.equal((await post('/api/support/messages', { text: 'Giúp mình với' }, { token: a })).status, 200);
+  const toAdmin = await until(() => adminWs.messages.find((m) => m.type === 'support_message'), 'admin nhận tin');
+  assert.equal(toAdmin.message.text, 'Giúp mình với');
+  assert.equal(toAdmin.username, 'chat.khach.a');
+  assert.ok(toAdmin.unread >= 1);
+
+  const list = await get('/api/admin/support/sessions', admin);
+  const row = list.body.sessions.find((s) => s.username === 'chat.khach.a');
+  assert.equal(row.open, true);
+  assert.equal(row.unread, 1);
+
+  // Khách thường không vào được API của Admin.
+  assert.equal((await get('/api/admin/support/sessions', a)).status, 403);
+  assert.equal((await post('/api/admin/support/reply', { sessionId: row.id, text: 'hi' }, { token: a })).status, 403);
+
+  const reply = await post('/api/admin/support/reply', { sessionId: row.id, text: 'Dạ shop đây ạ' }, { token: admin });
+  assert.equal(reply.status, 200);
+  const toUser = await until(() => userWs.messages.find((m) => m.type === 'support_message' && m.message.sender === 'admin'), 'khách nhận trả lời');
+  assert.equal(toUser.message.text, 'Dạ shop đây ạ');
+  assert.equal(toUser.unread, 1);
+
+  assert.equal((await get('/api/support/sessions', a)).body.unread, 1);
+  await post('/api/support/read', {}, { token: a });
+  assert.equal((await get('/api/support/sessions', a)).body.unread, 0);
+
+  // Khách B không thấy phiên của khách A dù biết mã phiên.
+  const peek = await get(`/api/support/messages?sessionId=${row.id}`, b);
+  assert.equal(peek.body.session, null);
+  assert.deepEqual(peek.body.messages, []);
+  const mine = await get(`/api/support/messages?sessionId=${row.id}`, a);
+  assert.equal(mine.body.messages.length, 2);
+
+  adminWs.ws.close();
+  userWs.ws.close();
+});

@@ -64,6 +64,11 @@ struct MainShell: View {
         } message: { item in
             Text(item.message)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openSupportChat)) { _ in
+            ui.tab = .me
+            ui.path = NavigationPath()
+            ui.push(.supportChat)
+        }
         .onReceive(client.$liveState.dropFirst()) { state in
             // Server mới tự ghi phiên; chỉ server bản cũ mới cần máy tự ghi.
             guard !isDemo, !client.serverSupportsSync else { return }
@@ -101,6 +106,7 @@ struct MainShell: View {
         case .keywords: KeywordsView()
         case .notifications: NotificationsView()
         case .help: HelpView()
+        case .supportChat: SupportChatView()
         }
     }
 }

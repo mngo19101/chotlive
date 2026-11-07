@@ -34,9 +34,10 @@ import {
   apiFetch,
   onForceLogout,
   onAdminUsersSync,
+  onSupportMessage,
   onAccountAccess,
   onOfflineChanges
-} from './sync.js?v=2';
+} from './sync.js?v=3';
 import { countdownClock, countdownText, remainingText } from './countdown.js';
 import {
   parsePrice,
@@ -2309,6 +2310,7 @@ function applyAuthUserToUI(user) {
   if (!user || !getAuthToken()) {
     overlay?.classList.remove('hidden');
     if ($('#admin-accounts-panel')) $('#admin-accounts-panel').style.display = 'none';
+    if ($('#admin-support-panel')) $('#admin-support-panel').style.display = 'none';
     if ($('#nav-btn-admin-shortcut')) $('#nav-btn-admin-shortcut').style.display = 'none';
     return;
   }
@@ -2339,10 +2341,128 @@ function applyAuthUserToUI(user) {
     $('#nav-btn-admin-shortcut').style.display = isAdmin ? 'flex' : 'none';
   }
 
+  if ($('#admin-support-panel')) $('#admin-support-panel').style.display = isAdmin ? 'block' : 'none';
   if (isAdmin) {
     loadAdminUsers();
+    loadSupportList();
   }
 }
+
+/* ===== Hỗ trợ khách (Admin): danh sách khách, xem lịch sử các phiên, trả lời ===== */
+let supportRows = [];
+let supportOpenUserId = null;
+
+const supportTime = (ts) =>
+  new Date(ts).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+
+async function loadSupportList() {
+  const cur = getCurrentUser();
+  if (!cur || cur.role !== 'admin') return;
+  try {
+    const res = await apiFetch('/api/admin/support/sessions');
+    const data = await res.json();
+    if (!res.ok || !data.ok) return;
+    supportRows = data.sessions;
+    renderSupportList(data.unread);
+  } catch {}
+}
+
+function renderSupportList(unread) {
+  const box = $('#support-admin-list');
+  if (!box) return;
+  const total = unread ?? supportRows.reduce((n, s) => n + s.unread, 0);
+  if ($('#admin-support-unread')) $('#admin-support-unread').textContent = `${total} tin mới`;
+  if (!supportRows.length) {
+    box.innerHTML = '<p class="support-empty">Chưa có khách nào nhắn.</p>';
+    return;
+  }
+  box.innerHTML = supportRows
+    .map(
+      (s) => `<button type="button" class="support-row ${s.userId === supportOpenUserId ? 'is-active' : ''}" data-support-user="${esc(s.userId)}">
+        <span class="support-row-top"><span>${esc(s.username || s.userId)}</span>${s.unread ? `<span class="support-badge">${s.unread}</span>` : ''}</span>
+        <span class="support-row-last">${s.lastSender === 'admin' ? 'Bạn: ' : ''}${esc(s.lastText)}</span>
+        <span class="support-state ${s.open ? '' : 'closed'}">${s.open ? 'Đang mở' : 'Đã đóng'} · ${esc(supportTime(s.lastAt))}</span>
+      </button>`
+    )
+    .join('');
+}
+
+async function openSupportThread(userId, { markRead = true } = {}) {
+  supportOpenUserId = userId;
+  const thread = $('#support-admin-thread');
+  if (!thread) return;
+  try {
+    const res = await apiFetch(`/api/admin/support/history?userId=${encodeURIComponent(userId)}`);
+    const data = await res.json();
+    if (!res.ok || !data.ok) return;
+    const sessions = [...data.sessions].reverse(); // cũ trước, mới sau
+    const latest = data.sessions[0];
+    const body = sessions
+      .map(
+        (s) =>
+          `<div class="support-sep">Phiên ${esc(supportTime(s.createdAt))} · ${s.open ? 'đang mở' : 'đã đóng'}</div>` +
+          s.messages
+            .map(
+              (m) => `<div class="support-msg ${m.sender === 'admin' ? 'admin' : ''}">${esc(m.text)}<small>${esc(supportTime(m.ts))}</small></div>`
+            )
+            .join('')
+      )
+      .join('');
+    const footer =
+      latest && latest.open
+        ? `<div class="support-reply"><textarea id="support-reply-text" rows="2" maxlength="2000" placeholder="Nhập trả lời…"></textarea>
+             <button type="button" class="btn-orange-pill" id="support-reply-send" data-session="${esc(latest.id)}" style="height:40px;padding:0 18px">Gửi</button></div>`
+        : '<div class="support-reply-closed">Phiên đã đóng (quá 24 giờ không có tin mới). Khi khách nhắn lại sẽ mở phiên mới.</div>';
+    thread.innerHTML = `<div class="support-thread-title">${esc(data.username || userId)}</div>
+      <div class="support-thread-body" id="support-thread-body">${body || '<p class="support-empty">Chưa có tin nhắn.</p>'}</div>${footer}`;
+    const tb = $('#support-thread-body');
+    if (tb) tb.scrollTop = tb.scrollHeight;
+    if (markRead) {
+      await apiFetch('/api/admin/support/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
+      });
+    }
+    loadSupportList();
+  } catch {}
+}
+
+$('#support-admin-list')?.addEventListener('click', (e) => {
+  const row = e.target.closest('[data-support-user]');
+  if (row) openSupportThread(row.dataset.supportUser);
+});
+
+$('#support-admin-thread')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('#support-reply-send');
+  if (!btn) return;
+  const input = $('#support-reply-text');
+  const text = (input?.value || '').trim();
+  if (!text) return;
+  btn.disabled = true;
+  try {
+    const res = await apiFetch('/api/admin/support/reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: btn.dataset.session, text })
+    });
+    const data = await res.json();
+    if (!res.ok) toast(data.error || 'Không gửi được', '⚠️');
+    else await openSupportThread(supportOpenUserId, { markRead: false });
+  } catch {
+    toast('Không gửi được, thử lại sau', '⚠️');
+  }
+});
+
+onSupportMessage((msg) => {
+  const cur = getCurrentUser();
+  if (!cur || cur.role !== 'admin' || msg.message.sender !== 'user') return;
+  if (msg.message.userId === supportOpenUserId) openSupportThread(supportOpenUserId);
+  else {
+    toast(`${msg.username || 'Khách'}: ${msg.message.text.slice(0, 60)}`, '💬', 4000);
+    loadSupportList();
+  }
+});
 
 // Xử lý Form Đăng nhập
 $('#form-auth-login')?.addEventListener('submit', async (e) => {

@@ -236,6 +236,13 @@ export function onForceLogout(fn) {
   forceLogoutListeners.push(fn);
 }
 
+const supportListeners = [];
+
+/** `fn(msg)`: tin chat hỗ trợ mới (khách nhận tin Admin, Admin nhận tin khách). */
+export function onSupportMessage(fn) {
+  supportListeners.push(fn);
+}
+
 export function onAdminUsersSync(fn) {
   adminUsersListeners.push(fn);
 }
@@ -461,6 +468,15 @@ export function connectSync() {
       forceLogoutListeners.forEach((fn) => {
         try {
           fn(msg.message || 'Tài khoản đã bị khoá hoặc thay đổi mật khẩu.');
+        } catch {}
+      });
+      return;
+    }
+
+    if (msg.type === 'support_message' && msg.message) {
+      supportListeners.forEach((fn) => {
+        try {
+          fn(msg);
         } catch {}
       });
       return;

@@ -3371,3 +3371,26 @@ input, select, textarea {
   color: var(--text-main);
   overflow-wrap: anywhere;
 }
+
+/* ===== Hỗ trợ khách (Admin) ===== */
+.support-admin-layout { display: grid; grid-template-columns: 280px 1fr; gap: 14px; margin-top: 12px; }
+.support-admin-list { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; }
+.support-row { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 14px; background: #fbf9f6; border: 1px solid #eee9e0; cursor: pointer; text-align: left; font: inherit; }
+.support-row.is-active { border-color: #ea6a09; background: #fff4ea; }
+.support-row-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; font-size: 13.5px; }
+.support-row-last { font-size: 12.5px; color: #5b6472; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.support-badge { background: #b3261e; color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11.5px; line-height: 20px; }
+.support-state { font-size: 11px; font-weight: 700; color: #107a54; }
+.support-state.closed { color: #5b6472; }
+.support-admin-thread { display: flex; flex-direction: column; border: 1px solid #eee9e0; border-radius: 16px; background: #fff; min-height: 260px; }
+.support-thread-title { padding: 10px 14px; font-weight: 800; border-bottom: 1px solid #eee9e0; }
+.support-thread-body { flex: 1; max-height: 340px; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.support-sep { align-self: center; font-size: 11px; font-weight: 700; color: #5b6472; margin: 8px 0 2px; }
+.support-msg { max-width: 75%; padding: 8px 12px; border-radius: 16px; font-size: 13.5px; white-space: pre-wrap; word-break: break-word; background: #f1f2f4; align-self: flex-start; }
+.support-msg.admin { background: #ea6a09; color: #fff; align-self: flex-end; }
+.support-msg small { display: block; font-size: 10px; opacity: 0.7; margin-top: 2px; }
+.support-reply { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #eee9e0; }
+.support-reply textarea { flex: 1; resize: none; border: 1px solid #e6e8ec; border-radius: 12px; padding: 8px 10px; font: inherit; }
+.support-reply-closed { padding: 10px 14px; font-size: 12.5px; color: #5b6472; border-top: 1px solid #eee9e0; }
+.support-empty { padding: 24px; color: #5b6472; text-align: center; font-size: 13px; }
+@media (max-width: 720px) { .support-admin-layout { grid-template-columns: 1fr; } }

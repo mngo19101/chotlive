@@ -26,6 +26,12 @@ final class LiveClient: ObservableObject {
     }
     /// Thông báo vừa bị chặn theo dõi live vì hết hạn, hiện thành hộp thoại ở mọi màn hình.
     @Published var accessNotice: String?
+    /// Số tin Admin trả lời mà khách chưa đọc.
+    @Published private(set) var supportUnread = 0
+    /// Tin chat hỗ trợ mới nhất vừa tới qua server (của cả hai phía), để màn chat tự thêm vào.
+    @Published private(set) var lastSupportMessage: SupportMessage?
+    /// Màn chat đang mở: tin Admin tới lúc này không cần báo.
+    var supportChatOpen = false
 
     var onChat: ((LiveComment) -> Void)?
     /// Báo đổi tài khoản trước khi nhận bình luận, để dữ liệu không rơi vào vùng của người khác.
@@ -158,6 +164,8 @@ final class LiveClient: ObservableObject {
         serverSupportsSync = false
         access = nil
         accessNotice = nil
+        supportUnread = 0
+        lastSupportMessage = nil
     }
 
     /// Chuyển sang một tài khoản đã lưu khác, không cần nhập lại mật khẩu.
@@ -275,6 +283,72 @@ final class LiveClient: ObservableObject {
         // Giá tính theo cùng quy tắc với bình luận nhận trực tiếp trên app.
         for i in page.comments.indices { page.comments[i].price = PriceParser.parse(page.comments[i].text) }
         return page
+    }
+
+    // MARK: - Chat với Admin
+
+    private func supportCall(_ path: String, method: String = "GET", body: [String: Any]? = nil) async -> (Int, [String: Any])? {
+        guard loggedIn, !token.isEmpty, let url = URL(string: baseURL + path) else { return nil }
+        var req = URLRequest(url: url, timeoutInterval: 20)
+        req.httpMethod = method
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let code = (resp as? HTTPURLResponse)?.statusCode else { return nil }
+        return (code, (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:])
+    }
+
+    /// Hỏi số tin chưa đọc (lúc mở app hoặc vừa nối lại server, phòng khi lỡ tin lúc mất kết nối).
+    func refreshSupportUnread() {
+        Task { @MainActor [weak self] in
+            guard let self, let (code, json) = await self.supportCall("/api/support/sessions"), code == 200 else { return }
+            self.supportUnread = (json["unread"] as? Int) ?? 0
+        }
+    }
+
+    func fetchSupportSessions() async -> [SupportSession]? {
+        guard let (code, json) = await supportCall("/api/support/sessions"), code == 200 else { return nil }
+        supportUnread = (json["unread"] as? Int) ?? supportUnread
+        return (json["sessions"] as? [[String: Any]])?.compactMap { SupportSession($0) } ?? []
+    }
+
+    /// Không truyền `sessionId` thì lấy phiên mới nhất.
+    func fetchSupportMessages(sessionId: String?) async -> (SupportSession?, [SupportMessage])? {
+        let path = "/api/support/messages" + (sessionId.map { "?sessionId=" + $0 } ?? "")
+        guard let (code, json) = await supportCall(path), code == 200 else { return nil }
+        let session = (json["session"] as? [String: Any]).flatMap { SupportSession($0) }
+        let messages = (json["messages"] as? [[String: Any]])?.compactMap { SupportMessage($0) } ?? []
+        return (session, messages)
+    }
+
+    func sendSupport(_ text: String) async throws -> SupportMessage {
+        guard let (code, json) = await supportCall("/api/support/messages", method: "POST", body: ["text": text]) else {
+            throw ClientError.msg("Không gửi được, vui lòng kiểm tra mạng rồi thử lại.")
+        }
+        guard code == 200, let m = (json["message"] as? [String: Any]).flatMap({ SupportMessage($0) }) else {
+            throw ClientError.msg(json["error"] as? String ?? "Không gửi được tin nhắn.")
+        }
+        return m
+    }
+
+    func markSupportRead() async {
+        supportUnread = 0
+        _ = await supportCall("/api/support/read", method: "POST", body: [:])
+    }
+
+    private func handleSupport(_ m: [String: Any]) {
+        guard let raw = m["message"] as? [String: Any], let msg = SupportMessage(raw) else { return }
+        lastSupportMessage = msg
+        guard msg.sender == "admin" else { return }
+        if supportChatOpen {
+            Task { await markSupportRead() }
+        } else {
+            supportUnread = (m["unread"] as? Int) ?? (supportUnread + 1)
+            SupportNotifier.shared.notify(text: msg.text)
+        }
     }
 
     // MARK: - Dùng thử và gói
@@ -435,6 +509,7 @@ final class LiveClient: ObservableObject {
             if serverSupportsSync, let snap = decodeSnapshot(data) {
                 if let onHello { onHello(snap) } else { pendingHello = snap }
             }
+            refreshSupportUnread()
         case "lives":
             if let raw = m["lives"] as? [[String: Any]] { applyLives(raw) }
         case "native_state":
@@ -484,6 +559,8 @@ final class LiveClient: ObservableObject {
                 sessionId: (m["sessionId"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             )
             onChat?(c)
+        case "support_message":
+            handleSupport(m)
         case "account_locked", "password_changed_force_login", "auth_error":
             liveMessage = (m["message"] as? String) ?? "Phiên đăng nhập không còn hiệu lực"
             logout()

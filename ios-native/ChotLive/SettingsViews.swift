@@ -149,7 +149,8 @@ struct SettingsView: View {
             HairLine()
             settingRow(.bell, "Thông báo", route: .notifications)
             HairLine()
-            settingRow(.help, "Trợ giúp", route: .help)
+            settingRow(.help, "Trợ giúp", trailing: client.supportUnread > 0 ? "\(client.supportUnread) tin mới" : nil,
+                       trailingColor: Theme.red, route: .help)
         }
         .cardStyle(22)
     }
@@ -444,6 +445,7 @@ struct NotificationsView: View {
 
 struct HelpView: View {
     @EnvironmentObject var client: LiveClient
+    @EnvironmentObject var ui: AppUI
 
     private let topics: [(String, String)] = [
         ("Bắt đầu đọc bình luận", "Vào tab Bình luận, bấm Live mới, nhập tên TikTok đang live. Phiên được ghi lại tự động."),
@@ -472,6 +474,31 @@ struct HelpView: View {
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .cardStyle(20)
+
+                    Button { ui.push(.supportChat) } label: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                T("Chat với quản trị viên", 15, .bold)
+                                T("Gửi câu hỏi cho Admin. Khi Admin trả lời, app sẽ báo cho bạn. Xem lại các phiên trước trong 30 ngày.",
+                                  13, .medium, Theme.muted)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 4)
+                            if client.supportUnread > 0 {
+                                T("\(client.supportUnread)", 12, .bold, .white)
+                                    .padding(.horizontal, 8)
+                                    .frame(minWidth: 24, minHeight: 24)
+                                    .background(Capsule().fill(Theme.red))
+                            }
+                            Icon(name: .chevronRight, size: 16, weight: 2.4, color: Theme.muted)
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .cardStyle(20)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
 
                     ForEach(topics, id: \.0) { title, body in
                         VStack(alignment: .leading, spacing: 6) {

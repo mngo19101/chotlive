@@ -17,6 +17,7 @@ struct ChotLiveApp: App {
                 .environmentObject(client)
                 .onAppear {
                     KeyboardDismisser.shared.install()
+                    SupportNotifier.shared.install()
                     client.onChat = { [store, client] c in
                         store.addComment(c, tiktok: client.liveUsername)
                         if store.isClosingComment(c) { CommentAlert.play() }
