@@ -114,9 +114,7 @@ func printComment(_ c: LiveComment, store: Store, printer: PrinterManager) -> St
     guard printer.isConnected else {
         return "Đã lưu đơn của \(c.nickname). Chưa kết nối máy in nên chưa in tem — vào Tôi › Máy in để kết nối."
     }
-    var ticket = c
-    ticket.price = items.reduce(0) { $0 + $1.lineTotal }
-    let ok = printer.send(TicketRenderer.ticketBytes(comment: ticket))
+    let ok = printer.send(TicketRenderer.liveTicketBytes(comment: c))
     if ok { items.forEach { store.markPrinted(itemId: $0.id) } }
     return ok ? nil : "Đã lưu đơn nhưng gửi lệnh in thất bại."
 }

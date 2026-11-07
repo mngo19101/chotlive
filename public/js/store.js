@@ -12,7 +12,6 @@ export const DEFAULT_SETTINGS = {
   shopName: 'Shop Hoa Hồng',
   shopHandle: '@shophoahong.live',
   shopSub: 'Đơn hàng Livestream TikTok',
-  footer: 'Cảm ơn bạn đã ủng hộ Shop Hoa Hồng ♥',
   paper: '80', // 80mm hoặc 58mm
   fontScale: '1',
   showNickname: true,

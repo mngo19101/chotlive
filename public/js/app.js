@@ -2901,16 +2901,19 @@ async function handlePrintOrder(order, isRemoteTrigger = false, onlyItem = null)
 
   try {
     await ensureFonts();
-    const canvas = renderTicket(S(), {
-      code: order.code,
+    // onlyItem chỉ có khi in từ 1 bình luận đang live: tem rút gọn, giờ là lúc bấm in.
+    const canvas = renderTicket(S(), onlyItem ? {
+      uniqueId: order.uniqueId,
+      nickname: order.nickname,
+      liveComment: onlyItem.comment || onlyItem.name || '',
+      ts: Date.now()
+    } : {
       uniqueId: order.uniqueId,
       userId: order.userId || '',
       nickname: order.nickname,
-      phone: order.phone || '',
-      address: order.address || '',
-      items: onlyItem ? [onlyItem] : order.items || [],
-      total: onlyItem ? (Number(onlyItem.price) || 0) * (Number(onlyItem.qty) || 1) : order.total || 0,
-      ts: onlyItem?.ts || order.ts
+      items: order.items || [],
+      total: order.total || 0,
+      ts: order.ts
     });
 
     const bytes = canvasToEscPos(canvas);
