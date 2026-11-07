@@ -94,30 +94,30 @@ final class SupportNotifier: NSObject, UNUserNotificationCenterDelegate {
 
 // MARK: - Màn chat
 
+/// Kiểu Messenger: danh sách phiên theo ngày, bấm vào một phiên mới thấy tin nhắn và ô chat.
 struct SupportChatView: View {
     @EnvironmentObject var client: LiveClient
 
     @State private var threads: [SupportThread] = []
+    /// nil = đang xem danh sách.
+    @State private var selectedId: String?
+    @State private var composingNew = false
     @State private var draft = ""
     @State private var sending = false
     @State private var loaded = false
-    @State private var composing = false // đã bấm "Phiên mới" nhưng chưa gửi tin đầu
     @State private var error: String?
 
-    private var current: SupportThread? { threads.first { $0.session.open } }
-    private var showComposer: Bool { current != nil || composing }
+    private var selected: SupportThread? { threads.first { $0.id == selectedId } }
+    private var hasOpen: Bool { threads.contains { $0.session.open } }
+    private var inThread: Bool { composingNew || selected != nil }
+    private var canType: Bool { composingNew || (selected?.session.open ?? false) }
     private var canSend: Bool { !sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         SubPage(title: "Chat với quản trị viên",
                 trailing: {
-                    if showComposer {
-                        T("Đang mở 1 phiên", 12, .bold, Theme.accent)
-                            .padding(.horizontal, 12)
-                            .frame(height: 32)
-                            .background(Capsule().fill(Theme.card).overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1)))
-                    } else {
-                        Button { composing = true } label: {
+                    if !inThread && !hasOpen {
+                        Button { composingNew = true } label: {
                             T("+ Phiên mới", 13, .bold, .white)
                                 .padding(.horizontal, 16)
                                 .frame(height: 44)
@@ -126,22 +126,7 @@ struct SupportChatView: View {
                         .buttonStyle(.plain)
                     }
                 }) {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: Metrics.gap) {
-                    T("Phiên tự đóng sau 24 giờ không có tin mới. Tin nhắn lưu 30 ngày.", 12, .medium, Theme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    T("Các phiên chat", 15, .bold).frame(maxWidth: .infinity, alignment: .leading)
-                    if showComposer { composer }
-                    ForEach(threads.filter { !$0.session.open }) { t in pastCard(t) }
-                    if loaded && !showComposer && threads.isEmpty {
-                        T("Chưa có phiên chat nào. Bấm “Phiên mới” để nhắn cho quản trị viên.", 13, .semibold, Theme.muted)
-                            .multilineTextAlignment(.center)
-                            .padding(.top, 24)
-                    }
-                }
-                .padding(.horizontal, Metrics.gutter)
-                .padding(.bottom, 16)
-            }
+            if inThread { thread } else { list }
         }
         .task {
             client.supportChatOpen = true
@@ -155,81 +140,155 @@ struct SupportChatView: View {
         }
     }
 
-    // MARK: Thẻ phiên
+    // MARK: Danh sách phiên
 
-    private var composer: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Circle().fill(Theme.green).frame(width: 8, height: 8)
-                T("Phiên hiện tại", 14, .bold)
-                if let s = current?.session { T("· mở lúc \(Self.stamp(s.createdAt))", 12, .medium, Theme.muted) }
-                Spacer()
-                Button {
-                    Task {
-                        composing = false
-                        await client.endSupportSession()
-                        await reload()
-                    }
-                } label: {
-                    T("Kết thúc phiên", 13, .semibold, Theme.muted)
-                        .padding(.horizontal, 12)
-                        .frame(height: 36)
-                        .background(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line, lineWidth: 1))
+    private var list: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 10) {
+                T("Phiên tự đóng sau 24 giờ không có tin mới. Tin nhắn lưu 30 ngày.", 12, .medium, Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 4)
+                if loaded && threads.isEmpty {
+                    T("Chưa có phiên chat nào. Bấm “Phiên mới” để nhắn cho quản trị viên.", 13, .semibold, Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 32)
                 }
-                .buttonStyle(.plain)
-            }
-            if let msgs = current?.messages, !msgs.isEmpty {
-                ForEach(msgs) { m in line(m) }
-            } else {
-                T("Nhập nội dung cần hỗ trợ, quản trị viên sẽ trả lời tại đây.", 13, .medium, Theme.muted)
-            }
-            if let error { T(error, 12, .semibold, Theme.red) }
-            HStack(spacing: 10) {
-                TextField("Nhập tin nhắn…", text: $draft, axis: .vertical)
-                    .lineLimit(1...4)
-                    .font(.system(size: 15))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Theme.card)
-                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line, lineWidth: 1)))
-                Button { Task { await send() } } label: {
-                    T("Gửi", 15, .bold, .white)
-                        .padding(.horizontal, 20)
-                        .frame(height: 48)
-                        .background(Capsule().fill(canSend ? Theme.orangeDeep : Theme.faint))
+                ForEach(threads) { t in
+                    Button { selectedId = t.id; error = nil } label: { row(t) }
+                        .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
             }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.bottom, 16)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.card)
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.orangeDeep, lineWidth: 1.5)))
     }
 
-    private func pastCard(_ t: SupportThread) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                T("Phiên \(Self.stamp(t.session.createdAt))", 14, .bold)
-                Spacer()
-                T("Đã đóng · \(t.messages.count) tin", 12, .medium, Theme.muted)
+    private func row(_ t: SupportThread) -> some View {
+        let last = t.messages.last
+        return HStack(spacing: 12) {
+            Circle().fill(t.session.open ? Theme.green : Theme.faint).frame(width: 10, height: 10)
+            VStack(alignment: .leading, spacing: 3) {
+                T("Phiên \(Self.day(t.session.createdAt))", 15, .bold)
+                T(last.map { ($0.fromAdmin ? "Quản trị viên: " : "Bạn: ") + $0.text } ?? "Chưa có tin nhắn", 13, .medium, Theme.muted)
+                    .lineLimit(1)
             }
-            ForEach(t.messages) { m in line(m) }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 3) {
+                T(t.session.open ? "Đang mở" : "Đã đóng", 11, .bold, t.session.open ? Theme.green : Theme.muted)
+                T(Self.clock(last?.ts ?? t.session.lastAt), 11, .medium, Theme.muted)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardStyle(16)
     }
 
-    private func line(_ m: SupportMessage) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            T(m.fromAdmin ? "Quản trị viên" : "Bạn", 13, .bold, m.fromAdmin ? Theme.accent : Theme.orangeDeep)
-                .frame(width: 92, alignment: .leading)
-            T(m.text, 14, .medium)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            T(Self.stamp(m.ts), 11, .medium, Theme.muted)
+    // MARK: Một phiên
+
+    private var thread: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button {
+                    selectedId = nil
+                    composingNew = false
+                    draft = ""
+                } label: {
+                    T("‹ Các phiên", 14, .bold, Theme.accent)
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                T(selected.map { "Phiên \(Self.day($0.session.createdAt))" } ?? "Phiên mới", 14, .bold)
+                Spacer()
+                if selected?.session.open == true {
+                    Button {
+                        Task {
+                            await client.endSupportSession()
+                            await reload()
+                        }
+                    } label: {
+                        T("Kết thúc", 13, .semibold, Theme.muted)
+                            .padding(.horizontal, 12)
+                            .frame(height: 34)
+                            .background(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Color.clear.frame(width: 70, height: 1)
+                }
+            }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.bottom, 8)
+
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 8) {
+                        if (selected?.messages.isEmpty ?? true) {
+                            T("Nhắn cho quản trị viên nếu bạn cần hỗ trợ. Khi có trả lời, app sẽ báo cho bạn.", 13, .medium, Theme.muted)
+                                .multilineTextAlignment(.center)
+                                .padding(.top, 24)
+                        }
+                        ForEach(selected?.messages ?? []) { m in bubble(m).id(m.id) }
+                        Color.clear.frame(height: 1).id("end")
+                    }
+                    .padding(.horizontal, Metrics.gutter)
+                    .padding(.bottom, 8)
+                }
+                .onChange(of: selected?.messages.count) { _ in
+                    withAnimation { proxy.scrollTo("end", anchor: .bottom) }
+                }
+                .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+            }
+            footer
+        }
+    }
+
+    private func bubble(_ m: SupportMessage) -> some View {
+        HStack {
+            if !m.fromAdmin { Spacer(minLength: 48) }
+            VStack(alignment: m.fromAdmin ? .leading : .trailing, spacing: 3) {
+                T(m.text, 14, .medium, m.fromAdmin ? Theme.ink : .white)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(m.fromAdmin ? Theme.card : Theme.orangeDeep)
+                            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .strokeBorder(m.fromAdmin ? Theme.line : .clear, lineWidth: 1))
+                    )
+                T((m.fromAdmin ? "Quản trị viên · " : "") + Self.clock(m.ts), 10, .medium, Theme.muted)
+            }
+            if m.fromAdmin { Spacer(minLength: 48) }
+        }
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        if canType {
+            VStack(spacing: 6) {
+                if let error { T(error, 12, .semibold, Theme.red) }
+                HStack(spacing: 10) {
+                    TextField("Nhập tin nhắn…", text: $draft, axis: .vertical)
+                        .lineLimit(1...4)
+                        .font(.system(size: 15))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Capsule().fill(Theme.card).overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1)))
+                    Button { Task { await send() } } label: {
+                        Icon(name: .arrowRight, size: 18, weight: 2.4, color: .white)
+                            .frame(width: 46, height: 46)
+                            .background(Circle().fill(canSend ? Theme.orangeDeep : Theme.faint))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSend)
+                }
+            }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.vertical, 10)
+        } else {
+            T("Phiên này đã đóng. Quay lại danh sách và bấm “Phiên mới” để nhắn tiếp.", 12, .semibold, Theme.muted)
+                .multilineTextAlignment(.center)
+                .padding(Metrics.gutter)
         }
     }
 
@@ -247,21 +306,25 @@ struct SupportChatView: View {
         error = nil
         defer { sending = false }
         do {
-            _ = try await client.sendSupport(text)
+            let m = try await client.sendSupport(text)
             draft = ""
-            composing = false
+            composingNew = false
+            selectedId = m.sessionId
             await reload()
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    private static let stampFormat: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "vi_VN")
-        f.dateFormat = "HH:mm dd/MM"
-        return f
-    }()
+    private static func format(_ f: String) -> DateFormatter {
+        let d = DateFormatter()
+        d.locale = Locale(identifier: "vi_VN")
+        d.dateFormat = f
+        return d
+    }
+    private static let dayFormat = format("dd/MM")
+    private static let clockFormat = format("HH:mm")
 
-    static func stamp(_ d: Date) -> String { stampFormat.string(from: d) }
+    static func day(_ d: Date) -> String { dayFormat.string(from: d) }
+    static func clock(_ d: Date) -> String { clockFormat.string(from: d) }
 }

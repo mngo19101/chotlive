@@ -3416,3 +3416,17 @@ input, select, textarea {
 .support-line b.admin { color: #1d4ed8; }
 .support-line-text { flex: 1; white-space: pre-line; word-break: break-word; }
 .support-hint { margin: 0; font-size: 13px; color: #78716c; }
+
+.support-row2 { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; background: #fff; border: 1px solid #e7e5e4; border-radius: 16px; font: inherit; text-align: left; cursor: pointer; }
+.support-row2 .support-dot.off { background: #8b93a0; margin: 0; }
+.support-row2 .support-dot { margin: 0; flex: none; }
+.support-row2-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.support-row2-main b { font-size: 15px; }
+.support-row2-main span { font-size: 13px; color: #78716c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.support-row2-side { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: none; }
+.support-row2-side b { font-size: 11px; color: #78716c; }
+.support-row2-side b.on { color: #107a54; }
+.support-row2-side small { font-size: 11px; color: #78716c; }
+.support-thread-wrap { display: flex; flex-direction: column; gap: 8px; }
+.support-thread-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.support-back { border: 0; background: none; font: inherit; font-weight: 700; color: #b5490c; cursor: pointer; padding: 6px 0; }
