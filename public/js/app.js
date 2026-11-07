@@ -2251,18 +2251,24 @@ function renderMySupportThread() {
   if (body) body.scrollTop = body.scrollHeight;
 }
 
-async function loadSupportChat() {
+let supportSig = '';
+async function loadSupportChat(quiet = false) {
   const box = $('#support-cards');
   if (!box) return;
   const draft = $('#support-user-text')?.value || '';
+  const hadFocus = document.activeElement?.id === 'support-user-text';
   try {
     const res = await apiFetch('/api/support/sessions?full=1');
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error();
+    const sig = JSON.stringify(data.sessions) + '|' + supportView;
+    if (quiet && sig === supportSig) return; // không đổi: khỏi vẽ lại, giữ nguyên con trỏ đang gõ
+    supportSig = sig;
     supportThreads = data.sessions;
     if (supportView === null) renderMySupportList();
     else renderMySupportThread();
     if (draft && $('#support-user-text')) $('#support-user-text').value = draft;
+    if (hadFocus) $('#support-user-text')?.focus();
     if (supportView !== null && supportView !== 'new') {
       await apiFetch('/api/support/read', jsonPost({}));
       supportUnread = 0;
@@ -2303,6 +2309,9 @@ function openSupportChat() {
 }
 
 $('#menu-row-help')?.addEventListener('click', openSupportChat);
+setInterval(() => {
+  if (supportChatIsOpen() && !document.hidden) loadSupportChat(true);
+}, 3000);
 $('#support-new-session')?.addEventListener('click', () => {
   supportView = 'new';
   renderMySupportThread();

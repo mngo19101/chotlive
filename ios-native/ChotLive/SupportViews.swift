@@ -131,8 +131,16 @@ struct SupportChatView: View {
         .task {
             client.supportChatOpen = true
             SupportNotifier.shared.requestPermission()
+            client.checkSocket()
             await reload()
             await client.markSupportRead()
+            // Hỏi lại server định kỳ: tin từ Telegram vẫn hiện ngay dù kết nối realtime bị rớt.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if Task.isCancelled { break }
+                await reload()
+                if client.supportUnread > 0 { await client.markSupportRead() }
+            }
         }
         .onDisappear { client.supportChatOpen = false }
         .onReceive(client.$lastSupportMessage.compactMap { $0 }) { _ in
