@@ -138,6 +138,22 @@ test('web và app nhận cùng bình luận; server giữ được nhiều hơn 
   app.close();
 });
 
+test('xem bình luận cũ theo từng trang qua API: đủ, không lặp, đúng định dạng cho app', async () => {
+  const all = (await api('/api/comments?limit=1000&format=native')).body.comments;
+  assert.ok(all.length > 10, 'có đủ bình luận để chia trang');
+  const seen = [];
+  let query = '';
+  for (let guard = 0; guard < 500; guard++) {
+    const { body } = await api(`/api/comments?limit=7&format=native${query}`);
+    assert.equal(typeof body.comments[0].text, 'string');
+    seen.push(...body.comments.map((c) => c.id));
+    if (!body.hasMore) break;
+    const last = body.comments[body.comments.length - 1];
+    query = `&before=${last.ts}&beforeId=${encodeURIComponent(last.id)}`;
+  }
+  assert.deepEqual(seen, all.map((c) => c.id));
+});
+
 test('thiết bị đẩy dữ liệu lên không làm mất bình luận của nhau', async () => {
   const web = await device().opened;
   const before = (await api('/api/comments?limit=1000')).body.comments.length;

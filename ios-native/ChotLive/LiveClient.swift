@@ -215,11 +215,21 @@ final class LiveClient: ObservableObject {
         }
     }
 
+    /// Lấy một trang bình luận cũ hơn của phiên để xem. Không có vị trí thì lấy từ mới nhất.
+    func fetchOlderComments(sessionId: String, before: CommentCursor?) async -> CommentsPage? {
+        guard serverSupportsSync else { return nil }
+        let query = [URLQueryItem(name: "sessionId", value: sessionId)] + (before?.queryItems ?? [])
+        return await fetchComments(query, limit: 200)
+    }
+
     private func fetchComments(since: Date?) async -> CommentsPage? {
+        let query = since.map { [URLQueryItem(name: "since", value: String(Int64($0.timeIntervalSince1970 * 1000)))] } ?? []
+        return await fetchComments(query, limit: 1000)
+    }
+
+    private func fetchComments(_ extra: [URLQueryItem], limit: Int) async -> CommentsPage? {
         guard var comps = URLComponents(string: baseURL + "/api/comments") else { return nil }
-        var query = [URLQueryItem(name: "format", value: "native"), URLQueryItem(name: "limit", value: "1000")]
-        if let since { query.append(URLQueryItem(name: "since", value: String(Int64(since.timeIntervalSince1970 * 1000)))) }
-        comps.queryItems = query
+        comps.queryItems = [URLQueryItem(name: "format", value: "native"), URLQueryItem(name: "limit", value: String(limit))] + extra
         guard let url = comps.url else { return nil }
         var req = URLRequest(url: url, timeoutInterval: 30)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

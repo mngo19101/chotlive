@@ -318,11 +318,23 @@ struct SessionDetailView: View {
     @State private var search = ""
     @State private var atBottom = true
     @State private var pending = 0
+    /// Bình luận cũ vừa tải từ server, chỉ giữ khi đang mở màn này.
+    @State private var older: [LiveComment] = []
+    @State private var loadingOlder = false
+    @State private var olderExhausted = false
 
     private var session: LiveSession? { store.sessions.first { $0.id == sessionId } }
 
     /// Cũ trước, mới dưới cùng.
-    private var all: [LiveComment] { store.comments(session: sessionId).sorted { $0.ts < $1.ts } }
+    private var all: [LiveComment] { store.sessionComments(sessionId, older: older) }
+
+    private var isDemo: Bool {
+        #if DEBUG
+        return Demo.isActive
+        #else
+        return false
+        #endif
+    }
 
     private func customer(of c: LiveComment, in map: [String: Customer]) -> Customer? {
         map[Store.key(uniqueId: c.uniqueId, userId: c.userId)]
@@ -374,13 +386,11 @@ struct SessionDetailView: View {
                         if searching { SearchField(text: $search) }
                         if let s = session { summaryCard(s) }
                         tabs(total: session?.commentCount ?? comments.count, count)
-                        if let total = session?.commentCount, total > comments.count, tab == 0, search.isEmpty {
-                            T("Điện thoại đang hiện \(comments.count) bình luận mới nhất. Xem đủ \(total) bình luận trên web.", 12.5, .medium, Theme.muted)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
+                        if !isDemo, let total = session?.commentCount, total > comments.count {
+                            olderControl(loaded: comments.count, total: total, proxy: proxy)
                         }
                         if shown.isEmpty {
-                            T(session?.isLive == true ? "Đang chờ bình luận..." : "Không có bình luận phù hợp.", 13, .medium, Theme.muted)
+                            T(emptyText, 13, .medium, Theme.muted)
                                 .padding(.top, 24)
                         }
                         LazyVStack(spacing: 9) {
@@ -389,6 +399,7 @@ struct SessionDetailView: View {
                                 CommentRow(c: c, closing: store.isClosingComment(c), customer: owner, isNew: isNew(owner)) {
                                     ui.notify(printComment(c, store: store, printer: printer))
                                 }
+                                .id(c.id)
                             }
                         }
                         Color.clear
@@ -407,6 +418,11 @@ struct SessionDetailView: View {
                 .onAppear {
                     if session?.isLive == true { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
+                .task(id: client.serverSupportsSync) {
+                    // Phiên cũ đã hết bình luận trên máy: tự tải luôn, khỏi thấy màn trống.
+                    guard !isDemo, client.serverSupportsSync, all.isEmpty, (session?.commentCount ?? 0) > 0 else { return }
+                    await loadOlder(proxy: nil)
+                }
                 .onChange(of: session?.commentCount ?? 0) { [old = session?.commentCount ?? 0] value in
                     if atBottom {
                         withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -424,6 +440,63 @@ struct SessionDetailView: View {
                 }
             }
         }
+    }
+
+    private var emptyText: String {
+        if loadingOlder { return "Đang tải bình luận..." }
+        return session?.isLive == true ? "Đang chờ bình luận..." : "Không có bình luận phù hợp."
+    }
+
+    /// Nút tải phần cũ từ server, đặt trên đầu danh sách vì bình luận cũ nằm ở trên.
+    @ViewBuilder
+    private func olderControl(loaded: Int, total: Int, proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 8) {
+            T(olderNote(loaded: loaded, total: total), 12.5, .medium, Theme.muted)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if client.serverSupportsSync && !olderExhausted {
+                Button {
+                    Task { @MainActor in await loadOlder(proxy: proxy) }
+                } label: {
+                    HStack(spacing: 8) {
+                        if loadingOlder { ProgressView().controlSize(.small) }
+                        T(loadingOlder ? "Đang tải..." : "Xem bình luận cũ hơn", 13.5, .bold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(
+                        Capsule().fill(Theme.card)
+                            .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(loadingOlder)
+            }
+        }
+    }
+
+    private func olderNote(loaded: Int, total: Int) -> String {
+        if olderExhausted { return "Đã hiện hết \(loaded) bình luận server còn lưu, trên tổng \(total) bình luận của phiên." }
+        if !client.serverSupportsSync { return "Đang hiện \(loaded)/\(total) bình luận. Cần kết nối server để xem phần cũ hơn." }
+        if !search.isEmpty || tab != 0 { return "Đã tải \(loaded)/\(total) bình luận. Chỉ lọc và tìm trong phần đã tải." }
+        return "Đang hiện \(loaded)/\(total) bình luận."
+    }
+
+    @MainActor
+    private func loadOlder(proxy: ScrollViewProxy?) async {
+        guard !loadingOlder else { return }
+        loadingOlder = true
+        defer { loadingOlder = false }
+        let current = all
+        guard let page = await client.fetchOlderComments(sessionId: sessionId, before: CommentCursor.oldest(in: current)) else {
+            if !Task.isCancelled { ui.notify("Không tải được bình luận cũ. Kiểm tra kết nối rồi thử lại.") }
+            return
+        }
+        older.append(contentsOf: page.comments)
+        olderExhausted = !page.hasMore
+        // Danh sách dài thêm ở phía trên: giữ nguyên chỗ đang đọc thay vì để màn hình nhảy.
+        guard let proxy, let anchor = current.first?.id, !page.comments.isEmpty else { return }
+        DispatchQueue.main.async { proxy.scrollTo(anchor, anchor: .top) }
     }
 
     private var subtitle: String {

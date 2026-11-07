@@ -752,6 +752,7 @@ app.get('/api/comments', requireAuth, (req, res) => {
   const rows = sqlite.listComments(db, req.user.id, {
     sessionId: req.query.sessionId ? String(req.query.sessionId) : '',
     before: Number(req.query.before) || 0,
+    beforeId: req.query.beforeId ? String(req.query.beforeId) : '',
     since: Number(req.query.since) || 0,
     limit: limit + 1
   });

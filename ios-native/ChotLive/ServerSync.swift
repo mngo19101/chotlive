@@ -84,6 +84,23 @@ struct CommentsPage: Decodable {
     var hasMore: Bool
 }
 
+/// Vị trí để lấy trang bình luận cũ hơn. Nhiều bình luận có thể trùng thời gian nên phải kèm id.
+struct CommentCursor: Equatable {
+    var ms: Int64
+    var id: String
+
+    /// Bình luận cuối cùng theo thứ tự của server: thời gian trước, id sau.
+    static func oldest(in comments: [LiveComment]) -> CommentCursor? {
+        comments
+            .map { CommentCursor(ms: Int64(($0.ts.timeIntervalSince1970 * 1000).rounded()), id: $0.id) }
+            .min { ($0.ms, $0.id) < ($1.ms, $1.id) }
+    }
+
+    var queryItems: [URLQueryItem] {
+        [URLQueryItem(name: "before", value: String(ms)), URLQueryItem(name: "beforeId", value: id)]
+    }
+}
+
 // MARK: - Đồng bộ trong Store
 
 extension Store {
@@ -165,4 +182,18 @@ extension Store {
 
     /// Lần đầu trên máy mới thì chưa có mốc: lấy phần mới nhất.
     var latestCommentDate: Date? { comments.map(\.ts).max() }
+
+    /// Bình luận của một phiên, cũ trước: phần lưu trên máy cộng với phần cũ vừa tải từ server.
+    /// Phần tải về chỉ để xem, không ghi vào máy, nên không đẩy bình luận mới ra khỏi giới hạn lưu.
+    func sessionComments(_ id: String, older: [LiveComment]) -> [LiveComment] {
+        let local = comments(session: id)
+        let localIds = Set(local.map(\.id))
+        var extra = older.filter { !localIds.contains($0.id) }
+        if !extra.isEmpty {
+            // Đã lưu thành đơn ở đâu đó thì hiện đúng như bình luận đã chốt, kể cả vừa in xong trên máy này.
+            let ordered = Set(customers.flatMap(\.items).map { $0.commentId ?? $0.id })
+            for i in extra.indices where ordered.contains(extra[i].id) { extra[i].printed = true }
+        }
+        return (local + extra).sorted { $0.ts < $1.ts }
+    }
 }

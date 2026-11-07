@@ -239,6 +239,64 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(store.comments.count, 2)
     }
 
+    // MARK: - Xem bình luận cũ từ server
+
+    func testOlderPageStartsAfterLastCommentInServerOrder() {
+        var a = comment("b")
+        var b = comment("a")
+        var c = comment("c")
+        let ts = Date(timeIntervalSince1970: 1_794_000_000.123)
+        a.ts = ts
+        b.ts = ts
+        c.ts = ts.addingTimeInterval(1)
+        let cursor = CommentCursor.oldest(in: [c, a, b])
+        XCTAssertEqual(cursor, CommentCursor(ms: 1_794_000_000_123, id: "a"), "trùng thời gian thì xét id, không lệch mili giây")
+        XCTAssertEqual(cursor?.queryItems.map(\.name), ["before", "beforeId"])
+        XCTAssertNil(CommentCursor.oldest(in: []))
+    }
+
+    func testOlderCommentsShowInOrderWithoutDuplicates() {
+        let store = makeStore()
+        var kept = comment("kept")
+        kept.ts = Date(timeIntervalSince1970: 1_794_000_100)
+        store.addComment(kept, tiktok: "")
+        var old = comment("old")
+        old.ts = Date(timeIntervalSince1970: 1_794_000_000)
+
+        XCTAssertEqual(store.sessionComments("s1", older: [old, kept]).map(\.id), ["old", "kept"])
+    }
+
+    func testOlderCommentsAreNotStoredOnThePhone() {
+        let store = makeStore()
+        var newest: [LiveComment] = []
+        for i in 0..<Store.commentLimit {
+            var c = comment("n\(i)")
+            c.ts = Date(timeIntervalSince1970: 1_794_000_000 + Double(i))
+            newest.append(c)
+        }
+        store.addComments(newest)
+        var old = comment("old")
+        old.ts = Date(timeIntervalSince1970: 1_793_000_000)
+
+        XCTAssertEqual(store.sessionComments("s1", older: [old]).count, Store.commentLimit + 1)
+        XCTAssertEqual(store.comments.count, Store.commentLimit, "không đẩy bình luận mới ra khỏi máy")
+        XCTAssertFalse(store.comments.contains { $0.id == "old" })
+    }
+
+    func testPrintingOlderCommentShowsAsClosedAndIsSent() {
+        let store = makeStore()
+        markSynced(store)
+        var old = comment("old")
+        old.ts = Date(timeIntervalSince1970: 1_793_000_000)
+        XCTAssertFalse(store.sessionComments("s1", older: [old])[0].printed)
+
+        store.saveToCustomer(old)
+        XCTAssertTrue(store.sessionComments("s1", older: [old])[0].printed, "hiện đã chốt ngay sau khi in")
+        XCTAssertTrue(store.comments.isEmpty, "vẫn không lưu bình luận cũ vào máy")
+        let update = store.makeSyncUpdate()
+        XCTAssertEqual(update?.customers.first?.items.first?.commentId, "old", "đơn vẫn gửi lên server")
+    }
+
     func testPrintedOnWebShowsOnPhone() {
         let store = makeStore()
         markSynced(store)

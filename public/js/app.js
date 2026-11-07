@@ -587,6 +587,8 @@ function setCommentScope(sessionId) {
   if (commentScopeSessionId !== sessionId) {
     commentRenderLimit = COMMENT_PAGE;
     olderExhausted = false;
+    // Phần đã tải chỉ liền mạch trong phạm vi cũ; giữ lại thì trang sau sẽ nhảy qua bình luận của live khác.
+    olderComments.clear();
   }
   commentScopeSessionId = sessionId;
   renderActiveLives();
@@ -755,11 +757,19 @@ $('#btn-load-older-comments')?.addEventListener('click', async (e) => {
     return;
   }
   const loaded = commentsInScope();
-  const oldest = loaded[loaded.length - 1];
+  // Nhiều bình luận có thể trùng thời gian: lấy đúng bình luận cuối theo thứ tự của server (thời gian rồi id).
+  const oldest = loaded.reduce((min, c) => {
+    if (!min) return c;
+    const diff = Number(c.ts) - Number(min.ts);
+    return diff < 0 || (diff === 0 && String(c.id) < String(min.id)) ? c : min;
+  }, null);
   btn.disabled = true;
   btn.textContent = 'Đang tải...';
   const params = new URLSearchParams({ limit: String(COMMENT_PAGE) });
-  if (oldest?.ts) params.set('before', String(oldest.ts));
+  if (oldest?.ts) {
+    params.set('before', String(oldest.ts));
+    params.set('beforeId', String(oldest.id));
+  }
   if (commentScopeSessionId) params.set('sessionId', commentScopeSessionId);
   try {
     const data = await apiFetch(`/api/comments?${params}`, { method: 'GET', cache: 'no-store' });

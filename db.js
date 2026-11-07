@@ -155,14 +155,18 @@ export function markCommentPrinted(db, userId, id) {
   updateComment(db, userId, c);
 }
 
-export function listComments(db, userId, { sessionId = '', before = 0, since = 0, limit = 200 } = {}) {
+export function listComments(db, userId, { sessionId = '', before = 0, beforeId = '', since = 0, limit = 200 } = {}) {
   const where = ['user_id = ?'];
   const args = [userId];
   if (sessionId) {
     where.push('session_id = ?');
     args.push(sessionId);
   }
-  if (before) {
+  if (before && beforeId) {
+    // Nhiều bình luận có thể trùng mốc thời gian: phải kèm id thì sang trang mới không sót.
+    where.push('(ts < ? OR (ts = ? AND id < ?))');
+    args.push(before, before, beforeId);
+  } else if (before) {
     where.push('ts < ?');
     args.push(before);
   }
