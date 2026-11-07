@@ -2172,6 +2172,149 @@ $('#menu-row-help')?.addEventListener('click', () => {
   $('#modal-help-guide')?.showModal();
 });
 
+/* ===== Chat với quản trị viên (khách) ===== */
+let supportUnread = 0;
+let supportChatSessions = [];
+let supportChatViewing = null; // null = phiên mới nhất
+let supportChatTab = 'current';
+
+const jsonPost = (body) => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body)
+});
+
+function renderSupportUnread() {
+  for (const id of ['#help-unread-badge', '#help-chat-unread']) {
+    const el = $(id);
+    if (!el) continue;
+    el.textContent = String(supportUnread);
+    el.style.display = supportUnread > 0 ? 'inline-block' : 'none';
+  }
+}
+
+async function refreshSupportUnread() {
+  const cur = getCurrentUser();
+  if (!cur || cur.role === 'admin' || !getAuthToken()) return;
+  try {
+    const res = await apiFetch('/api/support/sessions');
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      supportUnread = data.unread || 0;
+      renderSupportUnread();
+    }
+  } catch {}
+}
+
+const supportChatIsOpen = () => Boolean($('#modal-support-chat')?.open);
+
+async function loadSupportChat() {
+  const body = $('#support-user-body');
+  if (!body) return;
+  try {
+    const listRes = await apiFetch('/api/support/sessions');
+    const list = await listRes.json();
+    if (listRes.ok && list.ok) supportChatSessions = list.sessions;
+
+    if (supportChatTab === 'history') {
+      body.innerHTML = supportChatSessions.length
+        ? supportChatSessions
+            .map(
+              (x) => `<button type="button" class="support-session-row" data-support-session="${esc(x.id)}">
+                <b>${esc(supportTime(x.createdAt))} · ${x.open ? 'đang mở' : 'đã đóng'}</b>
+                <span class="support-row-last">${x.lastSender === 'admin' ? 'Admin: ' : 'Bạn: '}${esc(x.lastText)}</span>
+              </button>`
+            )
+            .join('')
+        : '<p class="support-empty">Chưa có phiên chat nào.</p>';
+      $('#support-user-footer').style.display = 'none';
+      return;
+    }
+
+    const id = supportChatViewing && supportChatViewing !== supportChatSessions[0]?.id ? supportChatViewing : '';
+    const res = await apiFetch(`/api/support/messages${id ? `?sessionId=${encodeURIComponent(id)}` : ''}`);
+    const data = await res.json();
+    if (!res.ok) return;
+    const msgs = data.messages
+      .map((m) => `<div class="support-msg ${m.sender === 'user' ? 'mine' : ''}">${esc(m.text)}<small>${m.sender === 'admin' ? 'Admin · ' : ''}${esc(supportTime(m.ts))}</small></div>`)
+      .join('');
+    const note = data.session && !data.session.open ? '<div class="support-sep">Phiên đã đóng. Gửi tin mới sẽ mở phiên mới.</div>' : '';
+    body.innerHTML =
+      (msgs || '<p class="support-empty">Nhắn cho Admin nếu bạn cần hỗ trợ. Khi Admin trả lời, bạn sẽ được báo ngay.</p>') + (id ? '' : note);
+    body.scrollTop = body.scrollHeight;
+    $('#support-user-footer').style.display = id ? 'none' : 'flex';
+    if (!id) {
+      await apiFetch('/api/support/read', jsonPost({}));
+      supportUnread = 0;
+      renderSupportUnread();
+    }
+  } catch {}
+}
+
+function setSupportTab(tab) {
+  supportChatTab = tab;
+  if (tab === 'current') supportChatViewing = null;
+  $('#support-tab-current')?.classList.toggle('is-active', tab === 'current');
+  $('#support-tab-history')?.classList.toggle('is-active', tab === 'history');
+  loadSupportChat();
+}
+
+$('#btn-open-support-chat')?.addEventListener('click', () => {
+  $('#modal-help-guide')?.close();
+  $('#modal-support-chat')?.showModal();
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+  setSupportTab('current');
+});
+$('#support-tab-current')?.addEventListener('click', () => setSupportTab('current'));
+$('#support-tab-history')?.addEventListener('click', () => setSupportTab('history'));
+$('#support-user-body')?.addEventListener('click', (e) => {
+  const row = e.target.closest('[data-support-session]');
+  if (!row) return;
+  supportChatViewing = row.dataset.supportSession;
+  supportChatTab = 'current';
+  $('#support-tab-current')?.classList.add('is-active');
+  $('#support-tab-history')?.classList.remove('is-active');
+  loadSupportChat();
+});
+$('#support-user-send')?.addEventListener('click', async () => {
+  const input = $('#support-user-text');
+  const text = (input?.value || '').trim();
+  if (!text) return;
+  const btn = $('#support-user-send');
+  btn.disabled = true;
+  try {
+    const res = await apiFetch('/api/support/messages', jsonPost({ text }));
+    const data = await res.json();
+    if (!res.ok) toast(data.error || 'Không gửi được', '⚠️');
+    else {
+      input.value = '';
+      supportChatViewing = null;
+      await loadSupportChat();
+    }
+  } catch {
+    toast('Không gửi được, thử lại sau', '⚠️');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+onSupportMessage((msg) => {
+  const cur = getCurrentUser();
+  if (!cur || cur.role === 'admin' || msg.message.sender !== 'admin') return;
+  if (supportChatIsOpen() && supportChatTab === 'current' && !supportChatViewing) {
+    loadSupportChat();
+    return;
+  }
+  supportUnread = msg.unread ?? supportUnread + 1;
+  renderSupportUnread();
+  toast(`Admin: ${msg.message.text.slice(0, 60)}`, '💬', 4000);
+  if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification('Admin đã trả lời', { body: msg.message.text.slice(0, 120) });
+    } catch {}
+  }
+});
+
 /* ============================================================
    4B. ĐĂNG NHẬP, ĐĂNG KÝ, PHÂN QUYỀN & QUẢN TRỊ ADMIN
    ============================================================ */
@@ -2345,6 +2488,8 @@ function applyAuthUserToUI(user) {
   if (isAdmin) {
     loadAdminUsers();
     loadSupportList();
+  } else {
+    refreshSupportUnread();
   }
 }
 

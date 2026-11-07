@@ -3394,3 +3394,10 @@ input, select, textarea {
 .support-reply-closed { padding: 10px 14px; font-size: 12.5px; color: #5b6472; border-top: 1px solid #eee9e0; }
 .support-empty { padding: 24px; color: #5b6472; text-align: center; font-size: 13px; }
 @media (max-width: 720px) { .support-admin-layout { grid-template-columns: 1fr; } }
+.support-user-tabs { display: flex; gap: 8px; margin: 12px 0 8px; }
+.support-tab { flex: 1; height: 36px; border-radius: 999px; border: 1px solid #e6e8ec; background: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+.support-tab.is-active { background: #fff4ea; border-color: #ea6a09; color: #b5490c; }
+.support-user-body { height: 320px; max-height: 50vh; border: 1px solid #eee9e0; border-radius: 16px; }
+.support-msg.mine { background: #ea6a09; color: #fff; align-self: flex-end; }
+.support-session-row { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 14px; background: #fbf9f6; border: 1px solid #eee9e0; cursor: pointer; text-align: left; font: inherit; }
+#btn-open-support-chat .support-badge { margin-left: 6px; }

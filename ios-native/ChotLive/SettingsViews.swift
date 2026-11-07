@@ -149,7 +149,7 @@ struct SettingsView: View {
             HairLine()
             settingRow(.bell, "Thông báo", route: .notifications)
             HairLine()
-            settingRow(.help, "Trợ giúp", trailing: client.supportUnread > 0 ? "\(client.supportUnread) tin mới" : nil,
+            settingRow(.help, "Hỗ trợ", trailing: client.supportUnread > 0 ? "\(client.supportUnread) tin mới" : nil,
                        trailingColor: Theme.red, route: .help)
         }
         .cardStyle(22)
@@ -436,82 +436,6 @@ struct NotificationsView: View {
                     .cardStyle(20)
                 }
                 .padding(.horizontal, Metrics.gutter)
-            }
-        }
-    }
-}
-
-// MARK: - Trợ giúp
-
-struct HelpView: View {
-    @EnvironmentObject var client: LiveClient
-    @EnvironmentObject var ui: AppUI
-
-    private let topics: [(String, String)] = [
-        ("Bắt đầu đọc bình luận", "Vào tab Bình luận, bấm Live mới, nhập tên TikTok đang live. Phiên được ghi lại tự động."),
-        ("Chốt đơn", "Mở phiên live, bấm nút in trên bình luận. Đơn được lưu vào Khách hàng và Đơn hàng kể cả khi chưa nối máy in."),
-        ("In tem", "Vào Tôi › Máy in để tìm và kết nối máy in Bluetooth, sau đó bấm In đơn trên đơn hàng."),
-        ("Trạng thái giao", "Bấm Giao hàng để chuyển đơn sang Đang giao, bấm lần nữa khi đã giao xong."),
-    ]
-
-    var body: some View {
-        SubPage(title: "Trợ giúp") {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: Metrics.gap) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        T("Tài khoản ChốtLive", 15, .bold)
-                        if !client.username.isEmpty { T(client.username, 14, .semibold).lineLimit(1) }
-                        if !client.baseURL.isEmpty { T(client.baseURL, 12, .medium, Theme.muted).lineLimit(1) }
-                        T(client.socketConnected ? "Đã nối server" : "Mất kết nối server", 12, .semibold,
-                          client.socketConnected ? Theme.green : Theme.red)
-                        if client.socketConnected {
-                            T(client.serverSupportsSync
-                              ? "\(client.clientsCount) thiết bị đang đồng bộ. Web và điện thoại phải cùng server và cùng tài khoản này mới thấy dữ liệu của nhau."
-                              : "Server này là bản cũ nên chưa đồng bộ đơn và khách.", 12, .medium, Theme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .cardStyle(20)
-
-                    Button { ui.push(.supportChat) } label: {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                T("Chat với quản trị viên", 15, .bold)
-                                T("Gửi câu hỏi cho Admin. Khi Admin trả lời, app sẽ báo cho bạn. Xem lại các phiên trước trong 30 ngày.",
-                                  13, .medium, Theme.muted)
-                                    .multilineTextAlignment(.leading)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer(minLength: 4)
-                            if client.supportUnread > 0 {
-                                T("\(client.supportUnread)", 12, .bold, .white)
-                                    .padding(.horizontal, 8)
-                                    .frame(minWidth: 24, minHeight: 24)
-                                    .background(Capsule().fill(Theme.red))
-                            }
-                            Icon(name: .chevronRight, size: 16, weight: 2.4, color: Theme.muted)
-                        }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .cardStyle(20)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
-                    ForEach(topics, id: \.0) { title, body in
-                        VStack(alignment: .leading, spacing: 6) {
-                            T(title, 15, .bold)
-                            T(body, 13, .medium, Theme.muted).fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .cardStyle(20)
-                    }
-                }
-                .padding(.horizontal, Metrics.gutter)
-                .padding(.bottom, 16)
             }
         }
     }

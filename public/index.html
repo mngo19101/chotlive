@@ -962,6 +962,7 @@
                     <span class="setting-row-title">Trợ giúp</span>
                   </div>
                   <div class="setting-row-right">
+                    <span class="support-badge" id="help-unread-badge" style="display:none"></span>
                     <span class="row-chevron">›</span>
                   </div>
                 </div>
@@ -1558,9 +1559,31 @@
         </div>
       </div>
 
-      <button type="button" class="btn-orange-pill" style="width:100%;height:42px" data-close-dialog>
+      <button type="button" class="btn-orange-pill" id="btn-open-support-chat" style="width:100%;height:42px;margin-bottom:10px">
+        💬 Chat với quản trị viên <span class="support-badge" id="help-chat-unread" style="display:none"></span>
+      </button>
+      <button type="button" class="btn-orange-pill" style="width:100%;height:42px;background:#fff;color:inherit;border:1px solid #e6e8ec" data-close-dialog>
         Đã hiểu
       </button>
+    </div>
+  </dialog>
+
+  <!-- ================== MODAL: CHAT VỚI QUẢN TRỊ VIÊN ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-support-chat">
+    <div class="modal-content-card">
+      <div class="sheet-drag-handle"></div>
+      <button class="btn-modal-close" data-close-dialog>×</button>
+      <h2 class="modal-title-main">Chat với quản trị viên</h2>
+      <p class="modal-subtitle-text">Phiên tự đóng sau 24 giờ không có tin mới. Tin nhắn lưu 30 ngày.</p>
+      <div class="support-user-tabs">
+        <button type="button" class="support-tab is-active" id="support-tab-current">Phiên hiện tại</button>
+        <button type="button" class="support-tab" id="support-tab-history">Phiên trước</button>
+      </div>
+      <div class="support-thread-body support-user-body" id="support-user-body"></div>
+      <div class="support-reply" id="support-user-footer">
+        <textarea id="support-user-text" rows="2" maxlength="2000" placeholder="Nhập tin nhắn…"></textarea>
+        <button type="button" class="btn-orange-pill" id="support-user-send" style="height:40px;padding:0 18px">Gửi</button>
+      </div>
     </div>
   </dialog>
 

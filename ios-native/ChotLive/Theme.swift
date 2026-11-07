@@ -179,7 +179,6 @@ enum Route: Hashable {
     case keywords
     case notifications
     case help
-    case supportChat
 }
 
 struct SheetItem: Identifiable {

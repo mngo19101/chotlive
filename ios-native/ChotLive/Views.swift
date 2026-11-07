@@ -67,7 +67,7 @@ struct MainShell: View {
         .onReceive(NotificationCenter.default.publisher(for: .openSupportChat)) { _ in
             ui.tab = .me
             ui.path = NavigationPath()
-            ui.push(.supportChat)
+            ui.push(.help)
         }
         .onReceive(client.$liveState.dropFirst()) { state in
             // Server mới tự ghi phiên; chỉ server bản cũ mới cần máy tự ghi.
@@ -105,8 +105,7 @@ struct MainShell: View {
         case .printer: PrinterView()
         case .keywords: KeywordsView()
         case .notifications: NotificationsView()
-        case .help: HelpView()
-        case .supportChat: SupportChatView()
+        case .help: SupportChatView()
         }
     }
 }
