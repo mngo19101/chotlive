@@ -34,6 +34,11 @@ enum Demo {
         let accA = demoAccount("https://shop.onrender.com", "Chủ shop")
         let accB = demoAccount("https://khohanglinh.onrender.com", "Nhân viên kho")
         client.setDemoAccounts([accA, accB], current: accA)
+        let trialLeft: TimeInterval = (2 * 24 + 13) * 3600 + 4 * 60 + 9
+        client.setDemoAccess(screen == "meExpired"
+            ? AccountAccess(status: "expired", canFollowLive: false, endsAt: nil, code: "TRIAL_EXPIRED",
+                            message: "Đã hết 3 ngày dùng thử. Vui lòng mua gói để tiếp tục theo dõi live.")
+            : AccountAccess(status: "trial", canFollowLive: true, endsAt: Date().addingTimeInterval(trialLeft)))
     }
 
     @MainActor
@@ -46,7 +51,7 @@ enum Demo {
             ui.present(dim: 0.9) { DateFilterSheet(filter: DateFilter.make(.today)) { _ in } }
         case "customers": ui.tab = .customers
         case "orders": ui.tab = .orders
-        case "me": ui.tab = .me
+        case "me", "meExpired": ui.tab = .me
         case "orderActions":
             ui.tab = .orders
             ui.present { OrderActionSheet(orderId: "linh.nguyen98|o25") }

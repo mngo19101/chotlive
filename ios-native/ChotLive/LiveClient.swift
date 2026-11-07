@@ -21,7 +21,9 @@ final class LiveClient: ObservableObject {
     /// Các tài khoản ChốtLive đã đăng nhập trên máy (gồm cả tài khoản đang dùng), để đổi qua lại không cần nhập lại mật khẩu.
     @Published private(set) var savedAccounts: [AuthStorage.SavedAccount] = []
     /// Dùng thử, gói hoặc đã hết hạn của tài khoản đang dùng.
-    @Published private(set) var access: AccountAccess?
+    @Published private(set) var access: AccountAccess? {
+        didSet { scheduleAccessCheck() }
+    }
     /// Thông báo vừa bị chặn theo dõi live vì hết hạn, hiện thành hộp thoại ở mọi màn hình.
     @Published var accessNotice: String?
 
@@ -48,6 +50,7 @@ final class LiveClient: ObservableObject {
     private var pingTimer: Timer?
     private var pendingHello: ServerSnapshot?
     private var syncWork: Task<Void, Never>?
+    private var accessCheck: Task<Void, Never>?
 
     private var currentAccountKey: String { AuthStorage.accountKey(server: baseURL, user: username) }
 
@@ -274,9 +277,45 @@ final class LiveClient: ObservableObject {
         return page
     }
 
+    // MARK: - Dùng thử và gói
+
+    /// Hỏi lại server thời hạn dùng của tài khoản. Server chỉ tự báo khi đang theo dõi live,
+    /// nên lúc mở lại app và lúc hết giờ dùng thử phải tự hỏi.
+    func refreshAccess() {
+        guard loggedIn, !token.isEmpty, let url = URL(string: baseURL + "/api/auth/me") else { return }
+        let key = currentAccountKey
+        var req = URLRequest(url: url, timeoutInterval: 20)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        Task { @MainActor [weak self] in
+            let reply = try? await URLSession.shared.data(for: req)
+            guard let self, self.currentAccountKey == key else { return }
+            if let (data, resp) = reply, (resp as? HTTPURLResponse)?.statusCode == 200,
+               let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+               let raw = (json["user"] as? [String: Any])?["access"] as? [String: Any] {
+                self.access = AccountAccess(raw)
+            } else {
+                self.scheduleAccessCheck() // mất mạng lúc vừa hết giờ: thử lại sau
+            }
+        }
+    }
+
+    /// Hỏi lại ngay sau mốc hết hạn; đã quá mốc mà server vẫn chưa báo hết thì hỏi lại mỗi 5 giây.
+    private func scheduleAccessCheck() {
+        accessCheck?.cancel()
+        accessCheck = nil
+        guard let a = access, a.canFollowLive, a.status != "admin", let end = a.endsAt else { return }
+        let delay = max(5, end.timeIntervalSinceNow + 1)
+        accessCheck = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.refreshAccess()
+        }
+    }
+
     /// App quay lại màn hình: kiểm tra kết nối còn sống không, để nối lại ngay thay vì chờ tự phát hiện.
     func checkSocket() {
         guard loggedIn else { return }
+        refreshAccess()
         guard let t = task else {
             openSocket()
             return
@@ -461,6 +500,10 @@ extension LiveClient {
         savedAccounts = accounts
         baseURL = current.server
         username = current.user
+    }
+
+    func setDemoAccess(_ demo: AccountAccess) {
+        access = demo
     }
 }
 #endif

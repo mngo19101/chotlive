@@ -55,7 +55,7 @@ jobs:
           xcrun simctl status_bar "$UDID" override --time "20:55" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
           xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/ChotLive.app
           mkdir -p screenshots
-          for screen in login register sales live dateFilter customers orders me orderActions orderDetail customerDetail \
+          for screen in login register sales live dateFilter customers orders me meExpired orderActions orderDetail customerDetail \
                         liveNew areaPicker session orderEdit orderCreate orderComments addressEdit addAccount printer keywords notifications help; do
             xcrun simctl terminate "$UDID" com.chotlive.native || true
             xcrun simctl launch "$UDID" com.chotlive.native -demoScreen "$screen"

@@ -84,6 +84,7 @@ struct AccountAccess: Equatable {
     var status: String     // admin | plan | trial | expired
     var canFollowLive: Bool
     var endsAt: Date?
+    var code: String       // TRIAL_EXPIRED | PLAN_EXPIRED khi đã hết hạn
     var message: String
 
     init?(_ dict: [String: Any]) {
@@ -91,21 +92,30 @@ struct AccountAccess: Equatable {
         self.status = status
         canFollowLive = (dict["canFollowLive"] as? Bool) ?? true
         endsAt = (dict["endsAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
+        code = (dict["code"] as? String) ?? ""
         message = (dict["message"] as? String) ?? ""
     }
 
-    /// Dòng hiện ở màn Tôi; admin không cần.
-    func summary(now: Date = Date()) -> String? {
-        switch status {
-        case "expired":
-            return message
-        case "trial":
-            return "Dùng thử còn \(Self.remainingText(until: endsAt, now: now))"
-        case "plan":
-            return "Gói còn \(Self.remainingText(until: endsAt, now: now))"
-        default:
-            return nil
-        }
+    init(status: String, canFollowLive: Bool, endsAt: Date?, code: String = "", message: String = "") {
+        self.status = status
+        self.canFollowLive = canFollowLive
+        self.endsAt = endsAt
+        self.code = code
+        self.message = message
+    }
+
+    /// Thời gian dùng thử còn lại, đếm tới từng giây như trên web: "2 ngày 13 giờ 04 phút 09 giây".
+    /// Bỏ các phần đầu bằng 0, nên lúc gần hết chỉ còn "04 phút 09 giây".
+    static func countdownText(until end: Date?, now: Date) -> String {
+        let total = Int(max(0, (end ?? now).timeIntervalSince(now)).rounded(.up))
+        let days = total / 86400, hours = total % 86400 / 3600, minutes = total % 3600 / 60, seconds = total % 60
+        let pad = { (n: Int) in n < 10 ? "0\(n)" : "\(n)" }
+        var parts: [String] = []
+        if days > 0 { parts.append("\(days) ngày") }
+        if total >= 3600 { parts.append("\(hours) giờ") }
+        if total >= 60 { parts.append("\(pad(minutes)) phút") }
+        parts.append("\(pad(seconds)) giây")
+        return parts.joined(separator: " ")
     }
 
     static func remainingText(until end: Date?, now: Date) -> String {

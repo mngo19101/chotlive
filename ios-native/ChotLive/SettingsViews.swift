@@ -27,10 +27,8 @@ struct SettingsView: View {
                     .padding(.bottom, 15)
 
                 sectionLabel("Tài khoản")
-                if let summary = client.access?.summary() {
-                    T(summary, 13.5, .bold, client.access?.canFollowLive == false ? Theme.red : Theme.accent)
-                        .padding(.leading, 4)
-                        .padding(.bottom, 8)
+                if let access = client.access, access.status != "admin" {
+                    AccessCard(access: access).padding(.bottom, 10)
                 }
                 appAccountsCard.padding(.bottom, 15)
 
@@ -173,6 +171,51 @@ struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Dùng thử, gói hoặc hết hạn của tài khoản đang dùng. Lúc dùng thử thì đếm ngược từng giây.
+struct AccessCard: View {
+    let access: AccountAccess
+
+    var body: some View {
+        if access.status == "trial" {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                card(title: "Dùng thử miễn phí còn",
+                     value: AccountAccess.countdownText(until: access.endsAt, now: context.date),
+                     color: Theme.accent, background: Theme.peachSoft, border: Theme.peachLine)
+            }
+        } else if access.canFollowLive {
+            card(title: "Gói đang dùng",
+                 value: "Còn \(AccountAccess.remainingText(until: access.endsAt, now: Date()))",
+                 color: Theme.accent, background: Theme.peachSoft, border: Theme.peachLine)
+        } else {
+            card(title: access.code == "PLAN_EXPIRED" ? "Gói đã hết hạn" : "Đã hết dùng thử",
+                 value: access.message.isEmpty ? "Vui lòng mua gói để tiếp tục theo dõi live." : access.message,
+                 color: Theme.red, background: Theme.redSoft, border: Theme.red.opacity(0.25), wraps: true)
+        }
+    }
+
+    private func card(title: String, value: String, color: Color, background: Color, border: Color,
+                      wraps: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            Icon(name: .calendar, size: 16, weight: 2.3, color: color)
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(Theme.card))
+            VStack(alignment: .leading, spacing: 3) {
+                T(title, 12.5, .semibold, color.opacity(0.85)).lineLimit(1)
+                if wraps {
+                    T(value, 14, .bold, color).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    T(value, 15, .bold, color).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 15)
+        .padding(.vertical, 12)
+        .background(RoundedRectangle(cornerRadius: 18).fill(background))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(border, lineWidth: 1))
     }
 }
 
