@@ -183,6 +183,7 @@ let uiEventListeners = [];
 let liveEventListeners = [];
 let forceLogoutListeners = [];
 let adminUsersListeners = [];
+let accessListeners = [];
 let offlineListeners = [];
 /** Số gói đã gửi qua WebSocket mà server chưa xác nhận. */
 let unackedPushes = 0;
@@ -237,6 +238,22 @@ export function onForceLogout(fn) {
 
 export function onAdminUsersSync(fn) {
   adminUsersListeners.push(fn);
+}
+
+/** `fn(access)`: quyền dùng của tài khoản vừa đổi (hết dùng thử, được cấp gói...). */
+export function onAccountAccess(fn) {
+  accessListeners.push(fn);
+}
+
+function updateAccess(access) {
+  const user = getCurrentUser();
+  if (!user) return;
+  setAuthSession(getAuthToken(), { ...user, access });
+  accessListeners.forEach((fn) => {
+    try {
+      fn(access);
+    } catch {}
+  });
 }
 
 function notifyLives(lives) {
@@ -457,6 +474,12 @@ export function connectSync() {
       });
       return;
     }
+
+    if (msg.type === 'access' && msg.access) {
+      updateAccess(msg.access);
+      return;
+    }
+    if (msg.type === 'hello' && msg.user?.access) updateAccess(msg.user.access);
 
     if (msg.type === 'hello' && msg.state) {
       syncStatus.connected = true;

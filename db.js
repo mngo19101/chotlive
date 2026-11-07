@@ -33,8 +33,25 @@ export function openDb(file) {
     );
     CREATE INDEX IF NOT EXISTS idx_live_comments_ts ON live_comments (user_id, ts);
     CREATE INDEX IF NOT EXISTS idx_live_comments_session ON live_comments (user_id, session_id, ts);
+    CREATE TABLE IF NOT EXISTS ip_registrations (
+      ip TEXT NOT NULL, user_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+      PRIMARY KEY (ip, user_id)
+    );
   `);
   return db;
+}
+
+/* Tài khoản đã tạo từ mỗi IP. Xoá tài khoản không xoá dòng này, nếu không xoá đi tạo lại sẽ né được giới hạn. */
+export function countIpRegistrations(db, ip) {
+  return Number(db.prepare('SELECT COUNT(*) AS n FROM ip_registrations WHERE ip = ?').get(ip).n);
+}
+
+export function addIpRegistration(db, ip, userId, at) {
+  db.prepare('INSERT INTO ip_registrations (ip, user_id, created_at) VALUES (?, ?, ?)').run(ip, userId, at);
+}
+
+export function removeIpRegistration(db, ip, userId) {
+  db.prepare('DELETE FROM ip_registrations WHERE ip = ? AND user_id = ?').run(ip, userId);
 }
 
 export function tx(db, fn) {

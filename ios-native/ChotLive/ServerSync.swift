@@ -79,6 +79,43 @@ struct LiveInfo: Identifiable, Equatable {
     }
 }
 
+/// Quyền dùng của tài khoản do server tính. Chỉ để hiển thị: việc chặn theo dõi live nằm ở server.
+struct AccountAccess: Equatable {
+    var status: String     // admin | plan | trial | expired
+    var canFollowLive: Bool
+    var endsAt: Date?
+    var message: String
+
+    init?(_ dict: [String: Any]) {
+        guard let status = dict["status"] as? String else { return nil }
+        self.status = status
+        canFollowLive = (dict["canFollowLive"] as? Bool) ?? true
+        endsAt = (dict["endsAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
+        message = (dict["message"] as? String) ?? ""
+    }
+
+    /// Dòng hiện ở màn Tôi; admin không cần.
+    func summary(now: Date = Date()) -> String? {
+        switch status {
+        case "expired":
+            return message
+        case "trial":
+            return "Dùng thử còn \(Self.remainingText(until: endsAt, now: now))"
+        case "plan":
+            return "Gói còn \(Self.remainingText(until: endsAt, now: now))"
+        default:
+            return nil
+        }
+    }
+
+    static func remainingText(until end: Date?, now: Date) -> String {
+        let hours = Int(max(0, (end ?? now).timeIntervalSince(now)) / 3600)
+        if hours < 1 { return "dưới 1 giờ" }
+        if hours < 24 { return "\(hours) giờ" }
+        return hours % 24 == 0 ? "\(hours / 24) ngày" : "\(hours / 24) ngày \(hours % 24) giờ"
+    }
+}
+
 struct CommentsPage: Decodable {
     var comments: [LiveComment]
     var hasMore: Bool

@@ -34,6 +34,7 @@ import {
   apiFetch,
   onForceLogout,
   onAdminUsersSync,
+  onAccountAccess,
   onOfflineChanges
 } from './sync.js?v=2';
 import {
@@ -1062,6 +1063,9 @@ $('#cal-grid-tbody')?.addEventListener('click', (e) => {
 });
 
 $('#btn-open-live-modal')?.addEventListener('click', () => {
+  // Chỉ để báo sớm: server mới là nơi chặn, kể cả khi trang này chưa biết tài khoản đã hết hạn.
+  const access = getCurrentUser()?.access;
+  if (access?.status === 'expired') return showAccessExpired(access.message);
   renderSavedLiveIds();
   $('#modal-new-live')?.showModal();
 });
@@ -1272,7 +1276,8 @@ onLiveStreamEvent((msg) => {
       }
       toast(`Đã kết nối TikTok Live @${msg.username}!`, '🔴');
     } else if (msg.state === 'error') {
-      toast(msg.message || `Không theo dõi được @${msg.username}`, '⚠️', 5000);
+      if (msg.code === 'TRIAL_EXPIRED' || msg.code === 'PLAN_EXPIRED') showAccessExpired(msg.message);
+      else toast(msg.message || `Không theo dõi được @${msg.username}`, '⚠️', 5000);
     } else if (msg.state === 'ended') {
       toast(`@${msg.username}: ${msg.message || 'Phiên live đã kết thúc.'}`, 'ℹ️', 4000);
     }
@@ -2212,8 +2217,54 @@ $('#nav-btn-admin-shortcut')?.addEventListener('click', () => {
   }, 80);
 });
 
+function remainingText(ms) {
+  const hours = Math.floor(ms / 3600000);
+  if (hours < 1) return 'dưới 1 giờ';
+  const days = Math.floor(hours / 24);
+  if (days < 1) return `${hours} giờ`;
+  return hours % 24 ? `${days} ngày ${hours % 24} giờ` : `${days} ngày`;
+}
+
+const accessDate = (ms) => new Date(ms).toLocaleDateString('vi-VN');
+
+function showAccessExpired(message) {
+  if ($('#access-expired-message')) $('#access-expired-message').textContent = message;
+  const dialog = $('#modal-access-expired');
+  if (dialog && !dialog.open) {
+    $('#modal-new-live')?.close();
+    dialog.showModal();
+  }
+}
+
+/** Thẻ tài khoản ở màn Tôi và dòng nhắc ở màn Bình luận. Thời gian còn lại chỉ để xem, server mới là nơi chặn. */
+function renderOwnAccess(access) {
+  const line = $('#current-auth-access');
+  const notice = $('#live-access-notice');
+  const remaining = access?.endsAt ? Math.max(0, access.endsAt - Date.now()) : 0;
+  const text =
+    access?.status === 'expired'
+      ? access.message
+      : access?.status === 'trial'
+        ? `Dùng thử còn ${remainingText(remaining)}`
+        : access?.status === 'plan'
+          ? `Gói còn hiệu lực đến ${accessDate(access.endsAt)} (còn ${remainingText(remaining)})`
+          : '';
+  if (line) {
+    line.textContent = text;
+    line.className = `auth-user-access ${access?.status || ''}`;
+    line.style.display = text ? 'block' : 'none';
+  }
+  if (notice) {
+    notice.textContent = access?.status === 'expired' ? access.message : '';
+    notice.style.display = access?.status === 'expired' ? 'block' : 'none';
+  }
+}
+
+onAccountAccess(renderOwnAccess);
+
 function applyAuthUserToUI(user) {
   const overlay = $('#auth-screen-overlay');
+  renderOwnAccess(user?.access);
   if (!user || !getAuthToken()) {
     overlay?.classList.remove('hidden');
     if ($('#admin-accounts-panel')) $('#admin-accounts-panel').style.display = 'none';
@@ -2406,6 +2457,59 @@ async function loadAdminUsers() {
   } catch (_err) {}
 }
 
+function adminAccessText(access) {
+  const remaining = access?.endsAt ? Math.max(0, access.endsAt - Date.now()) : 0;
+  if (access?.status === 'plan') return `Có gói đến ${accessDate(access.endsAt)} (còn ${remainingText(remaining)})`;
+  if (access?.status === 'trial') return `Dùng thử còn ${remainingText(remaining)}`;
+  if (access?.status === 'expired') return access.code === 'PLAN_EXPIRED' ? 'Gói đã hết hạn' : 'Đã hết dùng thử';
+  return '';
+}
+
+function adminAccessBadge(access) {
+  if (!access || access.status === 'admin') return '';
+  const icon = { plan: '🎫', trial: '⏳', expired: '⛔' }[access.status];
+  const short =
+    access.status === 'plan'
+      ? `Gói đến ${accessDate(access.endsAt)}`
+      : access.status === 'trial'
+        ? `Dùng thử còn ${remainingText(Math.max(0, access.endsAt - Date.now()))}`
+        : adminAccessText(access);
+  return `<span class="status-pill-badge ${access.status === 'expired' ? 'locked' : access.status}">${icon} ${esc(short)}</span>`;
+}
+
+let targetPlanUserId = null;
+
+/** Gửi yêu cầu đổi gói; server trả về danh sách mới. */
+async function submitPlanChange(options, successMessage) {
+  if (!targetPlanUserId) return;
+  try {
+    const res = await apiFetch(`/api/admin/users/${encodeURIComponent(targetPlanUserId)}/plan`, options);
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      return toast(data.error || 'Không thể cập nhật gói', '⚠️');
+    }
+    $('#modal-admin-plan')?.close();
+    toast(successMessage(data.user), '🎫', 3500);
+    adminUsersList = data.users;
+    renderAdminUsersTable();
+  } catch (_err) {
+    toast('Lỗi kết nối máy chủ', '⚠️');
+  }
+}
+
+$('#btn-submit-admin-plan')?.addEventListener('click', () => {
+  const months = Number($('#admin-plan-months')?.value);
+  submitPlanChange({ method: 'POST', body: JSON.stringify({ months }) }, (user) => {
+    return `Đã cấp gói cho "${user.username}", hết hạn ngày ${accessDate(user.access.endsAt)}`;
+  });
+});
+
+$('#btn-revoke-admin-plan')?.addEventListener('click', () => {
+  const user = adminUsersList.find((u) => u.id === targetPlanUserId);
+  if (!user || !confirm(`Thu hồi gói của tài khoản "${user.username}"?`)) return;
+  submitPlanChange({ method: 'DELETE' }, (u) => `Đã thu hồi gói của "${u.username}"`);
+});
+
 function renderAdminUsersTable() {
   const container = $('#admin-users-list');
   if (!container) return;
@@ -2456,6 +2560,7 @@ function renderAdminUsersTable() {
                 <span class="status-pill-badge ${u.locked ? 'locked' : 'active'}">
                   ${u.locked ? '🔒 Đã khoá' : '✓ Hoạt động'}
                 </span>
+                ${adminAccessBadge(u.access)}
               </div>
               <div class="admin-user-meta-line">
                 ${onlineBadge}
@@ -2467,6 +2572,13 @@ function renderAdminUsersTable() {
           </div>
 
           <div class="admin-user-actions-group">
+            ${
+              u.role !== 'admin'
+                ? `<button type="button" class="btn-admin-act plan-btn" data-admin-plan-id="${esc(u.id)}">
+                    🎫 Cấp gói
+                  </button>`
+                : ''
+            }
             ${
               !isPrimaryAdmin && !isSelf
                 ? `<button type="button" class="btn-admin-act ${u.locked ? 'unlock-btn' : 'lock-btn'}" data-admin-lock-id="${esc(u.id)}" data-admin-locked="${u.locked ? '1' : '0'}">
@@ -2523,6 +2635,21 @@ $('#admin-users-list')?.addEventListener('click', async (e) => {
     } catch (_err) {
       toast('Lỗi kết nối máy chủ', '⚠️');
     }
+    return;
+  }
+
+  // Nút Cấp gói
+  const planBtn = e.target.closest('[data-admin-plan-id]');
+  if (planBtn) {
+    targetPlanUserId = planBtn.dataset.adminPlanId;
+    const user = adminUsersList.find((u) => u.id === targetPlanUserId);
+    if ($('#admin-plan-account')) $('#admin-plan-account').textContent = user?.username || '';
+    if ($('#admin-plan-current')) $('#admin-plan-current').textContent = adminAccessText(user?.access);
+    if ($('#admin-plan-months')) $('#admin-plan-months').value = '1';
+    if ($('#btn-revoke-admin-plan')) {
+      $('#btn-revoke-admin-plan').style.display = user?.access?.status === 'plan' ? 'inline-flex' : 'none';
+    }
+    $('#modal-admin-plan')?.showModal();
     return;
   }
 

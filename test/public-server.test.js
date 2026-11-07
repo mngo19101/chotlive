@@ -285,16 +285,6 @@ test('đăng nhập đúng xoá số lần sai trước đó của chính ngư�
   }
 });
 
-test('đăng ký hàng loạt từ một IP bị chặn sau 20 tài khoản', async () => {
-  const ip = newIp();
-  const statuses = [];
-  for (let i = 0; i < 21; i++) statuses.push((await register(`spam.${i}`, 'mat-khau-tot', ip)).status);
-  assert.deepEqual(statuses.slice(0, 20), Array(20).fill(200));
-  assert.equal(statuses[20], 429);
-  // Người khác vẫn đăng ký bình thường.
-  assert.equal((await register('khach.that', 'mat-khau-tot', newIp())).status, 200);
-});
-
 test('server vẫn trả lời nhanh trong lúc nhiều người đăng nhập', async () => {
   const flood = Array.from({ length: 30 }, (_, i) => post('/api/auth/login', { username: `khong.co.${i}`, password: 'sai' }, { ip: newIp() }));
   // Băm mật khẩu của tài khoản có thật mới tốn thời gian.

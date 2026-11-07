@@ -20,6 +20,10 @@ final class LiveClient: ObservableObject {
     @Published private(set) var serverSupportsSync = false
     /// Các tài khoản ChốtLive đã đăng nhập trên máy (gồm cả tài khoản đang dùng), để đổi qua lại không cần nhập lại mật khẩu.
     @Published private(set) var savedAccounts: [AuthStorage.SavedAccount] = []
+    /// Dùng thử, gói hoặc đã hết hạn của tài khoản đang dùng.
+    @Published private(set) var access: AccountAccess?
+    /// Thông báo vừa bị chặn theo dõi live vì hết hạn, hiện thành hộp thoại ở mọi màn hình.
+    @Published var accessNotice: String?
 
     var onChat: ((LiveComment) -> Void)?
     /// Báo đổi tài khoản trước khi nhận bình luận, để dữ liệu không rơi vào vùng của người khác.
@@ -108,6 +112,7 @@ final class LiveClient: ObservableObject {
         baseURL = base
         token = tk
         username = ((json["user"] as? [String: Any])?["username"] as? String) ?? user
+        access = ((json["user"] as? [String: Any])?["access"] as? [String: Any]).flatMap { AccountAccess($0) }
         AuthStorage.saveSession(server: base, user: username, token: tk, defaults)
         savedAccounts = AuthStorage.savedAccounts(defaults)
         onAccountChange?(AuthStorage.accountKey(server: base, user: username))
@@ -148,6 +153,8 @@ final class LiveClient: ObservableObject {
         lastLiveEvent = nil
         clientsCount = 0
         serverSupportsSync = false
+        access = nil
+        accessNotice = nil
     }
 
     /// Chuyển sang một tài khoản đã lưu khác, không cần nhập lại mật khẩu.
@@ -380,6 +387,7 @@ final class LiveClient: ObservableObject {
             let version = (m["version"] as? Int) ?? 0
             serverSupportsSync = version >= 4
             if let n = m["clientsCount"] as? Int { clientsCount = n }
+            if let raw = (m["user"] as? [String: Any])?["access"] as? [String: Any] { access = AccountAccess(raw) }
             if serverSupportsSync, let raw = m["lives"] as? [[String: Any]] {
                 applyLives(raw)
             } else if let ls = m["liveStatus"] as? [String: Any] {
@@ -397,10 +405,15 @@ final class LiveClient: ObservableObject {
             if let id = m["id"] as? Int { onSyncAck?(id) }
         case "clients_count":
             if let n = m["clientsCount"] as? Int { clientsCount = n }
+        case "access":
+            if let raw = m["access"] as? [String: Any] { access = AccountAccess(raw) }
         case "status":
             let state = (m["state"] as? String) ?? "idle"
             let username = (m["username"] as? String) ?? ""
             liveMessage = (m["message"] as? String) ?? ""
+            if let code = m["code"] as? String, code == "TRIAL_EXPIRED" || code == "PLAN_EXPIRED" {
+                accessNotice = liveMessage
+            }
             if serverSupportsSync {
                 if state == "error" || state == "ended" {
                     lastLiveEvent = (username, state, liveMessage)

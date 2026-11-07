@@ -51,6 +51,12 @@ struct MainShell: View {
         } message: {
             Text(ui.alert ?? "")
         }
+        .alert("Không thể theo dõi live", isPresented: Binding(get: { client.accessNotice != nil },
+                                                               set: { if !$0 { client.accessNotice = nil } })) {
+            Button("Đã hiểu", role: .cancel) {}
+        } message: {
+            Text(client.accessNotice ?? "")
+        }
         .alert(ui.confirm?.title ?? "", isPresented: Binding(get: { ui.confirm != nil }, set: { if !$0 { ui.confirm = nil } }),
                presenting: ui.confirm) { item in
             Button("Huỷ", role: .cancel) {}

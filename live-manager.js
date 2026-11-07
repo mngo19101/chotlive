@@ -87,6 +87,11 @@ export class LiveManager {
     return m;
   }
 
+  /** Các tài khoản đang có live chạy. */
+  activeUserIds() {
+    return [...this.byUser.keys()];
+  }
+
   /** Danh sách gửi cho client. */
   list(userId) {
     const m = this.byUser.get(userId);

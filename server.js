@@ -5,6 +5,7 @@
  *   + Tài khoản Admin riêng (mật khẩu đặt qua ADMIN_PASSWORD, xem .env.example) quản lý toàn bộ tài khoản:
  *     Xem danh sách, Tạo mới, Khoá / Mở khoá tài khoản (đẩy văng tức thì nếu đang online), Đổi mật khẩu, Xoá tài khoản.
  *   + Tài khoản Thành viên (user): sử dụng đầy đủ tính năng chốt đơn, in tem, đồng bộ Web <-> App IPA.
+ *     Theo dõi live cần còn hạn dùng thử hoặc có gói do Admin cấp (xem access.js).
  * - Lưu trữ và đồng bộ dữ liệu thời gian thực theo từng tài khoản qua WebSocket (/ws) + REST API.
  */
 import crypto from 'node:crypto';
@@ -32,6 +33,16 @@ import { parsePrice, extractProductInfo } from './public/js/price.js';
 import { LiveManager, liveKey } from './live-manager.js';
 import { createLimiter, waitMessage } from './rate-limit.js';
 import { cleanNativeUpdate, cleanState, isObject } from './validate.js';
+import {
+  accessOf,
+  extendedPlanEnd,
+  IP_LIMIT_MESSAGE,
+  ipKey,
+  MAX_ACCOUNTS_PER_IP,
+  parseTrustProxy,
+  TRIAL_MS,
+  validPlanMonths
+} from './access.js';
 import {
   applyNativeUpdate,
   durationText,
@@ -205,7 +216,6 @@ if (!usersDb.users.some((u) => u.role === 'admin')) {
     lastLoginAt: Date.now()
   });
 }
-purgeExpiredTokens();
 if (!usersDb.tokens || typeof usersDb.tokens !== 'object') {
   usersDb.tokens = {};
 }
@@ -227,6 +237,22 @@ function flushUsersDb() {
   }
 }
 
+/**
+ * Tài khoản tạo trước khi có dùng thử được tính 3 ngày từ lần khởi động đầu tiên, không bị khoá ngay.
+ * Ghi xuống đĩa luôn: nếu không, mỗi lần khởi động lại sẽ được thêm 3 ngày mới.
+ */
+function startTrialForOldAccounts() {
+  const now = Date.now();
+  let changed = false;
+  for (const u of usersDb.users) {
+    if (u.role !== 'admin' && !Number.isFinite(u.trialEndsAt)) {
+      u.trialEndsAt = now + TRIAL_MS;
+      changed = true;
+    }
+  }
+  if (changed) flushUsersDb();
+}
+
 function purgeExpiredTokens() {
   const now = Date.now();
   let changed = false;
@@ -238,6 +264,10 @@ function purgeExpiredTokens() {
   }
   if (changed) persistUsersDb();
 }
+
+// Phải chạy sau khi có saveUsersTimer: token hết hạn lúc khởi động từng làm server không lên được.
+purgeExpiredTokens();
+startTrialForOldAccounts();
 
 function createSessionToken(userId) {
   purgeExpiredTokens();
@@ -282,7 +312,8 @@ function sanitizeUser(u) {
     locked: Boolean(u.locked),
     createdAt: u.createdAt || Date.now(),
     lastLoginAt: u.lastLoginAt || null,
-    onlineCount: countOnlineClientsForUser(u.id)
+    onlineCount: countOnlineClientsForUser(u.id),
+    access: accessOf(u)
   };
 }
 
@@ -464,7 +495,7 @@ const app = express();
 
 app.disable('x-powered-by');
 // Mặc định chỉ tin IP do Caddy trên cùng máy báo lại; người ngoài không giả IP được để né giới hạn.
-app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -529,11 +560,9 @@ app.get('/healthz', (_req, res) =>
 // Nhiều shop có thể chung một IP (mạng di động), nên giới hạn theo IP phải rộng hơn theo từng tài khoản.
 const loginFailuresByAccount = createLimiter({ max: 10, windowMs: 15 * 60 * 1000 });
 const loginFailuresByIp = createLimiter({ max: 100, windowMs: 15 * 60 * 1000 });
-const registrationsByIp = createLimiter({ max: 20, windowMs: 60 * 60 * 1000 });
 setInterval(() => {
   loginFailuresByAccount.sweep();
   loginFailuresByIp.sweep();
-  registrationsByIp.sweep();
 }, 10 * 60 * 1000).unref();
 
 // 1. Đăng nhập
@@ -593,28 +622,37 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(409).json({ error: 'Tên tài khoản này đã tồn tại, vui lòng chọn tên khác.' });
   }
 
-  const wait = registrationsByIp.retryAfter(req.ip);
-  if (wait > 0) {
-    res.setHeader('Retry-After', String(wait));
-    return res.status(429).json({ error: waitMessage(wait), code: 'TOO_MANY_ATTEMPTS' });
+  // Đếm và giữ chỗ không qua await: nhiều yêu cầu cùng lúc từ một IP không lọt quá giới hạn.
+  const ip = ipKey(req.ip);
+  if (sqlite.countIpRegistrations(db, ip) >= MAX_ACCOUNTS_PER_IP) {
+    return res.status(403).json({ error: IP_LIMIT_MESSAGE, code: 'IP_ACCOUNT_LIMIT' });
   }
-  registrationsByIp.hit(req.ip);
+  const userId = 'u_' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
+  sqlite.addIpRegistration(db, ip, userId, Date.now());
 
-  const passwordHash = await hashPassword(password);
+  let passwordHash;
+  try {
+    passwordHash = await hashPassword(password);
+  } catch (err) {
+    sqlite.removeIpRegistration(db, ip, userId);
+    throw err;
+  }
   // Hai người cùng đăng ký một tên: trong lúc chờ mã hoá mật khẩu, người kia có thể đã tạo xong.
   if (nameTaken()) {
+    sqlite.removeIpRegistration(db, ip, userId);
     return res.status(409).json({ error: 'Tên tài khoản này đã tồn tại, vui lòng chọn tên khác.' });
   }
 
   const newUser = {
-    id: 'u_' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex'),
+    id: userId,
     username: cleanName,
     displayName: rawName,
     passwordHash,
     role: 'user',
     locked: false,
     createdAt: Date.now(),
-    lastLoginAt: Date.now()
+    lastLoginAt: Date.now(),
+    trialEndsAt: Date.now() + TRIAL_MS
   };
 
   usersDb.users.push(newUser);
@@ -711,7 +749,8 @@ app.post('/api/admin/users/create', requireAdmin, async (req, res) => {
     role: role === 'admin' ? 'admin' : 'user',
     locked: false,
     createdAt: Date.now(),
-    lastLoginAt: null
+    lastLoginAt: null,
+    trialEndsAt: Date.now() + TRIAL_MS
   };
 
   usersDb.users.push(newUser);
@@ -787,6 +826,52 @@ app.post('/api/admin/users/:id/password', requireAdmin, async (req, res) => {
     message: `Đã đổi mật khẩu cho tài khoản ${target.displayName || target.username}!`,
     users: usersDb.users.map(sanitizeUser)
   });
+});
+
+/** Tài khoản nhận gói phải là thành viên thường: admin vốn không bị giới hạn. Trả về null nếu đã báo lỗi. */
+function findPlanTarget(req, res) {
+  const target = usersDb.users.find((u) => u.id === req.params.id);
+  if (!target) {
+    res.status(404).json({ error: 'Không tìm thấy tài khoản này.' });
+    return null;
+  }
+  if (target.role === 'admin') {
+    res.status(400).json({ error: 'Tài khoản Admin không cần cấp gói.' });
+    return null;
+  }
+  return target;
+}
+
+function finishPlanChange(res, target) {
+  flushUsersDb();
+  applyLiveAccess(target);
+  broadcastToUser(target.id, { type: 'access', access: accessOf(target) });
+  broadcastAdminUsersUpdate();
+  res.json({
+    ok: true,
+    user: sanitizeUser(target),
+    users: usersDb.users.map(sanitizeUser)
+  });
+}
+
+// Admin cấp hoặc gia hạn gói (tính theo tháng) cho tài khoản thường
+app.post('/api/admin/users/:id/plan', requireAdmin, (req, res) => {
+  const target = findPlanTarget(req, res);
+  if (!target) return;
+  const { months } = req.body || {};
+  if (!validPlanMonths(months)) {
+    return res.status(400).json({ error: 'Số tháng của gói không hợp lệ.' });
+  }
+  target.planEndsAt = extendedPlanEnd(target.planEndsAt, months);
+  finishPlanChange(res, target);
+});
+
+// Admin thu hồi gói: live đang chạy dừng ngay nếu tài khoản không còn hạn dùng thử
+app.delete('/api/admin/users/:id/plan', requireAdmin, (req, res) => {
+  const target = findPlanTarget(req, res);
+  if (!target) return;
+  delete target.planEndsAt;
+  finishPlanChange(res, target);
 });
 
 // Admin Xoá tài khoản
@@ -1471,6 +1556,26 @@ const liveManager = new LiveManager({
   })
 });
 
+/** Hết quyền thì dừng mọi live của tài khoản và báo lý do cho mọi thiết bị đang mở. */
+function applyLiveAccess(user) {
+  const access = accessOf(user);
+  if (access.canFollowLive || !liveManager.list(user.id).length) return;
+  liveManager.stop(user.id);
+  broadcastToUser(user.id, { type: 'access', access });
+  broadcastToUser(user.id, { type: 'status', state: 'error', username: '', code: access.code, message: access.message });
+}
+
+// Không chờ tới lần bấm kế tiếp: live đang chạy lúc hết hạn cũng phải dừng, kể cả lúc đang tự nối lại.
+setInterval(
+  safely('live access', () => {
+    for (const userId of liveManager.activeUserIds()) {
+      const user = usersDb.users.find((u) => u.id === userId);
+      if (user) applyLiveAccess(user);
+    }
+  }),
+  5000
+).unref();
+
 function getLiveStatus(userId) {
   const first = userId ? liveManager.list(userId)[0] : null;
   return first ? { state: first.state, username: first.username, mode: 'real' } : { state: 'idle', username: '', mode: 'idle' };
@@ -1483,7 +1588,7 @@ function resumeLivesAfterRestart() {
     const user = usersDb.users.find((u) => u.id === userId);
     for (const s of st.sessions || []) {
       if (!s.isLive || !s.tiktok || !s.startTs) continue;
-      if (!user || user.locked) {
+      if (!user || user.locked || !accessOf(user).canFollowLive) {
         s.isLive = false;
         s.endTs = s.lastActivityTs || s.startTs;
         s.endStr = timeOf(s.endTs);
@@ -1651,6 +1756,11 @@ wss.on('connection', safely('ws connection', (ws, req) => {
       );
     } else if (msg.type === 'connect') {
       const u = normalizeUsername(msg.username);
+      const access = accessOf(activeUser);
+      if (!access.canFollowLive) {
+        send({ type: 'access', access });
+        return send({ type: 'status', state: 'error', username: u, code: access.code, message: access.message });
+      }
       if (!u) return send({ type: 'status', state: 'error', message: 'Vui lòng nhập tên TikTok.' });
       const running = liveManager.list(ws.userId);
       if (!running.some((l) => liveKey(l.username) === liveKey(u)) && running.length >= MAX_LIVES_PER_USER) {

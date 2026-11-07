@@ -3003,6 +3003,42 @@ input, select, textarea {
   color: #b91c1c;
 }
 
+.status-pill-badge.trial {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.status-pill-badge.plan {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.auth-user-access {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #c2410c;
+}
+
+.auth-user-access.plan {
+  color: #1d4ed8;
+}
+
+.auth-user-access.expired {
+  color: #b91c1c;
+}
+
+.live-access-notice {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 /* Bảng Quản lý Tài khoản của Admin */
 .admin-accounts-panel {
   background: #ffffff;
@@ -3141,6 +3177,12 @@ input, select, textarea {
   border-color: #bbf7d0;
   background: #f0fdf4;
   color: #15803d;
+}
+
+.btn-admin-act.plan-btn {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .btn-admin-act.pass-btn {

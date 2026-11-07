@@ -28,6 +28,7 @@ struct LiveNewSheet: View {
         return client.live(for: pendingId)?.state != "connected"
     }
     private var errorMessage: String? {
+        if let access = client.access, !access.canFollowLive { return access.message }
         if let timeoutMessage { return timeoutMessage }
         if client.serverSupportsSync {
             guard let e = client.lastLiveEvent, e.state == "error" || e.state == "ended", !e.message.isEmpty else { return nil }

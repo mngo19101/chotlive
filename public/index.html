@@ -292,6 +292,9 @@
           </div>
         </header>
 
+        <!-- Hết dùng thử hoặc hết gói -->
+        <div class="live-access-notice" id="live-access-notice" role="alert" style="display:none"></div>
+
         <!-- Các live đang theo dõi cùng lúc -->
         <div class="active-lives-strip" id="active-lives-strip" style="display:none"></div>
 
@@ -813,6 +816,7 @@
                 <span class="role-pill-badge admin" id="current-auth-role-badge">Quản trị viên (Admin)</span>
               </div>
               <div class="auth-user-sub" id="current-auth-desc">Toàn quyền quản lý các tài khoản khác, khoá và đổi mật khẩu</div>
+              <div class="auth-user-access" id="current-auth-access" style="display:none"></div>
             </div>
           </div>
           <div class="auth-user-actions">
@@ -1588,6 +1592,44 @@
       <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px">
         <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
         <button type="button" class="btn-orange-pill" id="btn-submit-admin-create-user">Tạo tài khoản</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ================== MODAL ADMIN: CẤP GÓI ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-admin-plan">
+    <div class="modal-content-card">
+      <div class="sheet-drag-handle"></div>
+      <button class="btn-modal-close" data-close-dialog>×</button>
+      <h2 class="modal-title-main">🎫 Cấp gói</h2>
+      <p class="modal-subtitle-text">Tài khoản: <b id="admin-plan-account"></b> · <span id="admin-plan-current"></span></p>
+
+      <div class="form-field-group" style="margin-top:16px">
+        <label for="admin-plan-months">Thời hạn gói</label>
+        <select class="form-field-input" id="admin-plan-months">
+          <option value="1">1 tháng (30 ngày)</option>
+          <option value="3">3 tháng (90 ngày)</option>
+          <option value="6">6 tháng (180 ngày)</option>
+          <option value="12">12 tháng (360 ngày)</option>
+        </select>
+      </div>
+      <p class="modal-subtitle-text">Gói còn hạn thì được cộng nối tiếp vào ngày hết hạn hiện tại.</p>
+
+      <div style="display:flex;justify-content:flex-end;flex-wrap:wrap;gap:12px;margin-top:20px">
+        <button type="button" class="btn-admin-act del-btn" id="btn-revoke-admin-plan" style="display:none;height:auto;margin-right:auto">Thu hồi gói</button>
+        <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
+        <button type="button" class="btn-orange-pill" id="btn-submit-admin-plan">Cấp gói</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ================== MODAL: HẾT DÙNG THỬ / HẾT GÓI ================== -->
+  <dialog class="app-modal-dialog" id="modal-access-expired">
+    <div class="modal-content-card">
+      <h2 class="modal-title-main">Không thể theo dõi live</h2>
+      <p class="modal-subtitle-text" id="access-expired-message"></p>
+      <div style="display:flex;justify-content:flex-end;margin-top:20px">
+        <button type="button" class="btn-orange-pill" data-close-dialog>Đã hiểu</button>
       </div>
     </div>
   </dialog>

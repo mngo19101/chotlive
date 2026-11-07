@@ -27,6 +27,11 @@ struct SettingsView: View {
                     .padding(.bottom, 15)
 
                 sectionLabel("Tài khoản")
+                if let summary = client.access?.summary() {
+                    T(summary, 13.5, .bold, client.access?.canFollowLive == false ? Theme.red : Theme.accent)
+                        .padding(.leading, 4)
+                        .padding(.bottom, 8)
+                }
                 appAccountsCard.padding(.bottom, 15)
 
                 sectionLabel("Cài đặt")
