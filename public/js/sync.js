@@ -26,11 +26,7 @@ function getOrCreateClientId() {
   try {
     let cid = localStorage.getItem(CLIENT_ID_KEY);
     if (!cid) {
-      const isNative =
-        window.location.protocol === 'capacitor:' ||
-        window.location.protocol === 'file:' ||
-        Boolean(window.Capacitor);
-      cid = (isNative ? 'ipa_' : 'web_') + Math.random().toString(36).slice(2, 10);
+      cid = 'web_' + Math.random().toString(36).slice(2, 10);
       localStorage.setItem(CLIENT_ID_KEY, cid);
     }
     return cid;

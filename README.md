@@ -1,74 +1,100 @@
-# ChốtLive (Susu) – Chốt đơn TikTok Live (Web & App iPhone IPA đồng bộ thời gian thực)
+# ChốtLive – Chốt đơn TikTok Live (Web và App iPhone)
 
-Nền tảng đọc bình luận TikTok Live theo thời gian thực, tự bắt giá, chạm để in tem nhiệt 80mm (Xprinter Q80BS), gộp đơn theo khách, quản lý doanh số và xuất báo cáo Excel/CSV.
+Đọc bình luận TikTok Live theo thời gian thực, tự bắt giá, chạm để in tem nhiệt 80mm (Xprinter Q80BS), gộp đơn theo khách, quản lý doanh số và xuất file CSV.
 
-Hỗ trợ **đồng bộ 2 chiều thời gian thực (Real-time Sync)** giữa **bản Web trên mạng** và **App iPhone cài qua file `.ipa`**:
-- Trên **Web** bấm tạo đơn, sửa đơn, in đơn, đổi trạng thái giao hàng, sửa địa chỉ khách hoặc chọn khách → **App trên điện thoại hiển thị & cập nhật ngay lập tức**.
-- Trên **App iPhone (IPA)** ấn thao tác → **Web cũng tự động cập nhật tức thì**.
+Web và App iPhone đồng bộ qua server: thao tác trên máy này thì máy kia cập nhật ngay, miễn là cả hai dùng **cùng một server và cùng một tài khoản**.
 
 ---
 
-## 1. Chạy cục bộ trên máy tính
+## 1. Chạy trên máy tính
 
 ```powershell
 npm.cmd install
 npm.cmd start
 ```
-Mở http://localhost:3000 trên trình duyệt máy tính hoặc mở trên điện thoại qua địa chỉ IP mạng LAN (ví dụ `http://192.168.1.x:3000`).
 
-Web và điện thoại chỉ đồng bộ khi dùng **cùng một server và cùng một tài khoản**. `localhost` chỉ mở được trên chính máy tính đó; trên điện thoại phải nhập IP LAN (xem trong Tôi › Đồng bộ trên web) hoặc địa chỉ server đã đưa lên mạng.
+Mở http://localhost:3000 trên máy tính. `localhost` chỉ mở được trên chính máy đó. Điện thoại cùng Wi-Fi dùng địa chỉ IP LAN, xem trên web ở **Tôi › Đồng bộ Web & App (IPA)**.
 
-Chạy test: `npm test` (dùng TikTok giả trong `test/fake-tiktok`, không gọi mạng thật).
+Muốn in qua mạng LAN, đặt `LAN_MODE=1` trong file `.env`. Chỉ bật khi server chạy cùng mạng với máy in, không bật trên VPS. Các biến khác xem trong [.env.example](.env.example).
 
----
+Chạy test (dùng TikTok giả trong `test/fake-tiktok`, không gọi mạng thật):
 
-## 2. Đưa Web & Server Đồng Bộ lên mạng (Render / Railway)
-
-1. Đẩy toàn bộ thư mục này lên một repository **GitHub**.
-2. Vào https://render.com → **New → Blueprint** → chọn repo GitHub (Render tự đọc `render.yaml`).
-   Hoặc chọn **New → Web Service**: Build Command `npm install`, Start Command `npm start`.
-3. Sau khi hoàn tất, bạn sẽ có địa chỉ Web & Server đồng bộ (ví dụ: `https://susu-live-order.onrender.com`).
+```powershell
+npm.cmd test
+```
 
 ---
 
-## 3. Xuất file `.ipa` và cài App lên iPhone
+## 2. Đưa server lên mạng
 
-Dự án đã tích hợp sẵn cấu hình **Capacitor iOS** ([capacitor.config.json](file:///c:/Users/mnhti/Downloads/tiktok/capacitor.config.json)) và quy trình tự động biên dịch file `.ipa` trên đám mây macOS qua **GitHub Actions** ([.github/workflows/build-ipa.yml](file:///c:/Users/mnhti/Downloads/tiktok/.github/workflows/build-ipa.yml)):
-
-### Bước 1: Tải file `ChotLive-iOS.ipa`
-1. Sau khi đẩy code lên GitHub, vào tab **Actions** trên repo GitHub của bạn.
-2. Chọn workflow **Build iOS IPA (ChốtLive)** → bấm **Run workflow** (có thể nhập sẵn link Render của bạn vào ô `server_url`).
-3. Đợi khoảng 2–3 phút để máy chủ macOS biên dịch xong → kéo xuống mục **Artifacts** và tải file **`ChotLive-iOS-IPA.zip`** (bên trong là file `ChotLive-iOS.ipa`).
-
-### Bước 2: Cài file `.ipa` vào iPhone
-Bạn có thể cài file `ChotLive-iOS.ipa` vào iPhone bằng một trong các công cụ phổ biến sau:
-- **Sideloadly** (trên Windows/Mac): Cắm cáp iPhone vào máy tính, mở Sideloadly, kéo thả file `ChotLive-iOS.ipa` vào, nhập Apple ID miễn phí và bấm **Start** (trên iPhone vào *Cài đặt → Cài đặt chung → Quản lý VPN & Thiết bị* bấm **Tin cậy**).
-- **AltStore / SideStore**: Mở file `.ipa` trực tiếp trên iPhone qua AltStore/SideStore.
-- **TrollStore / ESign / Scarlet / Chứng chỉ P12**: Cài trực tiếp ngay trên iPhone không cần máy tính.
-
-### Bước 3: Kết nối đồng bộ giữa App IPA và Web
-1. Mở App **ChốtLive** trên iPhone → vào mục **Tôi → Đồng bộ Web & App (IPA)**.
-2. Nhập địa chỉ Web bạn đã đưa lên mạng (ví dụ `https://susu-live-order.onrender.com` hoặc IP LAN `http://192.168.1.x:3000`) rồi bấm **Lưu & Kết nối**.
-3. Từ lúc này, cả Web và App iPhone sẽ trao đổi thông tin thời gian thực với nhau (hiển thị số thiết bị đang kết nối ở mục **Đồng bộ Web & App**).
+- **VPS (nên dùng):** làm theo [deploy/README.md](deploy/README.md).
+- **Render:** vào https://render.com, chọn **New › Blueprint** rồi chọn repo. Render tự đọc [render.yaml](render.yaml). Cấu hình này dùng gói trả phí, vì cần ổ đĩa riêng để không mất dữ liệu khi khởi động lại.
 
 ---
 
-## 4. Sao lưu sang mini PC
+## 3. Cài App lên iPhone
 
-Laptop tự đồng bộ dữ liệu với mini PC mỗi khi bật máy, để máy này hỏng thì còn máy kia. Cách thêm mini PC và khôi phục dữ liệu: xem [sync/README.md](sync/README.md).
+App được viết bằng SwiftUI trong thư mục `ios-native/` và build trên GitHub Actions.
+
+### Lấy file IPA
+
+1. Vào tab **Actions** của repo, chọn workflow **Build iOS IPA native (ChốtLive SwiftUI)**. Workflow tự chạy khi có thay đổi trong `ios-native/`, hoặc bấm **Run workflow** để chạy tay.
+2. Khi chạy xong, tải **ChotLive-Native-IPA** ở mục **Artifacts**. Trong đó là file `ChotLive-Native.ipa`.
+
+Muốn gắn sẵn địa chỉ server vào app, tạo biến `CHOTLIVE_SERVER_URL` ở **Settings › Secrets and variables › Actions › Variables**, rồi build lại.
+
+### Cài vào iPhone
+
+File IPA chưa được ký, công cụ cài đặt sẽ ký lại. Có thể dùng một trong các công cụ sau:
+
+- **Sideloadly** (Windows/Mac): cắm cáp iPhone, kéo file IPA vào, nhập Apple ID rồi bấm **Start**. Sau đó trên iPhone vào **Cài đặt › Cài đặt chung › Quản lý VPN & Thiết bị** và bấm **Tin cậy**.
+- **AltStore / SideStore:** mở file IPA ngay trên iPhone.
+- **ESign:** cài trực tiếp trên iPhone bằng chứng chỉ của bạn.
+
+App cài bằng Apple ID miễn phí sẽ hết hạn sau 7 ngày và phải cài lại.
+
+### Kết nối App với server
+
+Mở App và đăng nhập. Nếu bản IPA chưa gắn sẵn địa chỉ server, nhập địa chỉ ở màn đăng nhập, ví dụ `https://ten-mien-cua-ban.vn` hoặc `http://192.168.1.x:3000`.
 
 ---
 
-## 5. Cấu trúc dự án
+## 4. Sao lưu
 
-| File | Vai trò |
+- **Laptop và mini PC:** xem [sync/README.md](sync/README.md).
+- **VPS:** xem mục sao lưu trong [deploy/README.md](deploy/README.md).
+
+---
+
+## 5. Quên mật khẩu admin
+
+`ADMIN_PASSWORD` chỉ có tác dụng khi tạo dữ liệu lần đầu. Muốn đặt lại mật khẩu sau đó:
+
+1. Tắt server.
+2. Thêm dòng `ADMIN_PASSWORD=mật-khẩu-mới` vào `.env`.
+3. Chạy lệnh dưới đây, rồi bật lại server:
+
+   ```powershell
+   node --env-file=.env scripts/reset-admin.mjs
+   ```
+
+4. Đăng nhập thử bằng mật khẩu mới, rồi xoá dòng `ADMIN_PASSWORD` khỏi `.env`.
+
+---
+
+## 6. Cấu trúc dự án
+
+| Đường dẫn | Vai trò |
 |---|---|
-| `server.js` | Server Node.js + WebSocket Sync Hub (`/ws`) + REST API (`/api/state`, `/api/sync`) + Kết nối TikTok Live |
-| `public/index.html` | Giao diện chuẩn 9 màn hình Mobile & Desktop (Doanh số, Bình luận, Khách hàng, Đơn hàng, Tôi) |
-| `public/css/style.css` | Thiết kế giao diện chuẩn UI/UX Mobile App (Bottom Sheet, Safe-area iPhone, Card bo tròn) & Web |
-| `public/js/sync.js` | Engine đồng bộ 2 chiều thời gian thực giữa Web và App IPA qua WebSocket + HTTP fallback |
-| `public/js/store.js` | Quản lý trạng thái đơn hàng, khách hàng, bình luận, phiên live & kích hoạt đồng bộ tự động |
-| `public/js/app.js` | Điều khiển giao diện, sự kiện tương tác, đồng bộ UI tức thì và in tem Xprinter |
+| `server.js` | Server Express: API, WebSocket và tài khoản |
+| `live-manager.js` | Kết nối và theo dõi các phiên TikTok Live |
+| `native-sync.js`, `delta.js` | Đồng bộ dữ liệu giữa server và các máy |
+| `db.js` | Lưu dữ liệu bằng SQLite |
+| `validate.js`, `rate-limit.js` | Kiểm tra dữ liệu gửi lên và giới hạn số lần gọi |
+| `public/` | Giao diện web |
+| `ios-native/` | App iPhone viết bằng SwiftUI |
+| `deploy/` | Cài đặt lên VPS |
 | `sync/` | Đồng bộ dữ liệu giữa laptop và mini PC |
-| `capacitor.config.json` | Cấu hình đóng gói ứng dụng iOS Native |
-| `.github/workflows/build-ipa.yml` | Tự động biên dịch và xuất file `ChotLive-iOS.ipa` trên GitHub Actions |
+| `scripts/reset-admin.mjs` | Đặt lại mật khẩu admin |
+| `test/` | Test server và logic web |
+| `.github/workflows/` | Chạy test và build IPA trên GitHub Actions |
