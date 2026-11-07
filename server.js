@@ -238,15 +238,17 @@ function flushUsersDb() {
 }
 
 /**
- * Tài khoản tạo trước khi có dùng thử được tính 3 ngày từ lần khởi động đầu tiên, không bị khoá ngay.
- * Ghi xuống đĩa luôn: nếu không, mỗi lần khởi động lại sẽ được thêm 3 ngày mới.
+ * Tài khoản tạo trước khi có dùng thử cũng chỉ có 3 ngày tính từ ngày tạo, nên tài khoản đã quá 3 ngày bị khoá live ngay.
+ * Không rõ ngày tạo thì không biết đã dùng bao lâu, cho 3 ngày từ lúc này.
+ * Ghi xuống đĩa luôn để mốc chỉ đặt một lần.
  */
 function startTrialForOldAccounts() {
   const now = Date.now();
   let changed = false;
   for (const u of usersDb.users) {
     if (u.role !== 'admin' && !Number.isFinite(u.trialEndsAt)) {
-      u.trialEndsAt = now + TRIAL_MS;
+      const created = typeof u.createdAt === 'number' ? u.createdAt : Date.parse(u.createdAt);
+      u.trialEndsAt = (Number.isFinite(created) ? Math.min(created, now) : now) + TRIAL_MS;
       changed = true;
     }
   }

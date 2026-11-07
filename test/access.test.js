@@ -342,34 +342,51 @@ test('server tắt rồi bật lại: hạn dùng thử không được làm m�
   await assertRefused(expiring.token);
 });
 
-test('tài khoản từ trước khi có dùng thử được 3 ngày tính từ lần cập nhật, không phải mỗi lần khởi động', async () => {
-  const u = await newUser('tk.cu');
+test('tài khoản từ trước khi có dùng thử tính 3 ngày từ ngày tạo, đặt một lần chứ không phải mỗi lần khởi động', async () => {
+  const veryOld = await newUser('tk.cu.100ngay');
+  const recent = await newUser('tk.cu.1ngay');
+  const noDate = await newUser('tk.cu.khongngay');
   await sleep(300);
   await stop(server);
 
-  // Giả dữ liệu cũ: không có trialEndsAt, tạo từ 100 ngày trước.
+  // Giả dữ liệu cũ: không có trialEndsAt.
+  const now = Date.now() + clockOffset;
+  const recentCreated = now - DAY_MS;
   const db = new DatabaseSync(path.join(DATA_DIR, 'susu.db'));
-  const row = db.prepare('SELECT data FROM users WHERE id = ?').get(u.id);
-  const old = JSON.parse(row.data);
-  delete old.trialEndsAt;
-  old.createdAt = Date.now() + clockOffset - 100 * DAY_MS;
-  db.prepare('UPDATE users SET data = ? WHERE id = ?').run(JSON.stringify(old), u.id);
+  const rewrite = (id, change) => {
+    const old = JSON.parse(db.prepare('SELECT data FROM users WHERE id = ?').get(id).data);
+    delete old.trialEndsAt;
+    change(old);
+    db.prepare('UPDATE users SET data = ? WHERE id = ?').run(JSON.stringify(old), id);
+  };
+  rewrite(veryOld.id, (u) => (u.createdAt = now - 100 * DAY_MS));
+  rewrite(recent.id, (u) => (u.createdAt = recentCreated));
+  rewrite(noDate.id, (u) => delete u.createdAt);
   db.close();
 
   server = startServer();
   await waitUp();
-  const first = await call('GET', '/api/auth/me', { token: u.token });
-  assert.equal(first.body.user.access.status, 'trial', 'không bị khoá ngay sau khi cập nhật');
-  const end = first.body.user.access.endsAt;
-  assert.ok(Math.abs(end - (Date.now() + clockOffset) - TRIAL_MS) < 10000);
+  const me = async (u) => (await call('GET', '/api/auth/me', { token: u.token })).body.user.access;
+
+  assert.equal((await me(veryOld)).status, 'expired', 'tạo đã quá 3 ngày thì khoá ngay');
+  await assertRefused(veryOld.token);
+
+  const recentAccess = await me(recent);
+  assert.equal(recentAccess.status, 'trial');
+  assert.equal(recentAccess.endsAt, recentCreated + TRIAL_MS, 'còn đúng phần còn lại của 3 ngày');
+
+  const noDateAccess = await me(noDate);
+  assert.equal(noDateAccess.status, 'trial', 'không rõ ngày tạo thì cho 3 ngày từ lúc cập nhật');
+  assert.ok(Math.abs(noDateAccess.endsAt - now - TRIAL_MS) < 10000);
 
   await advance(DAY_MS);
   await restart();
-  const second = await call('GET', '/api/auth/me', { token: u.token });
-  assert.equal(second.body.user.access.endsAt, end, 'khởi động lại không được thêm hạn');
+  assert.equal((await me(noDate)).endsAt, noDateAccess.endsAt, 'khởi động lại không được thêm hạn');
+  assert.equal((await me(recent)).endsAt, recentAccess.endsAt);
 
   await advance(2 * DAY_MS + 1000);
-  await assertRefused(u.token);
+  await assertRefused(recent.token);
+  await assertRefused(noDate.token);
 });
 
 test('admin không bao giờ hết hạn; tài khoản admin tạo vẫn chỉ có 3 ngày', async () => {
