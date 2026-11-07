@@ -2902,36 +2902,6 @@ input, select, textarea {
   margin-top: 6px;
 }
 
-.auth-quick-admin-hint {
-  margin-top: 16px;
-  padding: 11px 13px;
-  background: #fdf8f3;
-  border: 1px dashed #f2d5bd;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-  color: #7c4a21;
-}
-
-.btn-fill-admin-demo {
-  background: #faeadc;
-  color: #c2510c;
-  border: none;
-  border-radius: 8px;
-  padding: 5px 10px;
-  font-size: 11.5px;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.btn-fill-admin-demo:hover {
-  background: #f5d8be;
-}
-
 .auth-card-footer {
   margin-top: 18px;
   padding-top: 14px;

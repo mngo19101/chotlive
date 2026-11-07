@@ -44,7 +44,7 @@
       <form id="form-auth-login" class="auth-form-body" autocomplete="on">
         <div class="form-field-group">
           <label for="auth-login-username">Tên tài khoản <span class="req">*</span></label>
-          <input type="text" class="form-field-input" id="auth-login-username" placeholder="Nhập tên tài khoản (VD: admin)" required autocomplete="username" />
+          <input type="text" class="form-field-input" id="auth-login-username" placeholder="Nhập tên tài khoản" required autocomplete="username" />
         </div>
 
         <div class="form-field-group">
@@ -55,11 +55,6 @@
         <button type="submit" class="btn-orange-pill auth-submit-btn" id="btn-submit-login">
           Đăng nhập vào hệ thống
         </button>
-
-        <div class="auth-quick-admin-hint">
-          <span>Tài khoản Admin mặc định: <b>admin</b> / Mật khẩu: <b>admin123</b></span>
-          <button type="button" class="btn-fill-admin-demo" id="btn-fill-admin-cred">Điền nhanh Admin</button>
-        </div>
       </form>
 
       <!-- FORM 2: ĐĂNG KÝ (CHỈ GỒM 3 Ô: TÊN, MẬT KHẨU, XÁC NHẬN MẬT KHẨU) -->
@@ -71,7 +66,7 @@
 
         <div class="form-field-group">
           <label for="auth-reg-password">Mật khẩu <span class="req">*</span></label>
-          <input type="password" class="form-field-input" id="auth-reg-password" placeholder="Nhập mật khẩu (tối thiểu 4 ký tự)" required autocomplete="new-password" />
+          <input type="password" class="form-field-input" id="auth-reg-password" placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)" required autocomplete="new-password" />
         </div>
 
         <div class="form-field-group">
@@ -1262,9 +1257,9 @@
 
       <div class="form-field-group">
         <label>Địa chỉ máy chủ Web (Server URL)</label>
-        <input type="text" class="form-field-input" id="input-sync-server-url" placeholder="https://susu-live-order.onrender.com" />
+        <input type="text" class="form-field-input" id="input-sync-server-url" placeholder="https://ten-mien-cua-ban.vn" />
         <small style="color:var(--text-sub);font-size:12px;margin-top:4px">
-          Trên App IPA: nhập địa chỉ Web bạn đã đưa lên mạng (VD: <b>https://susu-live-order.onrender.com</b>) hoặc IP mạng LAN (VD: <b>http://192.168.1.10:3000</b>). Để trống nếu đang dùng trực tiếp trên trình duyệt Web.
+          Để trống nếu đang dùng trực tiếp trên trình duyệt Web. Chỉ nhập khi cần nối tới một máy chủ khác.
         </small>
       </div>
 
@@ -1543,7 +1538,7 @@
 
       <div class="form-field-group" style="margin-top:16px">
         <label>Mật khẩu mới <span class="req">*</span></label>
-        <input type="password" class="form-field-input" id="admin-input-new-pass" placeholder="Nhập mật khẩu mới (tối thiểu 4 ký tự)" />
+        <input type="password" class="form-field-input" id="admin-input-new-pass" placeholder="Nhập mật khẩu mới (tối thiểu 6 ký tự)" />
       </div>
 
       <div class="form-field-group">
@@ -1574,7 +1569,7 @@
       <div class="form-grid-2col">
         <div class="form-field-group">
           <label>Mật khẩu <span class="req">*</span></label>
-          <input type="password" class="form-field-input" id="admin-create-password" placeholder="Tối thiểu 4 ký tự" />
+          <input type="password" class="form-field-input" id="admin-create-password" placeholder="Tối thiểu 6 ký tự" />
         </div>
         <div class="form-field-group">
           <label>Xác nhận mật khẩu <span class="req">*</span></label>
@@ -1612,7 +1607,7 @@
 
       <div class="form-field-group">
         <label>Mật khẩu mới <span class="req">*</span></label>
-        <input type="password" class="form-field-input" id="own-pass-new" placeholder="Nhập mật khẩu mới (tối thiểu 4 ký tự)" />
+        <input type="password" class="form-field-input" id="own-pass-new" placeholder="Nhập mật khẩu mới (tối thiểu 6 ký tự)" />
       </div>
 
       <div class="form-field-group">

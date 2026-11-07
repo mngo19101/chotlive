@@ -74,17 +74,36 @@ final class LiveClient: ObservableObject {
     // MARK: - Đăng nhập
 
     func login(server: String, user: String, password: String) async throws {
+        try await authenticate(server: server, path: "/api/auth/login", user: user,
+                               body: ["username": user, "password": password],
+                               failure: "Đăng nhập thất bại")
+    }
+
+    /// Tạo tài khoản mới; server trả về phiên đăng nhập nên vào app được ngay.
+    func register(server: String, user: String, password: String, confirmPassword: String) async throws {
+        try await authenticate(server: server, path: "/api/auth/register", user: user,
+                               body: ["username": user, "password": password, "confirmPassword": confirmPassword],
+                               failure: "Đăng ký thất bại")
+    }
+
+    private func authenticate(server: String, path: String, user: String, body: [String: String], failure: String) async throws {
         let base = Self.normalize(server)
-        guard let url = URL(string: base + "/api/auth/login") else { throw ClientError.msg("Địa chỉ server không hợp lệ") }
+        guard let url = URL(string: base + path), url.host != nil else { throw ClientError.msg("Địa chỉ server không hợp lệ") }
         var req = URLRequest(url: url, timeoutInterval: 20)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: ["username": user, "password": password])
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let reply: (Data, URLResponse)
+        do {
+            reply = try await URLSession.shared.data(for: req)
+        } catch {
+            throw ClientError.msg("Không kết nối được máy chủ. Vui lòng kiểm tra mạng rồi thử lại.")
+        }
+        let (data, resp) = reply
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard (resp as? HTTPURLResponse)?.statusCode == 200, let tk = json["token"] as? String else {
-            throw ClientError.msg(json["error"] as? String ?? "Đăng nhập thất bại")
+            throw ClientError.msg(json["error"] as? String ?? failure)
         }
         baseURL = base
         token = tk

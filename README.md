@@ -53,7 +53,13 @@ Bạn có thể cài file `ChotLive-iOS.ipa` vào iPhone bằng một trong các
 
 ---
 
-## 4. Cấu trúc dự án
+## 4. Sao lưu sang mini PC
+
+Laptop tự đồng bộ dữ liệu với mini PC mỗi khi bật máy, để máy này hỏng thì còn máy kia. Cách thêm mini PC và khôi phục dữ liệu: xem [sync/README.md](sync/README.md).
+
+---
+
+## 5. Cấu trúc dự án
 
 | File | Vai trò |
 |---|---|
@@ -63,5 +69,6 @@ Bạn có thể cài file `ChotLive-iOS.ipa` vào iPhone bằng một trong các
 | `public/js/sync.js` | Engine đồng bộ 2 chiều thời gian thực giữa Web và App IPA qua WebSocket + HTTP fallback |
 | `public/js/store.js` | Quản lý trạng thái đơn hàng, khách hàng, bình luận, phiên live & kích hoạt đồng bộ tự động |
 | `public/js/app.js` | Điều khiển giao diện, sự kiện tương tác, đồng bộ UI tức thì và in tem Xprinter |
+| `sync/` | Đồng bộ dữ liệu giữa laptop và mini PC |
 | `capacitor.config.json` | Cấu hình đóng gói ứng dụng iOS Native |
 | `.github/workflows/build-ipa.yml` | Tự động biên dịch và xuất file `ChotLive-iOS.ipa` trên GitHub Actions |

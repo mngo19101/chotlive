@@ -21,6 +21,7 @@ enum Demo {
     @MainActor
     static func prepare(store: Store, client: LiveClient) {
         guard let screen else { return }
+        if screen == "login" || screen == "register" { return } // chưa đăng nhập, hiện màn đăng nhập thật
         Clock.fixed = date(10, 25, 20, 55)
         store.persistEnabled = false
         seed(store: store, fillToday: !["customers", "customerDetail"].contains(screen))

@@ -20,6 +20,7 @@ struct LiveNewSheet: View {
     @State private var remember = true
     /// ID vừa bấm theo dõi, đang chờ server nối xong.
     @State private var pendingId: String?
+    @State private var timeoutMessage: String?
 
     private var isConnecting: Bool {
         guard client.serverSupportsSync else { return client.liveState == "connecting" }
@@ -27,6 +28,7 @@ struct LiveNewSheet: View {
         return client.live(for: pendingId)?.state != "connected"
     }
     private var errorMessage: String? {
+        if let timeoutMessage { return timeoutMessage }
         if client.serverSupportsSync {
             guard let e = client.lastLiveEvent, e.state == "error" || e.state == "ended", !e.message.isEmpty else { return nil }
             return e.username.isEmpty ? e.message : "@\(e.username): \(e.message)"
@@ -164,6 +166,22 @@ struct LiveNewSheet: View {
         .frame(height: Metrics.sheetHeight(top: 112))
     }
 
+    /// Chờ quá lâu mà server không trả lời thì mở lại nút và báo lỗi, thay vì kẹt "Đang kết nối...".
+    private func watchPending(_ id: String) {
+        timeoutMessage = nil
+        guard client.socketConnected else {
+            pendingId = nil
+            timeoutMessage = "Chưa nối được tới server. Kiểm tra mạng rồi thử lại."
+            return
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 45_000_000_000)
+            guard pendingId?.lowercased() == id.lowercased(), isConnecting else { return }
+            pendingId = nil
+            timeoutMessage = "TikTok phản hồi quá lâu. Kiểm tra @\(id) có đang live không rồi thử lại."
+        }
+    }
+
     private func start(_ account: TikTokAccount) {
         guard !isConnecting else { return }
         store.unsavedLiveId = nil
@@ -171,6 +189,7 @@ struct LiveNewSheet: View {
         if client.lives.isEmpty { store.selectAccount(account.id) }
         pendingId = account.uniqueId
         client.connectLive(tiktok: account.uniqueId)
+        watchPending(account.uniqueId)
     }
 
     private func startNew(_ id: String) {
@@ -188,6 +207,7 @@ struct LiveNewSheet: View {
         }
         pendingId = id
         client.connectLive(tiktok: id)
+        watchPending(id)
     }
 
     private func lastLiveText(_ account: TikTokAccount) -> String {

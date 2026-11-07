@@ -27,11 +27,15 @@ targets:
         NSBluetoothAlwaysUsageDescription: Ứng dụng cần Bluetooth để kết nối và in tem qua máy in nhiệt.
         NSBluetoothPeripheralUsageDescription: Ứng dụng cần Bluetooth để kết nối máy in.
         NSLocalNetworkUsageDescription: Ứng dụng cần mạng nội bộ để nối server ChốtLive chạy trên máy tính cùng Wi-Fi.
+        # Ra Internet bắt buộc HTTPS để mật khẩu không đi dạng rõ; chỉ mạng nội bộ (thử nghiệm) mới được dùng http.
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        ChotLiveServerURL: $(CHOTLIVE_SERVER_URL)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chotlive.native
+        # Workflow build IPA truyền địa chỉ thật vào đây; để trống thì app cho nhập tay.
+        CHOTLIVE_SERVER_URL: ""
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "2"
         SWIFT_VERSION: "5.0"

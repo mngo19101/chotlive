@@ -162,59 +162,140 @@ struct TabBar: View {
 // MARK: - Đăng nhập
 
 struct LoginView: View {
+    private enum Mode { case login, register }
+
     @EnvironmentObject var client: LiveClient
-    @State private var server = UserDefaults.standard.string(forKey: "serverURL") ?? ""
+    @State private var mode = Mode.login
+    @State private var server = AppConfig.builtInServer ?? UserDefaults.standard.string(forKey: AuthStorage.serverKey) ?? ""
     @State private var user = ""
     @State private var pass = ""
+    @State private var confirm = ""
     @State private var busy = false
     @State private var error: String?
 
-    private var canSubmit: Bool { !busy && !server.isEmpty && !user.isEmpty && !pass.isEmpty }
+    private var isRegister: Bool { mode == .register }
+
+    private var canSubmit: Bool {
+        !busy && !server.isEmpty && !user.isEmpty && !pass.isEmpty && (!isRegister || !confirm.isEmpty)
+    }
+
+    private var buttonTitle: String {
+        if busy { return isRegister ? "Đang tạo tài khoản..." : "Đang đăng nhập..." }
+        return isRegister ? "Tạo tài khoản" : "Đăng nhập"
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Metrics.gap) {
-                VStack(alignment: .leading, spacing: 1) {
-                    T("Đăng nhập để bắt đầu", 13, .medium, Theme.muted)
-                    T("ChốtLive", 28, .heavy, Theme.ink, track: -0.5)
-                }
-                .padding(.bottom, 6)
-
-                VStack(alignment: .leading, spacing: 14) {
-                    LabeledField(label: "Server ChốtLive", placeholder: "https://ten-server.onrender.com",
-                                 text: $server, keyboard: .URL, capitalize: false)
-                    LabeledField(label: "Tên tài khoản", placeholder: "Tên tài khoản", text: $user, capitalize: false)
-                    VStack(alignment: .leading, spacing: 6) {
-                        T("Mật khẩu", 12, .medium, Theme.muted)
-                        SecureField("Mật khẩu", text: $pass)
-                            .font(.bv(15, .semibold))
-                            .padding(.horizontal, 15)
-                            .frame(height: 44)
-                            .cardStyle(14, fill: Theme.field)
+        GeometryReader { geo in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: Metrics.gap) {
+                    header.padding(.bottom, 6)
+                    modeSwitch
+                    fields
+                    if let error {
+                        T(error, 13, .medium, Theme.red)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    PrimaryButton(title: buttonTitle, enabled: canSubmit, action: submit)
+                    T(isRegister ? "Mật khẩu từ \(AppConfig.minPasswordLength) ký tự trở lên."
+                                 : "Quên mật khẩu? Liên hệ quản trị viên ChốtLive để được đặt lại.",
+                      12, .medium, Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(16)
-                .cardStyle(24)
-
-                if let error {
-                    T(error, 13, .medium, Theme.red)
-                }
-
-                PrimaryButton(title: busy ? "Đang đăng nhập..." : "Đăng nhập", enabled: canSubmit) {
-                    busy = true
-                    error = nil
-                    Task {
-                        do { try await client.login(server: server, user: user, password: pass) }
-                        catch { self.error = error.localizedDescription }
-                        busy = false
-                    }
-                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity, minHeight: geo.size.height)
             }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.top, 6)
+            .scrollDismissesKeyboard(.interactively)
         }
-        .scrollDismissesKeyboard(.interactively)
         .background(Theme.bg.ignoresSafeArea())
+        #if DEBUG
+        .onAppear { if Demo.screen == "register" { mode = .register } }
+        #endif
+    }
+
+    private var header: some View {
+        VStack(spacing: 12) {
+            T("CL", 26, .heavy, Theme.ink, track: -0.5)
+                .frame(width: 68, height: 68)
+                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Theme.orange))
+            VStack(spacing: 3) {
+                T("ChốtLive", 28, .heavy, Theme.ink, track: -0.5)
+                T(isRegister ? "Tạo tài khoản để bắt đầu chốt đơn" : "Chốt đơn TikTok Live, in tem tức thì", 14, .medium, Theme.muted)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
+    private var modeSwitch: some View {
+        HStack(spacing: 4) {
+            modeButton("Đăng nhập", .login)
+            modeButton("Đăng ký", .register)
+        }
+        .padding(4)
+        .background(Capsule().fill(Theme.card).overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1)))
+    }
+
+    private func modeButton(_ title: String, _ target: Mode) -> some View {
+        let selected = mode == target
+        return Button {
+            mode = target
+            error = nil
+            confirm = ""
+        } label: {
+            T(title, 14, .bold, selected ? Theme.ink : Theme.muted)
+                .frame(maxWidth: .infinity)
+                .frame(height: 40)
+                .background(Capsule().fill(selected ? Theme.orange : Color.clear))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var fields: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Bản phát hành đã gắn sẵn địa chỉ server nên người dùng không phải biết tới.
+            if AppConfig.builtInServer == nil {
+                LabeledField(label: "Địa chỉ máy chủ", placeholder: "https://ten-mien-cua-ban.vn",
+                             text: $server, keyboard: .URL, capitalize: false)
+            }
+            LabeledField(label: "Tên tài khoản", placeholder: "Tên tài khoản", text: $user, capitalize: false,
+                         contentType: .username)
+            PasswordField(label: "Mật khẩu", text: $pass, contentType: isRegister ? .newPassword : .password)
+            if isRegister {
+                PasswordField(label: "Nhập lại mật khẩu", text: $confirm, contentType: .newPassword)
+            }
+        }
+        .padding(16)
+        .cardStyle(24)
+    }
+
+    private func submit() {
+        if isRegister {
+            if pass.count < AppConfig.minPasswordLength {
+                error = "Mật khẩu phải có ít nhất \(AppConfig.minPasswordLength) ký tự."
+                return
+            }
+            if pass != confirm {
+                error = "Mật khẩu nhập lại không khớp."
+                return
+            }
+        }
+        busy = true
+        error = nil
+        Task {
+            do {
+                if isRegister {
+                    try await client.register(server: server, user: user, password: pass, confirmPassword: confirm)
+                } else {
+                    try await client.login(server: server, user: user, password: pass)
+                }
+            } catch {
+                self.error = error.localizedDescription
+            }
+            busy = false
+        }
     }
 }
 

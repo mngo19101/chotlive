@@ -2197,12 +2197,10 @@ function switchAuthTab(mode = 'login') {
 $('#tab-auth-login')?.addEventListener('click', () => switchAuthTab('login'));
 $('#tab-auth-register')?.addEventListener('click', () => switchAuthTab('register'));
 
-$('#btn-fill-admin-cred')?.addEventListener('click', () => {
-  if ($('#auth-login-username')) $('#auth-login-username').value = 'admin';
-  if ($('#auth-login-password')) $('#auth-login-password').value = 'admin123';
-  showAuthBanner('Đã điền tài khoản Admin mặc định. Bấm Đăng nhập để vào!', 'success');
-});
-
+// Trên trình duyệt, web luôn nối về chính máy chủ đang mở trang nên không cần chỉnh địa chỉ.
+if (location.protocol === 'http:' || location.protocol === 'https:') {
+  $('#btn-auth-server-config')?.closest('.auth-card-footer')?.remove();
+}
 $('#btn-auth-server-config')?.addEventListener('click', () => {
   openSyncSetupModal();
 });
@@ -2309,8 +2307,8 @@ $('#form-auth-register')?.addEventListener('submit', async (e) => {
   if (!username) {
     return showAuthBanner('Vui lòng nhập tên tài khoản');
   }
-  if (password.length < 4) {
-    return showAuthBanner('Mật khẩu phải có ít nhất 4 ký tự');
+  if (password.length < 6) {
+    return showAuthBanner('Mật khẩu phải có ít nhất 6 ký tự');
   }
   if (password !== confirmPassword) {
     return showAuthBanner('Xác nhận mật khẩu không khớp!');
@@ -2570,8 +2568,8 @@ $('#btn-confirm-admin-reset-pass')?.addEventListener('click', async () => {
   const newPassword = $('#admin-input-new-pass')?.value || '';
   const confirmPassword = $('#admin-input-confirm-pass')?.value || '';
 
-  if (newPassword.length < 4) {
-    return toast('Mật khẩu mới phải có ít nhất 4 ký tự', '⚠️');
+  if (newPassword.length < 6) {
+    return toast('Mật khẩu mới phải có ít nhất 6 ký tự', '⚠️');
   }
   if (newPassword !== confirmPassword) {
     return toast('Xác nhận mật khẩu mới không khớp!', '⚠️');
@@ -2610,7 +2608,7 @@ $('#btn-submit-admin-create-user')?.addEventListener('click', async () => {
   const role = $('#admin-create-role')?.value || 'user';
 
   if (!username) return toast('Vui lòng nhập tên tài khoản', '⚠️');
-  if (password.length < 4) return toast('Mật khẩu phải có ít nhất 4 ký tự', '⚠️');
+  if (password.length < 6) return toast('Mật khẩu phải có ít nhất 6 ký tự', '⚠️');
   if (password !== confirmPassword) return toast('Xác nhận mật khẩu không khớp!', '⚠️');
 
   try {

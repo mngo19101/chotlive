@@ -1,0 +1,14 @@
+# setup.sh thay __DOMAIN__ rồi chép vào /etc/caddy/Caddyfile.
+# Caddy tự xin và gia hạn chứng chỉ HTTPS, tự chuyển http sang https, tự chuyển tiếp WebSocket (/ws).
+# Không bật nhật ký truy cập: địa chỉ /ws có chứa token đăng nhập, không được ghi ra file.
+__DOMAIN__ {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+	reverse_proxy 127.0.0.1:3000
+}

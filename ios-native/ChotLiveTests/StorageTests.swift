@@ -323,6 +323,31 @@ final class StorageTests: XCTestCase {
     }
 
     @MainActor
+    func testRegisterCreatesSessionLikeLogin() async throws {
+        URLProtocol.registerClass(AuthStub.self)
+        defer { URLProtocol.unregisterClass(AuthStub.self) }
+
+        let client = LiveClient(defaults: defaults)
+        var changes: [String?] = []
+        client.onAccountChange = { changes.append($0) }
+
+        try await client.register(server: "https://chotlive.test", user: "shop.a", password: "mat-khau", confirmPassword: "mat-khau")
+
+        XCTAssertEqual(AuthStub.lastAuthPath, "/api/auth/register")
+        XCTAssertEqual(AuthStub.lastAuthBody?["confirmPassword"] as? String, "mat-khau")
+        XCTAssertTrue(client.loggedIn)
+        XCTAssertEqual(client.username, "Shop.A")
+        XCTAssertEqual(Keychain.read(AuthStorage.tokenAccount(accountA)), "tk-dang-nhap")
+        XCTAssertEqual(client.savedAccounts.map(\.key), [accountA])
+        XCTAssertEqual(changes, [accountA])
+    }
+
+    func testBuildsWithoutServerAddressAskForIt() {
+        // Test chạy trên bản không đặt CHOTLIVE_SERVER_URL.
+        XCTAssertNil(AppConfig.builtInServer)
+    }
+
+    @MainActor
     func testAddingSecondAccountSwitchingAndForgetting() async throws {
         URLProtocol.registerClass(AuthStub.self)
         defer { URLProtocol.unregisterClass(AuthStub.self) }
@@ -375,6 +400,9 @@ final class StorageTests: XCTestCase {
 
 /// Trả lời giả cho /api/auth/*; server thật không tham gia test.
 private final class AuthStub: URLProtocol {
+    static var lastAuthPath: String?
+    static var lastAuthBody: [String: Any]?
+
     override class func canInit(with request: URLRequest) -> Bool {
         request.url?.host == "chotlive.test" && request.url?.scheme == "https"
     }
@@ -390,6 +418,8 @@ private final class AuthStub: URLProtocol {
         }
         // Đăng nhập: trả token/tên tài khoản dựa theo username gửi lên, để test được 2 tài khoản khác nhau.
         let body = (try? JSONSerialization.jsonObject(with: request.httpBodyOrStream() ?? Data())) as? [String: Any]
+        Self.lastAuthPath = request.url?.path
+        Self.lastAuthBody = body
         let username = (body?["username"] as? String) ?? ""
         let displayName = username.lowercased() == "shop.a" ? "Shop.A" : username
         let token = "tk-dang-nhap"

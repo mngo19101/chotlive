@@ -1,6 +1,7 @@
 node_modules/
 data/*
 !data/*.example.json
+sync/config.json
 ios/
 build/
 Payload/

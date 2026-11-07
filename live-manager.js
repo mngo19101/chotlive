@@ -55,6 +55,7 @@ export class LiveManager {
     friendlyError = (e) => String(e?.message || e),
     retryDelays = DEFAULT_RETRY_DELAYS_MS,
     staleAfterMs = DEFAULT_STALE_AFTER_MS,
+    connectTimeoutMs = 30000,
     now = () => Date.now(),
     log = () => {}
   }) {
@@ -69,6 +70,7 @@ export class LiveManager {
       friendlyError,
       retryDelays,
       staleAfterMs,
+      connectTimeoutMs,
       now,
       log
     });
@@ -203,7 +205,18 @@ export class LiveManager {
     });
 
     try {
-      const res = await conn.connect();
+      // Không để lần nối đầu treo vô hạn: quá hạn thì coi như lỗi để báo người dùng / nối lại.
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Hết thời gian chờ TikTok phản hồi.')), this.connectTimeoutMs);
+        timer.unref?.();
+      });
+      let res;
+      try {
+        res = await Promise.race([conn.connect(), timeout]);
+      } finally {
+        clearTimeout(timer);
+      }
       if (!live()) {
         this.dropConnection({ conn });
         return;

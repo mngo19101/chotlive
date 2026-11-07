@@ -180,7 +180,7 @@ struct AddAppAccountSheet: View {
     @State private var error: String?
 
     init(defaultServer: String) {
-        _server = State(initialValue: defaultServer)
+        _server = State(initialValue: AppConfig.builtInServer ?? defaultServer)
     }
 
     private var canSubmit: Bool {
@@ -190,17 +190,13 @@ struct AddAppAccountSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             SheetTitle(title: "Thêm tài khoản", subtitle: "Đăng nhập một tài khoản ChốtLive khác").padding(.top, 6)
-            LabeledField(label: "Server ChốtLive", placeholder: "https://ten-server.onrender.com",
-                         text: $server, keyboard: .URL, capitalize: false)
-            LabeledField(label: "Tên tài khoản", placeholder: "Tên tài khoản", text: $user, capitalize: false)
-            VStack(alignment: .leading, spacing: 6) {
-                T("Mật khẩu", 12, .medium, Theme.muted)
-                SecureField("Mật khẩu", text: $pass)
-                    .font(.bv(15, .semibold))
-                    .padding(.horizontal, 15)
-                    .frame(height: 44)
-                    .cardStyle(14, fill: Theme.field)
+            if AppConfig.builtInServer == nil {
+                LabeledField(label: "Địa chỉ máy chủ", placeholder: "https://ten-mien-cua-ban.vn",
+                             text: $server, keyboard: .URL, capitalize: false)
             }
+            LabeledField(label: "Tên tài khoản", placeholder: "Tên tài khoản", text: $user, capitalize: false,
+                         contentType: .username)
+            PasswordField(label: "Mật khẩu", text: $pass)
             if let error { T(error, 13, .medium, Theme.red) }
             PrimaryButton(title: busy ? "Đang đăng nhập..." : "Đăng nhập", enabled: canSubmit) {
                 busy = true

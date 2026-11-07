@@ -2,7 +2,7 @@
  * Susu Live Order / ChốtLive – Server, Auth, Admin & Real-Time Sync Hub (Web <-> iOS IPA App)
  * - Hệ thống Đăng nhập / Đăng ký (Chỉ cần Tên tài khoản + Mật khẩu + Xác nhận mật khẩu)
  * - Phân quyền:
- *   + Tài khoản Admin riêng (mặc định: admin / admin123) quản lý toàn bộ tài khoản:
+ *   + Tài khoản Admin riêng (mật khẩu đặt qua ADMIN_PASSWORD, xem .env.example) quản lý toàn bộ tài khoản:
  *     Xem danh sách, Tạo mới, Khoá / Mở khoá tài khoản (đẩy văng tức thì nếu đang online), Đổi mật khẩu, Xoá tài khoản.
  *   + Tài khoản Thành viên (user): sử dụng đầy đủ tính năng chốt đơn, in tem, đồng bộ Web <-> App IPA.
  * - Lưu trữ và đồng bộ dữ liệu thời gian thực theo từng tài khoản qua WebSocket (/ws) + REST API.
@@ -14,6 +14,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { TikTokLiveConnection, WebcastEvent, ControlEvent } from 'tiktok-live-connector';
@@ -29,6 +30,7 @@ import * as sqlite from './db.js';
 import { snapCollections, diffCollections, snapScalars, diffScalars } from './delta.js';
 import { parsePrice, extractProductInfo } from './public/js/price.js';
 import { LiveManager, liveKey } from './live-manager.js';
+import { createLimiter, waitMessage } from './rate-limit.js';
 import { cleanNativeUpdate, cleanState, isObject } from './validate.js';
 import {
   applyNativeUpdate,
@@ -42,7 +44,19 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+/** Trên VPS đặt 127.0.0.1 để chỉ Caddy nối được vào, không ai đi vòng qua HTTPS. */
+const HOST = process.env.HOST || undefined;
+/**
+ * Chỉ bật khi server chạy trong cùng mạng với máy in (laptop, mini PC).
+ * Tắt trên VPS: in LAN cho server tự mở kết nối tới địa chỉ nội bộ theo yêu cầu của người dùng.
+ */
+const LAN_MODE = process.env.LAN_MODE === '1';
 const SIGN_API_KEY = process.env.SIGN_API_KEY || undefined;
+const MIN_PASSWORD_LENGTH = 6;
+const MAX_PASSWORD_LENGTH = 128;
+const MAX_USERNAME_LENGTH = 32;
+/** Dữ liệu đồng bộ lần đầu của một shop lớn vẫn lọt, gói lớn hơn thì coi là bất thường. */
+const MAX_WS_MESSAGE_BYTES = 32 * 1024 * 1024;
 const TOKEN_TTL_MS = (Number(process.env.TOKEN_TTL_DAYS) || 30) * 24 * 60 * 60 * 1000;
 /** Số bình luận mới nhất giữ sẵn trong dữ liệu đồng bộ. Toàn bộ nằm trong bảng live_comments. */
 const COMMENT_WINDOW = 500;
@@ -96,20 +110,46 @@ function archiveLegacyFile(file) {
 /* ============================================================
    Mã hoá mật khẩu & Quản lý Người Dùng / Phân Quyền (Admin / User)
    ============================================================ */
-function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
-  const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
-  return `${salt}:${hash}`;
+const scrypt = promisify(crypto.scrypt);
+
+/** Chạy ngoài luồng chính: nhiều người đăng nhập cùng lúc không làm đứng bình luận đang về. */
+async function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  const hash = await scrypt(String(password), salt, 64);
+  return `${salt}:${hash.toString('hex')}`;
 }
 
-function verifyPassword(password, storedHash) {
+function hashPasswordSync(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  return `${salt}:${crypto.scryptSync(String(password), salt, 64).toString('hex')}`;
+}
+
+async function verifyPassword(password, storedHash) {
   if (!storedHash || !storedHash.includes(':')) return false;
   const [salt, originalHash] = storedHash.split(':');
-  const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
-  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(originalHash, 'hex'));
+  const hash = await scrypt(String(password), salt, 64);
+  const original = Buffer.from(originalHash, 'hex');
+  return hash.length === original.length && crypto.timingSafeEqual(hash, original);
 }
 
 function normalizeAccountName(name = '') {
   return String(name).trim().toLowerCase();
+}
+
+/** Trả về lỗi để báo người dùng, hoặc null nếu mật khẩu mới dùng được. */
+function newPasswordProblem(password, confirm) {
+  const text = String(password ?? '');
+  if (text.length < MIN_PASSWORD_LENGTH) return `Mật khẩu phải có ít nhất ${MIN_PASSWORD_LENGTH} ký tự.`;
+  if (text.length > MAX_PASSWORD_LENGTH) return `Mật khẩu không được dài quá ${MAX_PASSWORD_LENGTH} ký tự.`;
+  if (text !== String(confirm ?? '')) return 'Mật khẩu xác nhận không khớp.';
+  return null;
+}
+
+function usernameProblem(rawName) {
+  const clean = normalizeAccountName(rawName);
+  if (clean.length < 2) return 'Tên tài khoản phải có ít nhất 2 ký tự.';
+  if (clean.length > MAX_USERNAME_LENGTH) return `Tên tài khoản không được dài quá ${MAX_USERNAME_LENGTH} ký tự.`;
+  if (/[\p{C}<>]/u.test(clean)) return 'Tên tài khoản có ký tự không hợp lệ.';
+  return null;
 }
 
 let generatedAdminPassword = null;
@@ -138,7 +178,7 @@ function loadUsersData() {
     id: 'u_admin',
     username: 'admin',
     displayName: 'admin',
-    passwordHash: hashPassword(getInitialAdminPassword()),
+    passwordHash: hashPasswordSync(getInitialAdminPassword()),
     role: 'admin',
     locked: false,
     createdAt: Date.now(),
@@ -158,7 +198,7 @@ if (!usersDb.users.some((u) => u.role === 'admin')) {
     id: 'u_admin',
     username: 'admin',
     displayName: 'admin',
-    passwordHash: hashPassword(getInitialAdminPassword()),
+    passwordHash: hashPasswordSync(getInitialAdminPassword()),
     role: 'admin',
     locked: false,
     createdAt: Date.now(),
@@ -422,6 +462,10 @@ process.on('uncaughtException', (err) => {
    ============================================================ */
 const app = express();
 
+app.disable('x-powered-by');
+// Mặc định chỉ tin IP do Caddy trên cùng máy báo lại; người ngoài không giả IP được để né giới hạn.
+app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
+
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -482,18 +526,38 @@ app.get('/healthz', (_req, res) =>
    API ĐĂNG NHẬP / ĐĂNG KÝ / ĐỔI MẬT KHẨU
    ============================================================ */
 
+// Nhiều shop có thể chung một IP (mạng di động), nên giới hạn theo IP phải rộng hơn theo từng tài khoản.
+const loginFailuresByAccount = createLimiter({ max: 10, windowMs: 15 * 60 * 1000 });
+const loginFailuresByIp = createLimiter({ max: 100, windowMs: 15 * 60 * 1000 });
+const registrationsByIp = createLimiter({ max: 20, windowMs: 60 * 60 * 1000 });
+setInterval(() => {
+  loginFailuresByAccount.sweep();
+  loginFailuresByIp.sweep();
+  registrationsByIp.sweep();
+}, 10 * 60 * 1000).unref();
+
 // 1. Đăng nhập
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { username = '', password = '' } = req.body || {};
   const cleanName = normalizeAccountName(username);
   if (!cleanName || !password) {
     return res.status(400).json({ error: 'Vui lòng nhập đầy đủ tên tài khoản và mật khẩu.' });
   }
 
+  const accountKey = `${req.ip}|${cleanName}`;
+  const wait = Math.max(loginFailuresByAccount.retryAfter(accountKey), loginFailuresByIp.retryAfter(req.ip));
+  if (wait > 0) {
+    res.setHeader('Retry-After', String(wait));
+    return res.status(429).json({ error: waitMessage(wait), code: 'TOO_MANY_ATTEMPTS' });
+  }
+
   const user = usersDb.users.find((u) => normalizeAccountName(u.username) === cleanName);
-  if (!user || !verifyPassword(password, user.passwordHash)) {
+  if (!user || !(await verifyPassword(password, user.passwordHash))) {
+    loginFailuresByAccount.hit(accountKey);
+    loginFailuresByIp.hit(req.ip);
     return res.status(401).json({ error: 'Tên tài khoản hoặc mật khẩu không chính xác.' });
   }
+  loginFailuresByAccount.reset(accountKey);
 
   if (user.locked) {
     return res.status(403).json({
@@ -516,31 +580,37 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 // 2. Đăng ký (Chỉ cần nhập: Tên tài khoản, Mật khẩu, Xác nhận mật khẩu)
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const { username = '', password = '', confirmPassword = '' } = req.body || {};
   const rawName = String(username).trim();
   const cleanName = normalizeAccountName(rawName);
 
-  if (!cleanName || cleanName.length < 2) {
-    return res.status(400).json({ error: 'Tên tài khoản phải có ít nhất 2 ký tự.' });
-  }
-  if (!password || String(password).length < 4) {
-    return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 4 ký tự.' });
-  }
-  if (String(password) !== String(confirmPassword)) {
-    return res.status(400).json({ error: 'Mật khẩu xác nhận không khớp.' });
+  const problem = usernameProblem(rawName) || newPasswordProblem(password, confirmPassword);
+  if (problem) return res.status(400).json({ error: problem });
+
+  const nameTaken = () => usersDb.users.some((u) => normalizeAccountName(u.username) === cleanName);
+  if (nameTaken()) {
+    return res.status(409).json({ error: 'Tên tài khoản này đã tồn tại, vui lòng chọn tên khác.' });
   }
 
-  const exists = usersDb.users.some((u) => normalizeAccountName(u.username) === cleanName);
-  if (exists) {
+  const wait = registrationsByIp.retryAfter(req.ip);
+  if (wait > 0) {
+    res.setHeader('Retry-After', String(wait));
+    return res.status(429).json({ error: waitMessage(wait), code: 'TOO_MANY_ATTEMPTS' });
+  }
+  registrationsByIp.hit(req.ip);
+
+  const passwordHash = await hashPassword(password);
+  // Hai người cùng đăng ký một tên: trong lúc chờ mã hoá mật khẩu, người kia có thể đã tạo xong.
+  if (nameTaken()) {
     return res.status(409).json({ error: 'Tên tài khoản này đã tồn tại, vui lòng chọn tên khác.' });
   }
 
   const newUser = {
-    id: 'u_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    id: 'u_' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex'),
     username: cleanName,
     displayName: rawName,
-    passwordHash: hashPassword(password),
+    passwordHash,
     role: 'user',
     locked: false,
     createdAt: Date.now(),
@@ -572,20 +642,21 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 });
 
 // 4. Tự đổi mật khẩu cá nhân
-app.post('/api/auth/change-password', requireAuth, (req, res) => {
+app.post('/api/auth/change-password', requireAuth, async (req, res) => {
   const { currentPassword = '', newPassword = '', confirmPassword = '' } = req.body || {};
-  if (!verifyPassword(currentPassword, req.user.passwordHash)) {
+  if (!(await verifyPassword(currentPassword, req.user.passwordHash))) {
     return res.status(400).json({ error: 'Mật khẩu hiện tại không đúng.' });
   }
-  if (!newPassword || String(newPassword).length < 4) {
-    return res.status(400).json({ error: 'Mật khẩu mới phải từ 4 ký tự trở lên.' });
-  }
-  if (String(newPassword) !== String(confirmPassword)) {
-    return res.status(400).json({ error: 'Xác nhận mật khẩu mới không khớp.' });
-  }
+  const problem = newPasswordProblem(newPassword, confirmPassword);
+  if (problem) return res.status(400).json({ error: problem });
 
-  req.user.passwordHash = hashPassword(newPassword);
+  req.user.passwordHash = await hashPassword(newPassword);
   revokeUserTokens(req.user.id, req.token);
+  kickUserSockets(req.user.id, {
+    type: 'password_changed_force_login',
+    userId: req.user.id,
+    message: 'Mật khẩu tài khoản vừa được đổi. Vui lòng đăng nhập lại.'
+  }, req.token);
   persistUsersDb();
 
   res.json({ ok: true, message: 'Đã đổi mật khẩu thành công!' });
@@ -614,29 +685,29 @@ app.get('/api/admin/users', requireAdmin, (_req, res) => {
 });
 
 // Admin tạo tài khoản mới
-app.post('/api/admin/users/create', requireAdmin, (req, res) => {
+app.post('/api/admin/users/create', requireAdmin, async (req, res) => {
   const { username = '', password = '', confirmPassword = '', role = 'user' } = req.body || {};
   const rawName = String(username).trim();
   const cleanName = normalizeAccountName(rawName);
 
-  if (!cleanName || cleanName.length < 2) {
-    return res.status(400).json({ error: 'Tên tài khoản phải có ít nhất 2 ký tự.' });
+  const problem = usernameProblem(rawName) || newPasswordProblem(password, confirmPassword);
+  if (problem) return res.status(400).json({ error: problem });
+
+  const nameTaken = () => usersDb.users.some((u) => normalizeAccountName(u.username) === cleanName);
+  if (nameTaken()) {
+    return res.status(409).json({ error: 'Tên tài khoản này đã tồn tại.' });
   }
-  if (!password || String(password).length < 4) {
-    return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 4 ký tự.' });
-  }
-  if (String(password) !== String(confirmPassword)) {
-    return res.status(400).json({ error: 'Mật khẩu xác nhận không khớp.' });
-  }
-  if (usersDb.users.some((u) => normalizeAccountName(u.username) === cleanName)) {
+
+  const passwordHash = await hashPassword(password);
+  if (nameTaken()) {
     return res.status(409).json({ error: 'Tên tài khoản này đã tồn tại.' });
   }
 
   const newUser = {
-    id: 'u_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    id: 'u_' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex'),
     username: cleanName,
     displayName: rawName,
-    passwordHash: hashPassword(password),
+    passwordHash,
     role: role === 'admin' ? 'admin' : 'user',
     locked: false,
     createdAt: Date.now(),
@@ -673,7 +744,7 @@ app.post('/api/admin/users/:id/lock', requireAdmin, (req, res) => {
     liveManager.stop(target.id);
     revokeUserTokens(target.id);
     // Đẩy thông báo khoá tài khoản tức thì tới mọi thiết bị của user đó đang mở
-    broadcastToUser(target.id, {
+    kickUserSockets(target.id, {
       type: 'account_locked',
       userId: target.id,
       message: 'Tài khoản của bạn đã bị Quản trị viên khoá.'
@@ -690,31 +761,24 @@ app.post('/api/admin/users/:id/lock', requireAdmin, (req, res) => {
 });
 
 // Admin Đổi mật khẩu cho bất kỳ tài khoản nào
-app.post('/api/admin/users/:id/password', requireAdmin, (req, res) => {
+app.post('/api/admin/users/:id/password', requireAdmin, async (req, res) => {
   const targetId = req.params.id;
   const { newPassword = '', confirmPassword = '' } = req.body || {};
   const target = usersDb.users.find((u) => u.id === targetId);
   if (!target) {
     return res.status(404).json({ error: 'Không tìm thấy tài khoản này.' });
   }
-  if (!newPassword || String(newPassword).length < 4) {
-    return res.status(400).json({ error: 'Mật khẩu mới phải từ 4 ký tự trở lên.' });
-  }
-  if (confirmPassword !== undefined && String(newPassword) !== String(confirmPassword)) {
-    return res.status(400).json({ error: 'Xác nhận mật khẩu mới không khớp.' });
-  }
+  const problem = newPasswordProblem(newPassword, confirmPassword);
+  if (problem) return res.status(400).json({ error: problem });
 
-  target.passwordHash = hashPassword(newPassword);
-  if (target.id !== req.user.id) {
-    revokeUserTokens(target.id);
-    broadcastToUser(target.id, {
-      type: 'password_changed_force_login',
-      userId: target.id,
-      message: 'Mật khẩu tài khoản đã được Quản trị viên thay đổi. Vui lòng đăng nhập lại.'
-    });
-  } else {
-    revokeUserTokens(target.id, req.token);
-  }
+  target.passwordHash = await hashPassword(newPassword);
+  const exceptToken = target.id === req.user.id ? req.token : null;
+  revokeUserTokens(target.id, exceptToken);
+  kickUserSockets(target.id, {
+    type: 'password_changed_force_login',
+    userId: target.id,
+    message: 'Mật khẩu tài khoản đã được Quản trị viên thay đổi. Vui lòng đăng nhập lại.'
+  }, exceptToken);
   persistUsersDb();
   broadcastAdminUsersUpdate();
 
@@ -738,7 +802,7 @@ app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
 
   liveManager.stop(target.id);
   revokeUserTokens(target.id);
-  broadcastToUser(target.id, {
+  kickUserSockets(target.id, {
     type: 'account_locked',
     userId: target.id,
     message: 'Tài khoản của bạn đã bị Quản trị viên xoá khỏi hệ thống.'
@@ -795,6 +859,7 @@ app.get('/api/comments', requireAuth, (req, res) => {
 
 /** Địa chỉ trong mạng nội bộ để nhập trên điện thoại khi chạy server ở máy tính. */
 function lanAddresses() {
+  if (!LAN_MODE) return [];
   const out = [];
   for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
     if (/vmware|virtual|vethernet|vbox|wsl|docker|loopback|hyper-v|tailscale|zerotier/i.test(name)) continue;
@@ -852,6 +917,12 @@ const isPrivateIPv4 = (ip) => {
 };
 
 app.post('/api/print-lan', requireAuth, (req, res) => {
+  if (!LAN_MODE) {
+    return res.status(403).json({
+      error: 'Máy chủ trên Internet không nối được máy in trong mạng của shop. Vui lòng in qua Bluetooth hoặc USB.',
+      code: 'LAN_PRINT_DISABLED'
+    });
+  }
   const { ip, port = 9100, bytes } = req.body || {};
   if (!ip || !Array.isArray(bytes) || bytes.length === 0) {
     return res.status(400).json({ error: 'Thiếu ip hoặc bytes in' });
@@ -886,7 +957,22 @@ app.post('/api/print-lan', requireAuth, (req, res) => {
    WebSocket Real-Time Sync Hub
    ============================================================ */
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: MAX_WS_MESSAGE_BYTES });
+
+/**
+ * Báo rồi ngắt các thiết bị đang nối của một tài khoản (trừ thiết bị đang dùng exceptToken):
+ * token đã thu hồi thì kết nối đang mở cũng không được tiếp tục nhận dữ liệu.
+ */
+function kickUserSockets(userId, payload, exceptToken = null) {
+  const msg = JSON.stringify(payload);
+  wss.clients.forEach((client) => {
+    if (client.userId !== userId || (exceptToken && client.token === exceptToken)) return;
+    try {
+      if (client.readyState === 1) client.send(msg);
+      client.close(4001, 'session revoked');
+    } catch {}
+  });
+}
 
 function countOnlineClientsForUser(userId) {
   let cnt = 0;
@@ -1425,6 +1511,7 @@ wss.on('connection', safely('ws connection', (ws, req) => {
     const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const tk = urlObj.searchParams.get('token') || '';
     initialUser = getUserByToken(tk);
+    if (initialUser) ws.token = tk;
   } catch {}
 
   ws.userId = initialUser?.id || null;
@@ -1487,6 +1574,7 @@ wss.on('connection', safely('ws connection', (ws, req) => {
       }
       const prevUid = ws.userId;
       ws.userId = u.id;
+      ws.token = String(msg.token).replace(/^Bearer\s+/i, '').trim();
       ws.userRole = u.role;
       ws.delta = msg.delta === true;
       const st = getStateForUser(u.id);
@@ -1512,14 +1600,20 @@ wss.on('connection', safely('ws connection', (ws, req) => {
       return;
     }
 
-    // Kiểm tra nếu tài khoản bị khoá giữa chừng
-    const activeUser = usersDb.users.find((u) => u.id === ws.userId);
-    if (activeUser && activeUser.locked) {
+    // Phiên có thể đã hết hạn, bị đăng xuất hoặc tài khoản đã bị xoá trong lúc kết nối vẫn mở.
+    const activeUser = getUserByToken(ws.token);
+    if (!activeUser) {
+      send({ type: 'auth_error', message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
+      ws.close(4001, 'session revoked');
+      return;
+    }
+    if (activeUser.locked) {
       send({
         type: 'account_locked',
         userId: activeUser.id,
         message: 'Tài khoản của bạn đã bị Quản trị viên khoá.'
       });
+      ws.close(4001, 'account locked');
       return;
     }
 
@@ -1600,7 +1694,7 @@ setInterval(() => {
   });
 }, 25000);
 
-server.listen(PORT, () => {
-  console.log(`Susu Live Order đang chạy: http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Susu Live Order đang chạy: http://${HOST || 'localhost'}:${PORT}`);
   resumeLivesAfterRestart();
 });

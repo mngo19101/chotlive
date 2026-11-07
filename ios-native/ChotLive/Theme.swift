@@ -566,6 +566,7 @@ struct LabeledField: View {
     @Binding var text: String
     var keyboard: UIKeyboardType = .default
     var capitalize = true
+    var contentType: UITextContentType? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -574,8 +575,29 @@ struct LabeledField: View {
                 .font(.bv(15, .semibold))
                 .foregroundColor(Theme.ink)
                 .keyboardType(keyboard)
+                .textContentType(contentType)
                 .textInputAutocapitalization(capitalize ? .sentences : .never)
                 .autocorrectionDisabled(!capitalize)
+                .padding(.horizontal, 15)
+                .frame(height: 44)
+                .cardStyle(14, fill: Theme.field)
+        }
+    }
+}
+
+/// Ô mật khẩu cùng kiểu với LabeledField.
+struct PasswordField: View {
+    let label: String
+    @Binding var text: String
+    var contentType: UITextContentType = .password
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            T(label, 12, .medium, Theme.muted)
+            SecureField(label, text: $text)
+                .font(.bv(15, .semibold))
+                .foregroundColor(Theme.ink)
+                .textContentType(contentType)
                 .padding(.horizontal, 15)
                 .frame(height: 44)
                 .cardStyle(14, fill: Theme.field)
