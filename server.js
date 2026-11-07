@@ -33,6 +33,7 @@ import { snapCollections, diffCollections, snapScalars, diffScalars } from './de
 import { parsePrice, extractProductInfo } from './public/js/price.js';
 import { LiveManager, liveKey } from './live-manager.js';
 import { createLimiter, waitMessage } from './rate-limit.js';
+import { createTelegramBridge } from './telegram.js';
 import { cleanNativeUpdate, cleanState, isObject } from './validate.js';
 import {
   accessOf,
@@ -761,6 +762,19 @@ function pushSupportMessage(userId, result) {
   });
 }
 
+// Bot Telegram: tin của khách báo về Admin, Admin bấm Trả lời trên Telegram thì chuyển đúng khách.
+const telegram = createTelegramBridge({
+  token: process.env.TELEGRAM_BOT_TOKEN,
+  adminChatId: process.env.TELEGRAM_ADMIN_CHAT_ID,
+  db,
+  onReply: async ({ userId, sessionId, text }) => {
+    const result = support.postMessage(db, { userId, sender: 'admin', text, sessionId });
+    if (!result) return { ok: false, error: 'phiên đã đóng (khách chưa nhắn lại sau 24 giờ).' };
+    pushSupportMessage(userId, result);
+    return { ok: true };
+  }
+});
+
 app.get('/api/support/sessions', requireAuth, (req, res) => {
   let sessions = support.listSessions(db, req.user.id);
   if (req.query.full) sessions = sessions.map((s) => ({ ...s, messages: support.listMessages(db, s.id) }));
@@ -782,6 +796,7 @@ app.post('/api/support/messages', requireAuth, (req, res) => {
   const result = support.postMessage(db, { userId: req.user.id, sender: 'user', text: req.body?.text });
   if (!result) return res.status(400).json({ error: 'Vui lòng nhập nội dung tin nhắn.' });
   pushSupportMessage(req.user.id, result);
+  telegram?.notifyUserMessage({ userId: req.user.id, username: usernameOf(req.user.id), ...result });
   res.json({ ok: true, ...result });
 });
 
@@ -1925,4 +1940,5 @@ setInterval(() => {
 server.listen(PORT, HOST, () => {
   console.log(`Susu Live Order đang chạy: http://${HOST || 'localhost'}:${PORT}`);
   resumeLivesAfterRestart();
+  telegram?.start();
 });
