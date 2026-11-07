@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'ios-native/**'
+      - 'public/img/icon-512.png'
       - '.github/workflows/build-native-ipa.yml'
 
 jobs:
