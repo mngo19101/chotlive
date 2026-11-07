@@ -45,6 +45,12 @@ struct SupportSession: Identifiable, Equatable {
     }
 }
 
+struct SupportThread: Identifiable, Equatable {
+    let session: SupportSession
+    let messages: [SupportMessage]
+    var id: String { session.id }
+}
+
 // MARK: - Thông báo
 
 extension Notification.Name {
@@ -91,33 +97,51 @@ final class SupportNotifier: NSObject, UNUserNotificationCenterDelegate {
 struct SupportChatView: View {
     @EnvironmentObject var client: LiveClient
 
-    @State private var sessions: [SupportSession] = []
-    /// nil = phiên mới nhất (hoặc chưa có phiên nào).
-    @State private var viewingId: String?
-    @State private var session: SupportSession?
-    @State private var messages: [SupportMessage] = []
+    @State private var threads: [SupportThread] = []
     @State private var draft = ""
     @State private var sending = false
     @State private var loaded = false
-    @State private var showHistory = false
+    @State private var composing = false // đã bấm "Phiên mới" nhưng chưa gửi tin đầu
     @State private var error: String?
 
-    private var latestId: String? { sessions.first?.id }
-    /// Đang xem phiên cũ: chỉ đọc.
-    private var readOnly: Bool { viewingId != nil && viewingId != latestId }
+    private var current: SupportThread? { threads.first { $0.session.open } }
+    private var showComposer: Bool { current != nil || composing }
+    private var canSend: Bool { !sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
-        SubPage(title: "Chat với Admin",
+        SubPage(title: "Chat với quản trị viên",
                 trailing: {
-                    Button { withAnimation(.easeOut(duration: 0.15)) { showHistory.toggle() } } label: {
-                        T(showHistory ? "Đóng" : "Phiên trước", 13, .bold, Theme.accent)
-                            .padding(.horizontal, 14)
-                            .frame(height: 44)
+                    if showComposer {
+                        T("Đang mở 1 phiên", 12, .bold, Theme.accent)
+                            .padding(.horizontal, 12)
+                            .frame(height: 32)
                             .background(Capsule().fill(Theme.card).overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1)))
+                    } else {
+                        Button { composing = true } label: {
+                            T("+ Phiên mới", 13, .bold, .white)
+                                .padding(.horizontal, 16)
+                                .frame(height: 44)
+                                .background(Capsule().fill(Theme.orangeDeep))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }) {
-            if showHistory { historyList } else { chat }
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: Metrics.gap) {
+                    T("Phiên tự đóng sau 24 giờ không có tin mới. Tin nhắn lưu 30 ngày.", 12, .medium, Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    T("Các phiên chat", 15, .bold).frame(maxWidth: .infinity, alignment: .leading)
+                    if showComposer { composer }
+                    ForEach(threads.filter { !$0.session.open }) { t in pastCard(t) }
+                    if loaded && !showComposer && threads.isEmpty {
+                        T("Chưa có phiên chat nào. Bấm “Phiên mới” để nhắn cho quản trị viên.", 13, .semibold, Theme.muted)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 24)
+                    }
+                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.bottom, 16)
+            }
         }
         .task {
             client.supportChatOpen = true
@@ -126,166 +150,93 @@ struct SupportChatView: View {
             await client.markSupportRead()
         }
         .onDisappear { client.supportChatOpen = false }
-        .onReceive(client.$lastSupportMessage.compactMap { $0 }) { m in
-            guard !readOnly, !messages.contains(where: { $0.id == m.id }) else { return }
-            if let s = session, s.id != m.sessionId { return }
-            messages.append(m)
-            Task { await reload(keepScroll: true) }
+        .onReceive(client.$lastSupportMessage.compactMap { $0 }) { _ in
+            Task { await reload() }
         }
     }
 
-    // MARK: Khung chat
+    // MARK: Thẻ phiên
 
-    private var chat: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 8) {
-                        info
-                        if loaded && messages.isEmpty {
-                            T("Nhắn cho Admin nếu bạn cần hỗ trợ. Admin sẽ trả lời ngay trong đây và app sẽ báo cho bạn.",
-                              13, .medium, Theme.muted)
-                                .multilineTextAlignment(.center)
-                                .padding(.top, 24)
-                        }
-                        ForEach(messages) { m in bubble(m).id(m.id) }
-                        Color.clear.frame(height: 1).id("end")
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Circle().fill(Theme.green).frame(width: 8, height: 8)
+                T("Phiên hiện tại", 14, .bold)
+                if let s = current?.session { T("· mở lúc \(Self.stamp(s.createdAt))", 12, .medium, Theme.muted) }
+                Spacer()
+                Button {
+                    Task {
+                        composing = false
+                        await client.endSupportSession()
+                        await reload()
                     }
-                    .padding(.horizontal, Metrics.gutter)
-                    .padding(.bottom, 8)
+                } label: {
+                    T("Kết thúc phiên", 13, .semibold, Theme.muted)
+                        .padding(.horizontal, 12)
+                        .frame(height: 36)
+                        .background(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line, lineWidth: 1))
                 }
-                .onChange(of: messages.count) { _ in
-                    withAnimation { proxy.scrollTo("end", anchor: .bottom) }
-                }
-                .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+                .buttonStyle(.plain)
             }
-            footer
-        }
-    }
-
-    private var info: some View {
-        let text: String
-        if let s = session {
-            let when = Self.stamp(s.createdAt)
-            text = s.open
-                ? "Phiên bắt đầu \(when). Tự đóng sau 24 giờ không có tin mới."
-                : "Phiên bắt đầu \(when), đã đóng. Tin nhắn được lưu 30 ngày."
-        } else {
-            text = "Phiên chat tự đóng sau 24 giờ không có tin mới. Tin nhắn được lưu 30 ngày."
-        }
-        return T(text, 11, .semibold, Theme.muted)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-    }
-
-    private func bubble(_ m: SupportMessage) -> some View {
-        HStack {
-            if !m.fromAdmin { Spacer(minLength: 48) }
-            VStack(alignment: m.fromAdmin ? .leading : .trailing, spacing: 3) {
-                T(m.text, 14, .medium, m.fromAdmin ? Theme.ink : .white)
-                    .fixedSize(horizontal: false, vertical: true)
+            if let msgs = current?.messages, !msgs.isEmpty {
+                ForEach(msgs) { m in line(m) }
+            } else {
+                T("Nhập nội dung cần hỗ trợ, quản trị viên sẽ trả lời tại đây.", 13, .medium, Theme.muted)
+            }
+            if let error { T(error, 12, .semibold, Theme.red) }
+            HStack(spacing: 10) {
+                TextField("Nhập tin nhắn…", text: $draft, axis: .vertical)
+                    .lineLimit(1...4)
+                    .font(.system(size: 15))
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(m.fromAdmin ? Theme.card : Theme.orangeDeep)
-                            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .strokeBorder(m.fromAdmin ? Theme.line : .clear, lineWidth: 1))
-                    )
-                T((m.fromAdmin ? "Admin · " : "") + Self.stamp(m.ts), 10, .medium, Theme.muted)
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Theme.card)
+                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line, lineWidth: 1)))
+                Button { Task { await send() } } label: {
+                    T("Gửi", 15, .bold, .white)
+                        .padding(.horizontal, 20)
+                        .frame(height: 48)
+                        .background(Capsule().fill(canSend ? Theme.orangeDeep : Theme.faint))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
             }
-            if m.fromAdmin { Spacer(minLength: 48) }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.card)
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.orangeDeep, lineWidth: 1.5)))
     }
 
-    @ViewBuilder
-    private var footer: some View {
-        if readOnly {
-            Button {
-                viewingId = nil
-                Task { await reload() }
-            } label: {
-                T("Về phiên hiện tại", 14, .bold, .white)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(Capsule().fill(Theme.orangeDeep))
+    private func pastCard(_ t: SupportThread) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                T("Phiên \(Self.stamp(t.session.createdAt))", 14, .bold)
+                Spacer()
+                T("Đã đóng · \(t.messages.count) tin", 12, .medium, Theme.muted)
             }
-            .buttonStyle(.plain)
-            .padding(Metrics.gutter)
-        } else {
-            VStack(spacing: 6) {
-                if let error { T(error, 12, .semibold, Theme.red) }
-                if let s = session, !s.open {
-                    T("Phiên này đã đóng. Gửi tin mới sẽ mở phiên mới.", 12, .semibold, Theme.muted)
-                }
-                HStack(spacing: 10) {
-                    TextField("Nhập tin nhắn…", text: $draft, axis: .vertical)
-                        .lineLimit(1...4)
-                        .font(.system(size: 15))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(Capsule().fill(Theme.card).overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1)))
-                    Button { Task { await send() } } label: {
-                        Icon(name: .arrowRight, size: 18, weight: 2.4, color: .white)
-                            .frame(width: 46, height: 46)
-                            .background(Circle().fill(canSend ? Theme.orangeDeep : Theme.faint))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canSend)
-                }
-            }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.vertical, 10)
+            ForEach(t.messages) { m in line(m) }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle(16)
     }
 
-    private var canSend: Bool { !sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
-    // MARK: Lịch sử
-
-    private var historyList: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: Metrics.gap) {
-                T("Tin nhắn các phiên được lưu 30 ngày.", 12, .medium, Theme.muted)
-                if sessions.isEmpty {
-                    T("Chưa có phiên chat nào.", 13, .semibold, Theme.muted).padding(.top, 24)
-                }
-                ForEach(sessions) { s in
-                    Button {
-                        viewingId = s.id == latestId ? nil : s.id
-                        showHistory = false
-                        Task { await reload() }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                T(Self.stamp(s.createdAt), 13, .bold)
-                                Spacer()
-                                T(s.open ? "Đang mở" : "Đã đóng", 11, .bold, s.open ? Theme.green : Theme.muted)
-                            }
-                            T((s.lastSender == "admin" ? "Admin: " : "Bạn: ") + s.lastText, 13, .medium, Theme.muted)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                        }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .cardStyle(20)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.bottom, 16)
+    private func line(_ m: SupportMessage) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            T(m.fromAdmin ? "Quản trị viên" : "Bạn", 13, .bold, m.fromAdmin ? Theme.accent : Theme.orangeDeep)
+                .frame(width: 92, alignment: .leading)
+            T(m.text, 14, .medium)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            T(Self.stamp(m.ts), 11, .medium, Theme.muted)
         }
     }
 
     // MARK: Dữ liệu
 
-    private func reload(keepScroll: Bool = false) async {
-        if let list = await client.fetchSupportSessions() { sessions = list }
-        if let (s, msgs) = await client.fetchSupportMessages(sessionId: viewingId) {
-            session = s
-            messages = msgs
-        }
+    private func reload() async {
+        if let list = await client.fetchSupportThreads() { threads = list }
         loaded = true
     }
 
@@ -296,9 +247,9 @@ struct SupportChatView: View {
         error = nil
         defer { sending = false }
         do {
-            let m = try await client.sendSupport(text)
+            _ = try await client.sendSupport(text)
             draft = ""
-            if !messages.contains(where: { $0.id == m.id }) { messages.append(m) }
+            composing = false
             await reload()
         } catch {
             self.error = error.localizedDescription

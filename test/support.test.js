@@ -87,3 +87,14 @@ test('xoá tài khoản xoá luôn chat của họ', () => {
   assert.equal(support.listSessions(db, 'u1').length, 0);
   assert.equal(support.listSessions(db, 'u2').length, 1);
 });
+
+test('khách kết thúc phiên thì lần nhắn sau mở phiên mới, phiên cũ vẫn xem lại được', () => {
+  const db = freshDb();
+  const a = say(db, 'u1', 'user', 'chào', T0);
+  assert.equal(support.endSession(db, 'u1', T0 + 1000), true);
+  assert.equal(support.endSession(db, 'u1', T0 + 2000), false); // không còn phiên mở
+  assert.equal(support.listSessions(db, 'u1', T0 + 2000)[0].open, false);
+  const b = say(db, 'u1', 'user', 'hỏi tiếp', T0 + 3000);
+  assert.notEqual(a.session.id, b.session.id);
+  assert.equal(support.listMessages(db, a.session.id).length, 1);
+});

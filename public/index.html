@@ -1536,38 +1536,6 @@
     </div>
   </dialog>
 
-  <!-- ================== MODAL: HƯỚNG DẪN SỬ DỤNG TRÊN WEB & APP IPA ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-help-guide">
-    <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">Hướng dẫn sử dụng</h2>
-      <p class="modal-subtitle-text">Đồng bộ Web &amp; App IPA và in tem nhiệt tự động</p>
-
-      <div style="display:flex;flex-direction:column;gap:14px;margin:20px 0;font-size:13.5px;line-height:1.6">
-        <div style="padding:14px;background:#fbf9f6;border-radius:12px;border:1px solid #f2ede7">
-          <b style="color:var(--primary-orange)">1. Đồng bộ 2 chiều Web &amp; App (IPA):</b>
-          <p style="margin-top:4px;color:var(--text-sub)">Mọi thao tác tạo đơn, sửa đơn, in đơn, sửa địa chỉ khách hoặc bắt đầu Live trên Web đều hiển thị tức thì trên App iPhone và ngược lại.</p>
-        </div>
-        <div style="padding:14px;background:#fbf9f6;border-radius:12px;border:1px solid #f2ede7">
-          <b style="color:var(--primary-orange)">2. Kết nối phiên Live:</b>
-          <p style="margin-top:4px;color:var(--text-sub)">Vào mục <b>Bình luận</b>, bấm <b>+ Live mới</b>, nhập username TikTok (@shophoahong.live) và bấm bắt đầu.</p>
-        </div>
-        <div style="padding:14px;background:#fbf9f6;border-radius:12px;border:1px solid #f2ede7">
-          <b style="color:var(--primary-orange)">3. In tem nhiệt Xprinter 80mm:</b>
-          <p style="margin-top:4px;color:var(--text-sub)">Vào <b>Tôi → Máy in</b> để kết nối Bluetooth hoặc USB/LAN. Tem in chuẩn ESC/POS 80mm sắc nét.</p>
-        </div>
-      </div>
-
-      <button type="button" class="btn-orange-pill" id="btn-open-support-chat" style="width:100%;height:42px;margin-bottom:10px">
-        💬 Chat với quản trị viên <span class="support-badge" id="help-chat-unread" style="display:none"></span>
-      </button>
-      <button type="button" class="btn-orange-pill" style="width:100%;height:42px;background:#fff;color:inherit;border:1px solid #e6e8ec" data-close-dialog>
-        Đã hiểu
-      </button>
-    </div>
-  </dialog>
-
   <!-- ================== MODAL: CHAT VỚI QUẢN TRỊ VIÊN ================== -->
   <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-support-chat">
     <div class="modal-content-card">
@@ -1575,15 +1543,12 @@
       <button class="btn-modal-close" data-close-dialog>×</button>
       <h2 class="modal-title-main">Chat với quản trị viên</h2>
       <p class="modal-subtitle-text">Phiên tự đóng sau 24 giờ không có tin mới. Tin nhắn lưu 30 ngày.</p>
-      <div class="support-user-tabs">
-        <button type="button" class="support-tab is-active" id="support-tab-current">Phiên hiện tại</button>
-        <button type="button" class="support-tab" id="support-tab-history">Phiên trước</button>
+      <div class="support-toolbar">
+        <span class="support-toolbar-label">Các phiên chat</span>
+        <button type="button" class="btn-orange-pill" id="support-new-session" style="height:40px;padding:0 18px">＋ Phiên mới</button>
+        <span class="support-open-pill" id="support-open-pill" style="display:none">Đang mở 1 phiên</span>
       </div>
-      <div class="support-thread-body support-user-body" id="support-user-body"></div>
-      <div class="support-reply" id="support-user-footer">
-        <textarea id="support-user-text" rows="2" maxlength="2000" placeholder="Nhập tin nhắn…"></textarea>
-        <button type="button" class="btn-orange-pill" id="support-user-send" style="height:40px;padding:0 18px">Gửi</button>
-      </div>
+      <div class="support-cards" id="support-cards"></div>
     </div>
   </dialog>
 

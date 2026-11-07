@@ -2168,15 +2168,8 @@ $('#btn-save-notify-setup')?.addEventListener('click', () => {
   toast('Đã lưu cài đặt thông báo & giọng nói!', '✓');
 });
 
-$('#menu-row-help')?.addEventListener('click', () => {
-  $('#modal-help-guide')?.showModal();
-});
-
 /* ===== Chat với quản trị viên (khách) ===== */
 let supportUnread = 0;
-let supportChatSessions = [];
-let supportChatViewing = null; // null = phiên mới nhất
-let supportChatTab = 'current';
 
 const jsonPost = (body) => ({
   method: 'POST',
@@ -2185,7 +2178,7 @@ const jsonPost = (body) => ({
 });
 
 function renderSupportUnread() {
-  for (const id of ['#help-unread-badge', '#help-chat-unread']) {
+  for (const id of ['#help-unread-badge']) {
     const el = $(id);
     if (!el) continue;
     el.textContent = String(supportUnread);
@@ -2207,76 +2200,59 @@ async function refreshSupportUnread() {
 }
 
 const supportChatIsOpen = () => Boolean($('#modal-support-chat')?.open);
+let supportComposing = false; // đã bấm "Phiên mới" nhưng chưa gửi tin đầu tiên
+
+function supportBubbleRows(msgs) {
+  return msgs
+    .map(
+      (m) => `<div class="support-line"><b class="${m.sender === 'admin' ? 'admin' : 'me'}">${m.sender === 'admin' ? 'Quản trị viên' : 'Bạn'}</b>
+        <span class="support-line-text">${esc(m.text)}</span><small>${esc(supportTime(m.ts))}</small></div>`
+    )
+    .join('');
+}
 
 async function loadSupportChat() {
-  const body = $('#support-user-body');
-  if (!body) return;
+  const box = $('#support-cards');
+  if (!box) return;
   try {
-    const listRes = await apiFetch('/api/support/sessions');
-    const list = await listRes.json();
-    if (listRes.ok && list.ok) supportChatSessions = list.sessions;
-
-    if (supportChatTab === 'history') {
-      body.innerHTML = supportChatSessions.length
-        ? supportChatSessions
-            .map(
-              (x) => `<button type="button" class="support-session-row" data-support-session="${esc(x.id)}">
-                <b>${esc(supportTime(x.createdAt))} · ${x.open ? 'đang mở' : 'đã đóng'}</b>
-                <span class="support-row-last">${x.lastSender === 'admin' ? 'Admin: ' : 'Bạn: '}${esc(x.lastText)}</span>
-              </button>`
-            )
-            .join('')
-        : '<p class="support-empty">Chưa có phiên chat nào.</p>';
-      $('#support-user-footer').style.display = 'none';
-      return;
-    }
-
-    const id = supportChatViewing && supportChatViewing !== supportChatSessions[0]?.id ? supportChatViewing : '';
-    const res = await apiFetch(`/api/support/messages${id ? `?sessionId=${encodeURIComponent(id)}` : ''}`);
+    const res = await apiFetch('/api/support/sessions?full=1');
     const data = await res.json();
-    if (!res.ok) return;
-    const msgs = data.messages
-      .map((m) => `<div class="support-msg ${m.sender === 'user' ? 'mine' : ''}">${esc(m.text)}<small>${m.sender === 'admin' ? 'Admin · ' : ''}${esc(supportTime(m.ts))}</small></div>`)
+    if (!res.ok || !data.ok) throw new Error();
+    const sessions = data.sessions;
+    const current = sessions.find((s) => s.open);
+    const showComposer = Boolean(current) || supportComposing;
+    $('#support-new-session').style.display = showComposer ? 'none' : '';
+    $('#support-open-pill').style.display = showComposer ? '' : 'none';
+    const composer = `<section class="support-card current">
+      <div class="support-card-head"><span><i class="support-dot"></i><b>Phiên hiện tại</b>${current ? ` <small>· mở lúc ${esc(supportTime(current.createdAt))}</small>` : ''}</span>
+        <button type="button" class="support-end" id="support-end">Kết thúc phiên</button></div>
+      ${current && current.messages.length ? supportBubbleRows(current.messages) : '<p class="support-hint">Nhập nội dung cần hỗ trợ, quản trị viên sẽ trả lời tại đây.</p>'}
+      <div class="support-reply" style="border:0;padding:0">
+        <textarea id="support-user-text" rows="2" maxlength="2000" placeholder="Nhập tin nhắn… (Enter để gửi)"></textarea>
+        <button type="button" class="btn-orange-pill" id="support-user-send" style="height:44px;padding:0 20px">Gửi</button>
+      </div></section>`;
+    const past = sessions
+      .filter((s) => !s.open)
+      .map(
+        (s) => `<section class="support-card"><div class="support-card-head"><b>Phiên ${esc(supportTime(s.createdAt))}</b>
+          <small>Đã đóng · ${s.messages.length} tin</small></div>${supportBubbleRows(s.messages)}</section>`
+      )
       .join('');
-    const note = data.session && !data.session.open ? '<div class="support-sep">Phiên đã đóng. Gửi tin mới sẽ mở phiên mới.</div>' : '';
-    body.innerHTML =
-      (msgs || '<p class="support-empty">Nhắn cho Admin nếu bạn cần hỗ trợ. Khi Admin trả lời, bạn sẽ được báo ngay.</p>') + (id ? '' : note);
-    body.scrollTop = body.scrollHeight;
-    $('#support-user-footer').style.display = id ? 'none' : 'flex';
-    if (!id) {
+    const keepDraft = $('#support-user-text')?.value || '';
+    box.innerHTML = (showComposer ? composer : '') + past ||
+      '<p class="support-empty">Chưa có phiên chat nào. Bấm “Phiên mới” để nhắn cho quản trị viên.</p>';
+    if (keepDraft && $('#support-user-text')) $('#support-user-text').value = keepDraft;
+    if (current) {
       await apiFetch('/api/support/read', jsonPost({}));
       supportUnread = 0;
       renderSupportUnread();
     }
-  } catch {}
+  } catch {
+    box.innerHTML = '<p class="support-empty">Không tải được tin nhắn, thử lại sau.</p>';
+  }
 }
 
-function setSupportTab(tab) {
-  supportChatTab = tab;
-  if (tab === 'current') supportChatViewing = null;
-  $('#support-tab-current')?.classList.toggle('is-active', tab === 'current');
-  $('#support-tab-history')?.classList.toggle('is-active', tab === 'history');
-  loadSupportChat();
-}
-
-$('#btn-open-support-chat')?.addEventListener('click', () => {
-  $('#modal-help-guide')?.close();
-  $('#modal-support-chat')?.showModal();
-  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
-  setSupportTab('current');
-});
-$('#support-tab-current')?.addEventListener('click', () => setSupportTab('current'));
-$('#support-tab-history')?.addEventListener('click', () => setSupportTab('history'));
-$('#support-user-body')?.addEventListener('click', (e) => {
-  const row = e.target.closest('[data-support-session]');
-  if (!row) return;
-  supportChatViewing = row.dataset.supportSession;
-  supportChatTab = 'current';
-  $('#support-tab-current')?.classList.add('is-active');
-  $('#support-tab-history')?.classList.remove('is-active');
-  loadSupportChat();
-});
-$('#support-user-send')?.addEventListener('click', async () => {
+async function sendSupportMessage() {
   const input = $('#support-user-text');
   const text = (input?.value || '').trim();
   if (!text) return;
@@ -2284,24 +2260,51 @@ $('#support-user-send')?.addEventListener('click', async () => {
   btn.disabled = true;
   try {
     const res = await apiFetch('/api/support/messages', jsonPost({ text }));
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) toast(data.error || 'Không gửi được', '⚠️');
     else {
       input.value = '';
-      supportChatViewing = null;
+      supportComposing = false;
       await loadSupportChat();
     }
   } catch {
     toast('Không gửi được, thử lại sau', '⚠️');
   } finally {
-    btn.disabled = false;
+    if (btn.isConnected) btn.disabled = false;
+  }
+}
+
+function openSupportChat() {
+  supportComposing = false;
+  $('#modal-support-chat')?.showModal();
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+  loadSupportChat();
+}
+
+$('#menu-row-help')?.addEventListener('click', openSupportChat);
+$('#support-new-session')?.addEventListener('click', () => {
+  supportComposing = true;
+  loadSupportChat().then(() => $('#support-user-text')?.focus());
+});
+$('#support-cards')?.addEventListener('click', async (e) => {
+  if (e.target.closest('#support-user-send')) return sendSupportMessage();
+  if (e.target.closest('#support-end')) {
+    supportComposing = false;
+    await apiFetch('/api/support/end', jsonPost({})).catch(() => {});
+    loadSupportChat();
+  }
+});
+$('#support-cards')?.addEventListener('keydown', (e) => {
+  if (e.target.id === 'support-user-text' && e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendSupportMessage();
   }
 });
 
 onSupportMessage((msg) => {
   const cur = getCurrentUser();
   if (!cur || cur.role === 'admin' || msg.message.sender !== 'admin') return;
-  if (supportChatIsOpen() && supportChatTab === 'current' && !supportChatViewing) {
+  if (supportChatIsOpen()) {
     loadSupportChat();
     return;
   }

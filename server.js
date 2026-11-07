@@ -762,11 +762,9 @@ function pushSupportMessage(userId, result) {
 }
 
 app.get('/api/support/sessions', requireAuth, (req, res) => {
-  res.json({
-    ok: true,
-    sessions: support.listSessions(db, req.user.id),
-    unread: support.unreadCount(db, req.user.id, 'user')
-  });
+  let sessions = support.listSessions(db, req.user.id);
+  if (req.query.full) sessions = sessions.map((s) => ({ ...s, messages: support.listMessages(db, s.id) }));
+  res.json({ ok: true, sessions, unread: support.unreadCount(db, req.user.id, 'user') });
 });
 
 // Không truyền sessionId thì lấy phiên mới nhất.
@@ -785,6 +783,10 @@ app.post('/api/support/messages', requireAuth, (req, res) => {
   if (!result) return res.status(400).json({ error: 'Vui lòng nhập nội dung tin nhắn.' });
   pushSupportMessage(req.user.id, result);
   res.json({ ok: true, ...result });
+});
+
+app.post('/api/support/end', requireAuth, (req, res) => {
+  res.json({ ok: true, ended: support.endSession(db, req.user.id) });
 });
 
 app.post('/api/support/read', requireAuth, (req, res) => {

@@ -74,6 +74,14 @@ export function postMessage(db, { userId, sender, text, sessionId = '', now = Da
   return { message, session: sessionView({ ...session, last_at: now }, now) };
 }
 
+/** Khách chủ động kết thúc phiên đang mở: coi như đã quá hạn để lần nhắn sau mở phiên mới. */
+export function endSession(db, userId, now = Date.now()) {
+  const s = db.prepare('SELECT * FROM support_sessions WHERE user_id = ? ORDER BY last_at DESC LIMIT 1').get(userId);
+  if (!s || !isOpen(s.last_at, now)) return false;
+  db.prepare('UPDATE support_sessions SET last_at = ? WHERE id = ?').run(now - SESSION_TTL_MS, s.id);
+  return true;
+}
+
 function lastReadId(db, userId, side) {
   return Number(db.prepare('SELECT last_id FROM support_reads WHERE user_id = ? AND side = ?').get(userId, side)?.last_id ?? 0);
 }

@@ -309,6 +309,21 @@ final class LiveClient: ObservableObject {
         }
     }
 
+    /// Mọi phiên kèm toàn bộ tin nhắn (mới nhất trước).
+    func fetchSupportThreads() async -> [SupportThread]? {
+        guard let (code, json) = await supportCall("/api/support/sessions?full=1"), code == 200 else { return nil }
+        supportUnread = (json["unread"] as? Int) ?? supportUnread
+        return (json["sessions"] as? [[String: Any]])?.compactMap { d in
+            guard let s = SupportSession(d) else { return nil }
+            let msgs = (d["messages"] as? [[String: Any]])?.compactMap { SupportMessage($0) } ?? []
+            return SupportThread(session: s, messages: msgs)
+        } ?? []
+    }
+
+    func endSupportSession() async {
+        _ = await supportCall("/api/support/end", method: "POST", body: [:])
+    }
+
     func fetchSupportSessions() async -> [SupportSession]? {
         guard let (code, json) = await supportCall("/api/support/sessions"), code == 200 else { return nil }
         supportUnread = (json["unread"] as? Int) ?? supportUnread
