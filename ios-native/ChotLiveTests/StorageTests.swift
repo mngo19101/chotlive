@@ -291,7 +291,43 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(AuthStorage.savedAccounts(defaults).map(\.key), [accountA])
     }
 
+    func testLoggedOutAccountDoesNotReturnFromLegacyToken() {
+        AuthStorage.saveSession(server: "https://chotlive.test", user: "Shop.A", token: "tk-a", defaults)
+        Keychain.write("authToken", "tk-cu")
+
+        AuthStorage.clearCurrentSession(defaults)
+
+        XCTAssertNil(Keychain.read("authToken"))
+        XCTAssertEqual(AuthStorage.currentToken(defaults), "") // như lúc mở lại app
+        XCTAssertTrue(AuthStorage.savedAccounts(defaults).isEmpty)
+    }
+
     // MARK: - LiveClient: đăng nhập, đổi và quên tài khoản
+
+    @MainActor
+    func testLogoutAllLeavesOnlyTheNextLogin() async throws {
+        URLProtocol.registerClass(AuthStub.self)
+        defer { URLProtocol.unregisterClass(AuthStub.self) }
+
+        let client = LiveClient(defaults: defaults)
+        try await client.login(server: "https://chotlive.test", user: "shop.a", password: "x")
+        try await client.login(server: "https://chotlive.test", user: "shop.b", password: "x")
+        var changes: [String?] = []
+        client.onAccountChange = { changes.append($0) }
+
+        client.logoutAll()
+
+        XCTAssertFalse(client.loggedIn)
+        XCTAssertTrue(client.savedAccounts.isEmpty)
+        XCTAssertTrue(AuthStorage.savedAccounts(defaults).isEmpty)
+        XCTAssertNil(AuthStorage.token(for: accountA))
+        XCTAssertNil(AuthStorage.token(for: accountB))
+        XCTAssertEqual(changes, [nil])
+
+        // Tài khoản đã đăng xuất không quay lại danh sách khi đăng nhập tài khoản khác.
+        try await client.login(server: "https://chotlive.test", user: "shop.b", password: "x")
+        XCTAssertEqual(client.savedAccounts.map(\.key), [accountB])
+    }
 
     @MainActor
     func testLoginAndLogoutFlow() async throws {

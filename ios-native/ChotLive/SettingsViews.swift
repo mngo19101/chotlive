@@ -33,8 +33,10 @@ struct SettingsView: View {
                 settingsCard.padding(.bottom, 15)
 
                 Button {
-                    ui.confirm = ConfirmItem(title: "Đăng xuất?", message: "Dữ liệu đã lưu trên máy vẫn được giữ lại.",
-                                             action: "Đăng xuất") { client.logout() }
+                    let count = client.savedAccounts.count
+                    let scope = count > 1 ? "Cả \(count) tài khoản trên máy sẽ được đăng xuất. " : ""
+                    ui.confirm = ConfirmItem(title: "Đăng xuất?", message: scope + "Dữ liệu đã lưu trên máy vẫn được giữ lại.",
+                                             action: "Đăng xuất") { client.logoutAll() }
                 } label: {
                     HStack(spacing: 10) {
                         Icon(name: .logout, size: 17, color: Theme.red)

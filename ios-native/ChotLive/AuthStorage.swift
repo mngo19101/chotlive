@@ -130,10 +130,9 @@ enum AuthStorage {
         if let key = currentAccountKey(defaults) {
             setSavedAccounts(savedAccounts(defaults).filter { $0.key != key }, defaults)
             Keychain.delete(tokenAccount(key))
-        } else {
-            // Chưa rõ tài khoản (ví dụ app vừa cài lại): dọn luôn mục Keychain cũ nếu còn sót.
-            Keychain.delete(legacyKeychainAccount)
         }
+        // Tên tài khoản vẫn còn trong defaults: để sót token bản cũ thì lần mở app sau nó sẽ tự đăng nhập lại.
+        Keychain.delete(legacyKeychainAccount)
         defaults.removeObject(forKey: legacyTokenKey)
     }
 

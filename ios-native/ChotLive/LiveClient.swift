@@ -136,6 +136,13 @@ final class LiveClient: ObservableObject {
         resetLiveInfo()
     }
 
+    /// Nút Đăng xuất: đăng xuất mọi tài khoản trên máy, để sau màn đăng nhập danh sách chỉ còn tài khoản vừa vào.
+    func logoutAll() {
+        // forgetSavedAccount bỏ qua tài khoản đang dùng; logout() lo tài khoản đó.
+        for account in savedAccounts { forgetSavedAccount(account.key) }
+        logout()
+    }
+
     private func resetLiveInfo() {
         lives = []
         lastLiveEvent = nil

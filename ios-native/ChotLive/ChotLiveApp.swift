@@ -16,6 +16,7 @@ struct ChotLiveApp: App {
                 .environmentObject(printer)
                 .environmentObject(client)
                 .onAppear {
+                    KeyboardDismisser.shared.install()
                     client.onChat = { [store, client] c in
                         store.addComment(c, tiktok: client.liveUsername)
                         if store.isClosingComment(c) { CommentAlert.play() }
@@ -38,12 +39,54 @@ struct ChotLiveApp: App {
                 }
                 .onChange(of: scenePhase) { phase in
                     if phase == .active {
+                        KeyboardDismisser.shared.install()
                         client.checkSocket()
                     } else {
                         store.save()
                     }
                 }
         }
+    }
+}
+
+/// Chạm ra ngoài ô nhập thì ẩn bàn phím, ở mọi màn hình và sheet. Gắn vào cửa sổ và không chặn chạm,
+/// nên nút bấm và cuộn vẫn chạy bình thường.
+@MainActor
+final class KeyboardDismisser: NSObject, UIGestureRecognizerDelegate {
+    static let shared = KeyboardDismisser()
+
+    private lazy var tap: UITapGestureRecognizer = {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(KeyboardDismisser.dismissKeyboard))
+        tap.cancelsTouchesInView = false
+        tap.delaysTouchesEnded = false
+        tap.requiresExclusiveTouchType = false
+        tap.delegate = self
+        return tap
+    }()
+
+    func install() {
+        guard tap.view == nil else { return }
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap { $0.windows }
+        (windows.first { $0.isKeyWindow } ?? windows.first)?.addGestureRecognizer(tap)
+    }
+
+    @objc private func dismissKeyboard() {
+        tap.view?.endEditing(true)
+    }
+
+    /// Chạm vào ô nhập là để đặt con trỏ hoặc đổi ô, không ẩn bàn phím.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var view = touch.view
+        while let current = view {
+            if current is UITextInput { return false }
+            view = current.superview
+        }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
     }
 }
 
