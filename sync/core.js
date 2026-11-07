@@ -268,7 +268,9 @@ async function* encryptStream(source, key) {
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   yield iv;
   for await (const chunk of source) yield cipher.update(chunk);
-  yield cipher.final();
+  // fetch của Node 22 đứng mãi nếu nhận đoạn rỗng, mà AES-GCM thường trả final() rỗng.
+  const last = cipher.final();
+  if (last.length) yield last;
   yield cipher.getAuthTag();
 }
 
