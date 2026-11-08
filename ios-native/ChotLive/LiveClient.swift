@@ -23,13 +23,27 @@ final class LiveClient: ObservableObject {
     /// Dùng thử, gói hoặc đã hết hạn của tài khoản đang dùng.
     @Published private(set) var access: AccountAccess? {
         didSet {
-            if let access { accessByAccount[currentAccountKey] = access }
+            if let access, accessByAccount[currentAccountKey] != access {
+                accessByAccount[currentAccountKey] = access
+                saveAccessCache()
+            }
             scheduleAccessCheck()
         }
     }
     /// Hạn dùng đã biết của từng tài khoản trên máy: đổi tài khoản thì hiện ngay thẻ đúng của tài khoản đó,
     /// không để thẻ của tài khoản cũ nhấp nháy rồi mới đổi khi server trả lời.
+    /// Lưu cả xuống máy, để lần đầu đổi sang tài khoản sau khi mở lại app cũng không chờ server.
     private var accessByAccount: [String: AccountAccess] = [:]
+    private static let accessCacheKey = "chotlive.accessByAccount"
+
+    private func saveAccessCache() {
+        defaults.set(accessByAccount.mapValues(\.dict), forKey: Self.accessCacheKey)
+    }
+
+    private func forgetAccess(_ key: String) {
+        guard accessByAccount.removeValue(forKey: key) != nil else { return }
+        saveAccessCache()
+    }
     /// Thông báo vừa bị chặn theo dõi live vì hết hạn, hiện thành hộp thoại ở mọi màn hình.
     @Published var accessNotice: String?
     /// Số tin Admin trả lời mà khách chưa đọc.
@@ -73,6 +87,9 @@ final class LiveClient: ObservableObject {
         username = defaults.string(forKey: AuthStorage.userKey) ?? ""
         token = tk
         savedAccounts = AuthStorage.savedAccounts(defaults)
+        let cached = defaults.dictionary(forKey: Self.accessCacheKey) as? [String: [String: Any]] ?? [:]
+        accessByAccount = cached.compactMapValues(AccountAccess.init)
+        access = accessByAccount[currentAccountKey]
         if !tk.isEmpty && !baseURL.isEmpty {
             loggedIn = true
             openSocket()
@@ -147,6 +164,7 @@ final class LiveClient: ObservableObject {
             URLSession.shared.dataTask(with: req).resume()
         }
         closeSocket()
+        forgetAccess(currentAccountKey)
         token = ""
         AuthStorage.clearCurrentSession(defaults)
         savedAccounts = AuthStorage.savedAccounts(defaults)
@@ -182,7 +200,6 @@ final class LiveClient: ObservableObject {
         baseURL = account.server
         username = account.user
         token = tk
-        access = accessByAccount[key]
         savedAccounts = AuthStorage.savedAccounts(defaults)
         onAccountChange?(key)
         loggedIn = true
@@ -191,6 +208,9 @@ final class LiveClient: ObservableObject {
         liveUsername = ""
         viewers = 0
         resetLiveInfo()
+        // Sau resetLiveInfo (nó xoá access về nil): hiện ngay thẻ hạn dùng đã biết của tài khoản mới,
+        // không để thẻ biến mất rồi hiện lại làm cả trang Tôi nhảy lên xuống.
+        access = accessByAccount[key]
         openSocket()
     }
 
@@ -205,6 +225,7 @@ final class LiveClient: ObservableObject {
             URLSession.shared.dataTask(with: req).resume()
         }
         AuthStorage.forgetAccount(key, defaults)
+        forgetAccess(key)
         savedAccounts = AuthStorage.savedAccounts(defaults)
     }
 

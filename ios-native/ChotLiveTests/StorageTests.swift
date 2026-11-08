@@ -418,6 +418,29 @@ final class StorageTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchingAccountShowsThatAccountsAccessRightAway() async throws {
+        URLProtocol.registerClass(AuthStub.self)
+        defer { URLProtocol.unregisterClass(AuthStub.self) }
+
+        let client = LiveClient(defaults: defaults)
+        try await client.login(server: "https://chotlive.test", user: "shop.a", password: "x")
+        try await client.login(server: "https://chotlive.test", user: "shop.b", password: "x")
+        XCTAssertEqual(client.access?.status, "plan")
+
+        // Đổi tài khoản: thẻ hạn dùng của tài khoản mới có ngay, không chờ server (trang Tôi không nhảy).
+        client.switchAccount(to: accountA)
+        XCTAssertEqual(client.access?.status, "trial")
+        client.switchAccount(to: accountB)
+        XCTAssertEqual(client.access?.status, "plan")
+
+        // Mở lại app: vẫn nhớ hạn dùng của từng tài khoản trên máy.
+        let reopened = LiveClient(defaults: defaults)
+        XCTAssertEqual(reopened.access?.status, "plan")
+        reopened.switchAccount(to: accountA)
+        XCTAssertEqual(reopened.access?.status, "trial")
+    }
+
+    @MainActor
     func testSwitchAccountIgnoresUnknownOrCurrentKey() async throws {
         URLProtocol.registerClass(AuthStub.self)
         defer { URLProtocol.unregisterClass(AuthStub.self) }
@@ -459,7 +482,11 @@ private final class AuthStub: URLProtocol {
         let username = (body?["username"] as? String) ?? ""
         let displayName = username.lowercased() == "shop.a" ? "Shop.A" : username
         let token = "tk-dang-nhap"
-        let reply = ["ok": true, "token": token, "user": ["username": displayName]] as [String: Any]
+        // Shop.A đang dùng thử, tài khoản khác đã mua gói: để test thẻ hạn dùng đổi đúng theo tài khoản.
+        let access: [String: Any] = username.lowercased() == "shop.a"
+            ? ["status": "trial", "canFollowLive": true, "endsAt": 4_000_000_000_000.0]
+            : ["status": "plan", "canFollowLive": true, "endsAt": 4_100_000_000_000.0]
+        let reply = ["ok": true, "token": token, "user": ["username": displayName, "access": access]] as [String: Any]
         let data = try! JSONSerialization.data(withJSONObject: reply)
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

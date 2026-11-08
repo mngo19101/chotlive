@@ -53,6 +53,11 @@ enum Vtp {
         pendingOrders(of: order.customer.id, in: orders).filter { $0.id != order.id && $0.lastTs <= order.lastTs }
     }
 
+    /// Đơn đã duyệt và mọi đơn chưa gửi khác của khách cũng đã duyệt: lúc xuất đã chung một vận đơn, không cần gộp nữa.
+    static func alreadyMerged(_ order: Order, with others: [Order]) -> Bool {
+        state(order) == .ready && others.allSatisfy { state($0) == .ready }
+    }
+
     /// Đơn của khách đã xuất Viettel Post trong 3 ngày qua mà chưa giao xong: dễ thành 2 vận đơn.
     static func recentExported(of customerId: String, in orders: [Order], now: Date = Clock.now) -> [Order] {
         orders.filter {

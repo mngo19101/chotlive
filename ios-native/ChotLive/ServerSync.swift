@@ -96,6 +96,13 @@ struct AccountAccess: Equatable {
         message = (dict["message"] as? String) ?? ""
     }
 
+    /// Dạng lưu được vào UserDefaults, đọc lại bằng init(_ dict:).
+    var dict: [String: Any] {
+        var d: [String: Any] = ["status": status, "canFollowLive": canFollowLive, "code": code, "message": message]
+        if let endsAt { d["endsAt"] = endsAt.timeIntervalSince1970 * 1000 }
+        return d
+    }
+
     init(status: String, canFollowLive: Bool, endsAt: Date?, code: String = "", message: String = "") {
         self.status = status
         self.canFollowLive = canFollowLive

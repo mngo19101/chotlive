@@ -562,6 +562,8 @@ struct OutlineButton: View {
                 if let icon { Icon(name: icon, size: 15, weight: 2.3, color: color) }
                 T(title, 14, .bold, color).lineLimit(1).minimumScaleFactor(0.8)
             }
+            // Chừa lề trong để chữ dài co lại trong viền nút, không chạm sát mép.
+            .padding(.horizontal, 10)
             .frame(maxWidth: .infinity)
             .frame(height: height)
             .background(

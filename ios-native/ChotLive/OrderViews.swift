@@ -26,50 +26,55 @@ struct OrdersView: View {
         let scoped = every.filter { dateFilter.contains($0.lastTs) }
         let groups = Vtp.readyGroups(every)
         let shown = list(every: every, scoped: scoped)
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: Metrics.gap) {
-                PageHeader(subtitle: filter == 0 ? "\(every.count) đơn · mọi ngày" : "\(scoped.count) đơn · \(dateFilter.pillLabel)",
-                           title: "Đơn hàng") {
-                    HeaderAddButton(title: "Tạo đơn") { ui.push(.orderCreate) }
-                }
-                HStack(spacing: 8) {
-                    SearchField(text: $search)
-                    CircleButton(icon: .filter) {
-                        ui.present(dim: 0.9) { DateFilterSheet(filter: dateFilter) { dateFilter = $0 } }
+        GeometryReader { geo in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: Metrics.gap) {
+                    PageHeader(subtitle: filter == 0 ? "\(every.count) đơn · mọi ngày" : "\(scoped.count) đơn · \(dateFilter.pillLabel)",
+                               title: "Đơn hàng") {
+                        HeaderAddButton(title: "Tạo đơn") { ui.push(.orderCreate) }
+                    }
+                    HStack(spacing: 8) {
+                        SearchField(text: $search)
+                        CircleButton(icon: .filter) {
+                            ui.present(dim: 0.9) { DateFilterSheet(filter: dateFilter) { dateFilter = $0 } }
+                        }
+                    }
+                    // Cả 5 tab nằm gọn một hàng, không phải kéo ngang. Hàng chip cuộn ngang cũ (lề âm)
+                    // làm trang rộng hơn màn hình nên kéo qua lại bị lộ khoảng trắng.
+                    HStack(spacing: 4) {
+                        StatusTab(title: "Tất cả", count: every.count, selected: filter == 0) { filter = 0 }
+                        statusTab("Đơn mới", 1, scoped)
+                        statusTab("Chờ gửi", 2, scoped)
+                        statusTab("Gom sau", 3, scoped)
+                        statusTab("Đang giao", 4, scoped)
+                    }
+                    .padding(4)
+                    .cardStyle(18)
+
+                    if !groups.isEmpty {
+                        ReadyExportBanner(groups: groups) {
+                            ui.present(dim: 0.42) { VtpExportSheet() }
+                        }
+                    }
+
+                    if shown.isEmpty {
+                        T("Chưa có đơn nào. Bấm nút in trên một bình luận hoặc “Tạo đơn” để thêm đơn.", 13, .medium, Theme.muted)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 30)
+                    }
+                    LazyVStack(spacing: 11) {
+                        ForEach(shown) { o in card(o, every: every) }
                     }
                 }
-                // Cả 5 tab nằm gọn một hàng, không phải kéo ngang. Hàng chip cuộn ngang cũ (lề âm)
-                // làm trang rộng hơn màn hình nên kéo qua lại bị lộ khoảng trắng.
-                HStack(spacing: 4) {
-                    StatusTab(title: "Tất cả", count: every.count, selected: filter == 0) { filter = 0 }
-                    statusTab("Đơn mới", 1, scoped)
-                    statusTab("Chờ gửi", 2, scoped)
-                    statusTab("Gom sau", 3, scoped)
-                    statusTab("Đang giao", 4, scoped)
-                }
-                .padding(4)
-                .cardStyle(18)
-
-                if !groups.isEmpty {
-                    ReadyExportBanner(groups: groups) {
-                        ui.present(dim: 0.42) { VtpExportSheet() }
-                    }
-                }
-
-                if shown.isEmpty {
-                    T("Chưa có đơn nào. Bấm nút in trên một bình luận hoặc “Tạo đơn” để thêm đơn.", 13, .medium, Theme.muted)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 30)
-                }
-                LazyVStack(spacing: 11) {
-                    ForEach(shown) { o in card(o, every: every) }
-                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.top, 2)
+                .padding(.bottom, 16)
+                // Khoá đúng bề ngang màn hình: thẻ đơn nào lỡ rộng hơn (thẻ chỉ dựng khi cuộn tới) cũng không
+                // làm trang rộng ra rồi kéo ngang được, lộ khoảng trắng hai bên.
+                .frame(width: geo.size.width)
             }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.top, 2)
-            .padding(.bottom, 16)
+            .scrollDismissesKeyboard(.interactively)
         }
-        .scrollDismissesKeyboard(.interactively)
         .background(Theme.bg)
     }
 
@@ -122,13 +127,16 @@ struct OrdersView: View {
             .contentShape(Rectangle())
             .onTapGesture { ui.push(.order(o.id)) }
 
-            if hasOldGom {
+            if !older.isEmpty && !Vtp.alreadyMerged(o, with: older) {
+                // Bấm để thêm đơn này vào đơn đã gom trước đó: bảng Duyệt đơn tick sẵn mọi đơn chưa gửi của khách.
                 Button { openReview(o) } label: {
-                    tag("Có \(older.count) đơn gom từ \(dayMonth(older[0].lastTs)) · bấm để gộp", Theme.gomInk, Theme.gomTag)
+                    tag(hasOldGom ? "Có \(older.count) đơn gom từ \(dayMonth(older[0].lastTs)) · bấm để gộp"
+                                  : "Còn \(older.count) đơn cũ từ \(dayMonth(older[0].lastTs)) · bấm để gộp",
+                        Theme.gomInk, Theme.gomTag)
                 }
                 .buttonStyle(.plain)
             } else if !older.isEmpty {
-                tag("Còn \(older.count) đơn cũ chưa gửi · từ \(dayMonth(older[0].lastTs))", Theme.gomInk, Theme.gomTag)
+                tag("Gửi chung với \(older.count) đơn từ \(dayMonth(older[0].lastTs))", Theme.accent, Theme.peachSoft)
             } else if st == .hold {
                 tag("Khách hẹn gom sau", Theme.gomInk, Theme.gomTag)
             } else if st == .ready {
@@ -298,6 +306,9 @@ struct OrderDetailView: View {
                     VStack(spacing: Metrics.gap) {
                         customerCard(o)
                         productsCard(o)
+                        let others = Vtp.state(o).isPending
+                            ? Vtp.pendingOrders(of: o.customer.id, in: store.allOrders()).filter { $0.id != o.id } : []
+                        if !others.isEmpty { gomCard(o, others) }
                     }
                     .padding(.horizontal, Metrics.gutter)
                     .padding(.bottom, 12)
@@ -371,6 +382,50 @@ struct OrderDetailView: View {
         .padding(.top, 14)
         .padding(.bottom, 15)
         .cardStyle(20)
+    }
+
+    /// Các đơn chưa gửi khác của khách (đơn gom ngày trước…): xem nhanh và gộp đơn này vào chung một vận đơn.
+    private func gomCard(_ o: Order, _ others: [Order]) -> some View {
+        let merged = Vtp.alreadyMerged(o, with: others)
+        return VStack(alignment: .leading, spacing: 0) {
+            T("Đơn đã gom chưa gửi (\(others.count))", 14, .bold, Theme.gomInk).padding(.bottom, 3)
+            ForEach(Array(others.enumerated()), id: \.element.id) { index, x in
+                if index > 0 { HairLine() }
+                Button { ui.push(.order(x.id)) } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            T("Đơn \(dayMonth(x.lastTs)) · \(timeText(x.lastTs))", 14, .bold).lineLimit(1)
+                            T("\(x.productCount) sản phẩm · \(shipButtonLabel(x))", 12, .medium, Theme.muted).lineLimit(1)
+                        }
+                        Spacer(minLength: 4)
+                        T(money(x.total), 14, .bold).lineLimit(1).fixedSize()
+                        Icon(name: .chevronRight, size: 14, color: Theme.muted)
+                    }
+                    .frame(height: 50)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            HStack {
+                T(merged ? "Gửi chung, tổng" : "Tổng nếu gộp", 14, .semibold)
+                Spacer()
+                T(money(others.reduce(o.total) { $0 + $1.total }), 18, .heavy, Theme.ink, track: -0.4).lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.gomTag))
+            .padding(.top, 7)
+            if !merged {
+                OutlineButton(title: "Gộp vào đơn đã gom", icon: .truck, color: Theme.gomInk, height: 44) {
+                    ui.present(dim: 0.42) { ShipReviewSheet(orderId: o.id) }
+                }
+                .padding(.top, 10)
+            }
+        }
+        .padding(.horizontal, 15)
+        .padding(.top, 14)
+        .padding(.bottom, 15)
+        .cardStyle(20, fill: Theme.gomFill, border: Theme.gomLine)
     }
 
     private func actions(_ o: Order) -> some View {

@@ -31,7 +31,7 @@ func shipButtonLabel(_ o: Order) -> String {
     switch Vtp.state(o) {
     case .ask: return "Duyệt đơn"
     case .hold: return "Gom sau"
-    case .ready: return "Sẵn sàng gửi"
+    case .ready: return "Sẵn sàng"
     case .exported, .gone: return o.status == .delivered ? "Đã giao" : "Đang giao"
     }
 }
@@ -55,7 +55,7 @@ struct ShipBadge: View {
         switch s {
         case .ask: Badge(text: "Đơn mới", fontSize: fontSize, height: height, hPad: 12)
         case .hold: Badge(text: "Gom sau", color: Theme.gomInk, fill: Theme.gomTag, fontSize: fontSize, height: height, hPad: 12)
-        case .ready: Badge(text: "Sẵn sàng gửi", fontSize: fontSize, height: height, hPad: 12)
+        case .ready: Badge(text: "Sẵn sàng", fontSize: fontSize, height: height, hPad: 12)
         case .exported, .gone: StatusBadge(status: order.status, fontSize: fontSize, height: height)
         }
     }
