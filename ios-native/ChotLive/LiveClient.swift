@@ -305,14 +305,14 @@ final class LiveClient: ObservableObject {
     func refreshSupportUnread() {
         Task { @MainActor [weak self] in
             guard let self, let (code, json) = await self.supportCall("/api/support/sessions"), code == 200 else { return }
-            self.supportUnread = (json["unread"] as? Int) ?? 0
+            self.setSupportUnread((json["unread"] as? Int) ?? 0)
         }
     }
 
     /// Mọi phiên kèm toàn bộ tin nhắn (mới nhất trước).
     func fetchSupportThreads() async -> [SupportThread]? {
         guard let (code, json) = await supportCall("/api/support/sessions?full=1"), code == 200 else { return nil }
-        supportUnread = (json["unread"] as? Int) ?? supportUnread
+        setSupportUnread((json["unread"] as? Int) ?? supportUnread)
         return (json["sessions"] as? [[String: Any]])?.compactMap { d in
             guard let s = SupportSession(d) else { return nil }
             let msgs = (d["messages"] as? [[String: Any]])?.compactMap { SupportMessage($0) } ?? []
@@ -326,7 +326,7 @@ final class LiveClient: ObservableObject {
 
     func fetchSupportSessions() async -> [SupportSession]? {
         guard let (code, json) = await supportCall("/api/support/sessions"), code == 200 else { return nil }
-        supportUnread = (json["unread"] as? Int) ?? supportUnread
+        setSupportUnread((json["unread"] as? Int) ?? supportUnread)
         return (json["sessions"] as? [[String: Any]])?.compactMap { SupportSession($0) } ?? []
     }
 
@@ -350,8 +350,13 @@ final class LiveClient: ObservableObject {
     }
 
     func markSupportRead() async {
-        supportUnread = 0
+        setSupportUnread(0)
         _ = await supportCall("/api/support/read", method: "POST", body: [:])
+    }
+
+    /// Chỉ gán khi số thật sự đổi: gán lại cùng số vẫn làm mọi màn hình đang dùng LiveClient vẽ lại.
+    private func setSupportUnread(_ n: Int) {
+        if supportUnread != n { supportUnread = n }
     }
 
     private func handleSupport(_ m: [String: Any]) {
@@ -361,7 +366,7 @@ final class LiveClient: ObservableObject {
         if supportChatOpen {
             Task { await markSupportRead() }
         } else {
-            supportUnread = (m["unread"] as? Int) ?? (supportUnread + 1)
+            setSupportUnread((m["unread"] as? Int) ?? (supportUnread + 1))
             SupportNotifier.shared.notify(text: msg.text)
         }
     }

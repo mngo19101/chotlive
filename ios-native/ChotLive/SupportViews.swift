@@ -106,6 +106,8 @@ struct SupportChatView: View {
     @State private var sending = false
     @State private var loaded = false
     @State private var error: String?
+    /// Còn đang mở màn chat. Đã bấm quay lại thì không tải hay đánh dấu đã đọc nữa.
+    @State private var visible = false
 
     private var selected: SupportThread? { threads.first { $0.id == selectedId } }
     private var hasOpen: Bool { threads.contains { $0.session.open } }
@@ -129,21 +131,29 @@ struct SupportChatView: View {
             if inThread { thread } else { list }
         }
         .task {
+            visible = true
             client.supportChatOpen = true
             SupportNotifier.shared.requestPermission()
             client.checkSocket()
             await reload()
-            await client.markSupportRead()
+            if visible { await client.markSupportRead() }
             // Hỏi lại server định kỳ: tin từ Telegram vẫn hiện ngay dù kết nối realtime bị rớt.
-            while !Task.isCancelled {
+            while !Task.isCancelled && visible {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-                if Task.isCancelled { break }
+                if Task.isCancelled || !visible { break }
                 await reload()
-                if client.supportUnread > 0 { await client.markSupportRead() }
+                if visible && client.supportUnread > 0 { await client.markSupportRead() }
             }
         }
-        .onDisappear { client.supportChatOpen = false }
-        .onReceive(client.$lastSupportMessage.compactMap { $0 }) { _ in
+        .onDisappear {
+            visible = false
+            client.supportChatOpen = false
+        }
+        // Chỉ chạy khi có tin mới thật. Không dùng onReceive(client.$lastSupportMessage): nó phát lại tin cũ
+        // mỗi lần màn này vẽ lại, nên màn chat tải liên tục và vẫn tải sau khi đã bấm quay lại,
+        // làm cả app vẽ lại giữa lúc đóng màn và màn chat bị mở lại.
+        .onChange(of: client.lastSupportMessage?.id) { _ in
+            guard visible else { return }
             Task { await reload() }
         }
     }
@@ -303,8 +313,12 @@ struct SupportChatView: View {
     // MARK: Dữ liệu
 
     private func reload() async {
-        if let list = await client.fetchSupportThreads() { threads = list }
-        loaded = true
+        guard visible else { return }
+        let list = await client.fetchSupportThreads()
+        guard visible else { return }
+        // Không gán lại khi không có gì đổi để màn hình khỏi vẽ lại mỗi 3 giây.
+        if let list, list != threads { threads = list }
+        if !loaded { loaded = true }
     }
 
     private func send() async {
