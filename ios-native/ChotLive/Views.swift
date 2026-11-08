@@ -323,6 +323,8 @@ struct DashboardView: View {
     @EnvironmentObject var client: LiveClient
     @EnvironmentObject var store: Store
     @State private var days = 7
+    /// Cột đang được chạm; nil nghĩa là cột hôm nay.
+    @State private var pickedBar: Int?
 
     private var cal: Calendar { Calendar.current }
     private var today: Date { Clock.now }
@@ -483,8 +485,13 @@ struct DashboardView: View {
                 .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Theme.track))
             }
             Spacer(minLength: 16)
-            BarChart(data: series, labelEveryBar: days == 7).frame(height: 170)
-            Spacer(minLength: 16)
+            BarChart(data: series, labelEveryBar: days == 7, selected: $pickedBar).frame(height: 170)
+            Spacer(minLength: 10)
+            T("Chạm vào cột bất kỳ để xem doanh thu ngày đó", 12, .medium, Theme.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+            Spacer(minLength: 12)
         }
         .padding(.horizontal, 16)
         .padding(.top, 16)
@@ -493,7 +500,7 @@ struct DashboardView: View {
     }
 
     private func segment(_ title: String, value: Int) -> some View {
-        Button { days = value } label: {
+        Button { days = value; pickedBar = nil } label: {
             T(title, 12, days == value ? .bold : .semibold, days == value ? Theme.ink : Theme.muted)
                 .lineLimit(1)
                 .fixedSize()
@@ -510,6 +517,7 @@ struct DashboardView: View {
 struct BarChart: View {
     let data: [(Date, Int)]
     let labelEveryBar: Bool
+    @Binding var selected: Int?
 
     private let labelArea: CGFloat = 23
     private let plotTopInset: CGFloat = 25
@@ -530,28 +538,39 @@ struct BarChart: View {
 
                 ForEach(Array(data.enumerated()), id: \.offset) { index, item in
                     let isToday = index == data.count - 1
+                    let isSelected = index == (selected ?? data.count - 1)
                     let height = max(CGFloat(item.1) / CGFloat(maxValue) * plot * 0.95, 3)
                     let centerX = barInset + column * (CGFloat(index) + 0.5)
 
                     RoundedRectangle(cornerRadius: data.count > 10 ? 3 : 7, style: .continuous)
-                        .fill(isToday ? Theme.orangeDeep : Theme.bar)
+                        .fill(isSelected ? Theme.orangeDeep : Theme.bar)
                         .frame(width: barWidth, height: height)
                         .position(x: centerX, y: baseline - height / 2)
 
-                    if isToday && item.1 > 0 {
-                        T(compactMoney(item.1), 12, .bold, Theme.accent)
+                    if isSelected && (item.1 > 0 || !isToday) {
+                        // Ở chế độ 30 ngày không đủ chỗ cho nhãn ngày, nên ghi kèm ngày vào số tiền.
+                        let text = item.1 > 0 ? compactMoney(item.1) : "0"
+                        T(labelEveryBar ? text : "\(shortDate(item.0)) · \(text)", 12, .bold, Theme.accent)
                             .lineLimit(1)
                             .fixedSize()
-                            .position(x: min(centerX, geo.size.width - 20), y: baseline - height - 12)
+                            .position(x: min(max(centerX, labelEveryBar ? 20 : 45), geo.size.width - (labelEveryBar ? 20 : 45)),
+                                      y: baseline - height - 12)
                     }
 
                     if labelEveryBar || index % 5 == 4 || isToday {
                         T(labelEveryBar ? weekdayLabel(item.0) : shortDate(item.0), labelEveryBar ? 12 : 10,
-                          isToday ? .bold : .medium, isToday ? Theme.ink : Theme.muted)
+                          isSelected ? .bold : .medium, isSelected ? Theme.ink : Theme.muted)
                             .lineLimit(1)
                             .fixedSize()
                             .position(x: centerX, y: baseline + 16)
                     }
+
+                    // Vùng chạm cả cột (kể cả cột rỗng hay quá thấp).
+                    Color.clear
+                        .frame(width: column, height: geo.size.height)
+                        .contentShape(Rectangle())
+                        .position(x: centerX, y: geo.size.height / 2)
+                        .onTapGesture { selected = index }
                 }
             }
         }
