@@ -8,6 +8,7 @@ struct SettingsView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var printer: PrinterManager
     @EnvironmentObject var ui: AppUI
+    @EnvironmentObject var appearance: Appearance
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
@@ -120,6 +121,7 @@ struct SettingsView: View {
                     Icon(name: .check, size: 14, weight: 2.8)
                         .frame(width: 24, height: 24)
                         .background(Circle().fill(Theme.orange))
+                        .onAccent()
                 } else {
                     Circle().strokeBorder(Theme.bar, lineWidth: 1.5).frame(width: 24, height: 24)
                 }
@@ -145,6 +147,9 @@ struct SettingsView: View {
             settingRow(.printer, "Máy in", trailing: printerConnected ? "Đã kết nối" : "Chưa kết nối",
                        trailingColor: printerConnected ? Theme.green : Theme.muted, route: .printer)
             HairLine()
+            settingRow(.palette, "Giao diện", trailing: appearance.summary, trailingColor: Theme.accent,
+                       isNew: !appearance.seen, route: .appearance)
+            HairLine()
             settingRow(.tag, "Từ khoá chốt đơn", route: .keywords)
             HairLine()
             settingRow(.bell, "Thông báo", route: .notifications)
@@ -156,7 +161,7 @@ struct SettingsView: View {
     }
 
     private func settingRow(_ icon: IconName, _ title: String, trailing: String? = nil, trailingColor: Color = Theme.muted,
-                            route: Route) -> some View {
+                            isNew: Bool = false, route: Route) -> some View {
         Button { ui.push(route) } label: {
             HStack(spacing: 12) {
                 Icon(name: icon, size: 16, weight: 2.3, color: Theme.accent)
@@ -164,6 +169,10 @@ struct SettingsView: View {
                     .background(Circle().fill(Theme.peachSoft))
                 T(title, 15, .semibold).lineLimit(1)
                 Spacer(minLength: 4)
+                if isNew {
+                    T("MỚI", 10, .heavy).padding(.horizontal, 7).frame(height: 18)
+                        .background(Capsule().fill(Theme.orange)).onAccent()
+                }
                 if let trailing { T(trailing, 12, .semibold, trailingColor).lineLimit(1).fixedSize() }
                 Icon(name: .chevronRight, size: 16, weight: 2.4, color: Theme.muted).padding(.leading, -2)
             }

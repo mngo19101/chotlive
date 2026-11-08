@@ -255,6 +255,7 @@ struct LiveNewSheet: View {
                         Capsule().fill(active ? Theme.orange : Theme.card)
                             .overlay(Capsule().strokeBorder(active ? Color.clear : Theme.line, lineWidth: 1))
                     )
+                    .onAccent(active)
             }
             .padding(.horizontal, 15)
             .padding(.vertical, 11.6)
@@ -628,6 +629,7 @@ struct SessionDetailView: View {
                 Capsule().fill(selected ? Theme.orange : Theme.card)
                     .overlay(Capsule().strokeBorder(selected ? Color.clear : Theme.line, lineWidth: 1))
             )
+            .onAccent(selected)
         }
         .buttonStyle(.plain)
     }
@@ -641,7 +643,7 @@ struct SessionDetailView: View {
             .padding(.horizontal, 18)
             .frame(height: 40)
             .background(Capsule().fill(Theme.ink))
-            .shadow(color: Theme.ink.opacity(0.18), radius: 10, y: 5)
+            .shadow(color: Color.black.opacity(0.18), radius: 10, y: 5)
         }
         .buttonStyle(.plain)
         .padding(.bottom, Metrics.safeBottom > 0 ? -5.5 : 12)
@@ -674,6 +676,7 @@ struct CommentRow: View {
                         Icon(name: .check, size: 10, weight: 3)
                             .frame(width: 18, height: 18)
                             .background(Circle().fill(Theme.orange))
+                            .onAccent()
                     }
                 }
                 // Giữ chiều cao dòng tên để badge và dấu tích không đẩy hàng cao lên.

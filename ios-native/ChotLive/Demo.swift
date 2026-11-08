@@ -100,6 +100,9 @@ enum Demo {
         case "help":
             ui.tab = .me
             ui.push(.help)
+        case "appearance":
+            ui.tab = .me
+            ui.push(.appearance)
         default: break
         }
     }

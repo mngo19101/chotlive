@@ -7,6 +7,7 @@ struct ChotLiveApp: App {
     @StateObject private var store = Store()
     @StateObject private var printer = PrinterManager()
     @StateObject private var client = LiveClient()
+    @StateObject private var appearance = Appearance()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -15,6 +16,7 @@ struct ChotLiveApp: App {
                 .environmentObject(store)
                 .environmentObject(printer)
                 .environmentObject(client)
+                .environmentObject(appearance)
                 .onAppear {
                     KeyboardDismisser.shared.install()
                     SupportNotifier.shared.install()

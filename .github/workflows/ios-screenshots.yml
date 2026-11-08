@@ -62,6 +62,14 @@ jobs:
             sleep 5
             xcrun simctl io "$UDID" screenshot "screenshots/$screen.png"
           done
+          # Giao diện: màn chọn màu và vài màn ở nền Tối với các màu chủ đạo khác.
+          for combo in appearance:light:vang appearance:dark:xanh me:dark:vang sales:dark:vang live:dark:hong                        orders:dark:ngoc orderDetail:dark:tim customers:light:la dateFilter:dark:vang; do
+            IFS=: read -r screen mode accent <<< "$combo"
+            xcrun simctl terminate "$UDID" com.chotlive.native || true
+            xcrun simctl launch "$UDID" com.chotlive.native -demoScreen "$screen" -demoAppearance "$mode" -demoAccent "$accent"
+            sleep 5
+            xcrun simctl io "$UDID" screenshot "screenshots/theme-$screen-$mode-$accent.png"
+          done
           echo "$DEVICE_NAME" > screenshots/device.txt
 
       - uses: actions/upload-artifact@v4

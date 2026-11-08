@@ -366,6 +366,7 @@ struct AreaPickerSheet: View {
             T(title, 13, .bold, mode == value ? Theme.ink : Theme.muted)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Capsule().fill(mode == value ? Theme.orange : Color.clear))
+                .onAccent(mode == value)
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -434,6 +435,7 @@ struct AreaPickerSheet: View {
                     Icon(name: .check, size: 14, weight: 2.8)
                         .frame(width: 26, height: 26)
                         .background(Circle().fill(Theme.orange))
+                        .onAccent()
                 }
             }
             .padding(.horizontal, 4)

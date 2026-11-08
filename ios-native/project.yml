@@ -16,7 +16,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
-        UIUserInterfaceStyle: Light
+        # Không khoá nền Sáng: người dùng chọn Sáng / Tối / Theo máy trong Tôi › Giao diện.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIAppFonts:

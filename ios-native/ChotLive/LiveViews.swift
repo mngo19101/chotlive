@@ -305,6 +305,7 @@ struct DateFilterSheet: View {
                     Capsule().fill(selected ? Theme.orange : Theme.card)
                         .overlay(Capsule().strokeBorder(selected ? Color.clear : Theme.line, lineWidth: 1))
                 )
+                .onAccent(selected)
         }
         .buttonStyle(.plain)
     }
@@ -382,6 +383,7 @@ struct DateFilterSheet: View {
                 T("\(cal.component(.day, from: d))", 15, inMonth && isEdge ? .heavy : .medium, enabled ? Theme.ink : Theme.faint)
             }
             .frame(height: 46)
+            .onAccent(inMonth && isEdge)
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }

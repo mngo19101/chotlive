@@ -5,6 +5,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject var client: LiveClient
     @EnvironmentObject var store: Store
+    @EnvironmentObject var appearance: Appearance
 
     var body: some View {
         Group {
@@ -20,8 +21,8 @@ struct RootView: View {
         } message: {
             Text(store.storageWarning ?? "")
         }
-        .preferredColorScheme(.light)
         .tint(Theme.orangeDeep)
+        .onAppear { appearance.applyToWindows() }
         #if DEBUG
         .onAppear { Demo.prepare(store: store, client: client) }
         #endif
@@ -31,6 +32,7 @@ struct RootView: View {
 struct MainShell: View {
     @EnvironmentObject var client: LiveClient
     @EnvironmentObject var store: Store
+    @EnvironmentObject var appearance: Appearance
     @StateObject private var ui = AppUI()
 
     var body: some View {
@@ -45,6 +47,8 @@ struct MainShell: View {
             }
             SheetLayer(ui: ui)
         }
+        // Đổi màu chủ đạo thì dựng lại các màn để mọi chỗ lấy màu mới; trang đang mở (ui.path) vẫn giữ.
+        .id(appearance.accent)
         .environmentObject(ui)
         .alert("Thông báo", isPresented: Binding(get: { ui.alert != nil }, set: { if !$0 { ui.alert = nil } })) {
             Button("OK", role: .cancel) {}
@@ -106,6 +110,7 @@ struct MainShell: View {
         case .keywords: KeywordsView()
         case .notifications: NotificationsView()
         case .help: SupportChatView()
+        case .appearance: AppearanceView()
         }
     }
 }
@@ -163,7 +168,7 @@ struct TabBar: View {
         .frame(height: 75)
         .padding(.bottom, max(Metrics.safeBottom - 25, 0))
         .background(
-            Color.white
+            Theme.tabBar
                 .overlay(Rectangle().fill(Theme.line).frame(height: 1), alignment: .top)
                 .ignoresSafeArea(.container, edges: .bottom)
         )
@@ -231,6 +236,7 @@ struct LoginView: View {
             T("CL", 26, .heavy, Theme.ink, track: -0.5)
                 .frame(width: 68, height: 68)
                 .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Theme.orange))
+                .onAccent()
             VStack(spacing: 3) {
                 T("ChốtLive", 28, .heavy, Theme.ink, track: -0.5)
                 T(isRegister ? "Tạo tài khoản để bắt đầu chốt đơn" : "Chốt đơn TikTok Live, in tem tức thì", 14, .medium, Theme.muted)
@@ -259,6 +265,7 @@ struct LoginView: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 40)
                 .background(Capsule().fill(selected ? Theme.orange : Color.clear))
+                .onAccent(selected)
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -412,6 +419,7 @@ struct DashboardView: View {
         .padding(.bottom, 21)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(Theme.orange))
+        .onAccent()
     }
 
     private var customersTile: some View {
@@ -492,6 +500,7 @@ struct DashboardView: View {
                 .padding(.horizontal, 13)
                 .frame(height: 28)
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(days == value ? Theme.orange : Color.clear))
+                .onAccent(days == value)
         }
         .buttonStyle(.plain)
     }

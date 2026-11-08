@@ -10,35 +10,42 @@ extension Color {
 }
 
 enum Theme {
-    static let bg = Color(hex: 0xF6F7F9)
-    static let card = Color.white
-    static let line = Color(hex: 0xE6E8EC)
-    static let ink = Color(hex: 0x14181F)
-    static let muted = Color(hex: 0x5B6472)
-    static let faint = Color(hex: 0x8B93A0)
-    static let placeholder = Color(hex: 0x7D8592)
-    static let orange = Color(hex: 0xFF9A4C)
-    static let orangeDeep = Color(hex: 0xEA6A09)
-    static let accent = Color(hex: 0xB5490C)
-    static let peach = Color(hex: 0xFEE4CD)
-    static let peachSoft = Color(hex: 0xFEF4EA)
-    static let peachLine = Color(hex: 0xFFBD87)
-    static let peachTint = Color(hex: 0xFFF1E4)
-    static let peachCode = Color(hex: 0xFFE9D2)
-    static let peachRow = Color(hex: 0xFFF7EC)
-    static let accentDeep = Color(hex: 0x7A3300)
-    static let slate = Color(hex: 0xE6E9F0)
-    static let green = Color(hex: 0x107A54)
-    static let greenSoft = Color(hex: 0xE6F7EF)
+    // Màu nền và chữ: mỗi màu có bản Sáng và bản Tối, iOS tự chọn theo chế độ nền đang dùng.
+    static let bg = Color.dynamic(0xF6F7F9, 0x0F1115)
+    static let card = Color.dynamic(0xFFFFFF, 0x1A1D23)
+    static let line = Color.dynamic(0xE6E8EC, 0x2C3038)
+    static let ink = Color.dynamic(0x14181F, 0xF2F3F5)
+    static let muted = Color.dynamic(0x5B6472, 0xA3AAB6)
+    static let faint = Color.dynamic(0x8B93A0, 0x7D8592)
+    static let placeholder = Color.dynamic(0x7D8592, 0x8A919D)
+    static let tabBar = Color.dynamic(0xFFFFFF, 0x15181D)
+    static let slate = Color.dynamic(0xE6E9F0, 0x2A2F3A)
+    static let green = Color.dynamic(0x107A54, 0x4ADE9C)
+    static let greenSoft = Color.dynamic(0xE6F7EF, 0x12291F)
     static let greenBright = Color(hex: 0x4ADE9C)
-    static let red = Color(hex: 0xB3261E)
-    static let redSoft = Color(hex: 0xFDECEC)
-    static let live = Color(hex: 0xE5484D)
-    static let bar = Color(hex: 0xCBD2DC)
-    static let field = Color(hex: 0xF6F7F9)
-    static let track = Color(hex: 0xEFF0F4)
-    static let grayBadge = Color(hex: 0xEBEEF3)
-    static let grabber = Color(hex: 0xD6D9DF)
+    static let red = Color.dynamic(0xB3261E, 0xFF8A80)
+    static let redSoft = Color.dynamic(0xFDECEC, 0x3A1A1C)
+    static let live = Color.dynamic(0xE5484D, 0xFF6369)
+    static let bar = Color.dynamic(0xCBD2DC, 0x3A3F48)
+    static let field = Color.dynamic(0xF6F7F9, 0x23272E)
+    static let track = Color.dynamic(0xEFF0F4, 0x262A31)
+    static let grayBadge = Color.dynamic(0xEBEEF3, 0x2A2E36)
+    static let grabber = Color.dynamic(0xD6D9DF, 0x3A3F48)
+
+    // Màu chủ đạo người dùng chọn trong Tôi › Giao diện (mặc định Vàng, đúng mẫu thiết kế).
+    static private(set) var colors = AccentColors(AccentChoice.saved)
+    static func use(_ choice: AccentChoice) { colors = AccentColors(choice) }
+
+    static var orange: Color { colors.orange }
+    static var orangeDeep: Color { colors.orangeDeep }
+    static var accent: Color { colors.accent }
+    static var accentDeep: Color { colors.accentDeep }
+    static var peach: Color { colors.peach }
+    static var peachSoft: Color { colors.peachSoft }
+    static var peachLine: Color { colors.peachLine }
+    static var peachTint: Color { colors.peachTint }
+    static var peachCode: Color { colors.peachCode }
+    static var peachRow: Color { colors.peachRow }
 }
 
 enum BV: String {
@@ -179,6 +186,7 @@ enum Route: Hashable {
     case keywords
     case notifications
     case help
+    case appearance
 }
 
 struct SheetItem: Identifiable {
@@ -233,7 +241,8 @@ struct SheetLayer: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if let s = shown {
-                (s.dim >= 0.9 ? Color(hex: 0x2B3036) : Theme.ink.opacity(s.dim))
+                // Lớp phủ luôn tối, kể cả khi app đang nền Tối.
+                (s.dim >= 0.9 ? Color(hex: 0x2B3036) : Color(hex: 0x14181F).opacity(s.dim))
                     .ignoresSafeArea()
                     .opacity(isUp ? 1 : 0)
                     .onTapGesture { ui.dismissSheet() }
@@ -256,7 +265,7 @@ struct SheetLayer: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, Metrics.safeBottom > 0 ? -6 : 16)
-                .background(TopRounded(radius: 28).fill(Color.white).ignoresSafeArea(.container, edges: .bottom))
+                .background(TopRounded(radius: 28).fill(Theme.card).ignoresSafeArea(.container, edges: .bottom))
                 .offset(y: max(drag, 0))
                 .modifier(SheetSlide(progress: isUp ? 1 : 0))
                 .id(s.id)
@@ -440,6 +449,7 @@ struct HeaderAddButton: View {
             }
             .frame(width: 108, height: 44)
             .background(Capsule().fill(Theme.orange))
+            .onAccent()
         }
         .buttonStyle(.plain)
     }
@@ -479,6 +489,7 @@ struct Chip: View {
                     Capsule().fill(selected ? Theme.orange : Theme.card)
                         .overlay(Capsule().strokeBorder(selected ? Color.clear : Theme.line, lineWidth: 1))
                 )
+                .onAccent(selected)
         }
         .buttonStyle(.plain)
     }
@@ -528,6 +539,7 @@ struct PrimaryButton: View {
             .frame(maxWidth: .infinity)
             .frame(height: height)
             .background(Capsule().fill(Theme.orange))
+            .onAccent()
             .opacity(enabled ? 1 : 0.5)
         }
         .buttonStyle(.plain)
@@ -556,6 +568,7 @@ struct OutlineButton: View {
                 Capsule().fill(filled ? Theme.orange : Theme.card)
                     .overlay(Capsule().strokeBorder(filled ? Color.clear : Theme.line, lineWidth: 1))
             )
+            .onAccent(filled)
         }
         .buttonStyle(.plain)
     }
@@ -717,7 +730,7 @@ struct FooterBar<Content: View>: View {
                 .padding(.top, 14)
                 .padding(.bottom, Metrics.safeBottom > 0 ? -5.5 : 12)
         }
-        .background(Color.white.ignoresSafeArea(edges: .bottom))
+        .background(Theme.card.ignoresSafeArea(edges: .bottom))
     }
 }
 

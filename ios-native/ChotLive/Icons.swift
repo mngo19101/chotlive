@@ -5,6 +5,7 @@ import SwiftUI
 enum IconName {
     case chart, messageLines, message, messageSquare, users, bag, user, calendar, plus, minus, chevronLeft, chevronRight, chevronDown, chevronUp
     case arrowRight, arrowDown, radio, search, filter, printer, truck, more, check, tag, bell, help, logout, cart, trash, close, pencil, pin, stop
+    case palette, sun, moon, smartphone
 
     fileprivate var paths: [String] {
         switch self {
@@ -80,6 +81,17 @@ enum IconName {
             return ["M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497Z"]
         case .pin:
             return ["M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0", circle(12, 10, 3)]
+        case .palette:
+            return [circle(13.5, 6.5, 0.5), circle(17.5, 10.5, 0.5), circle(8.5, 7.5, 0.5), circle(6.5, 12.5, 0.5),
+                    // Bộ đọc path không có lệnh S nên viết lại bằng C, toạ độ tuyệt đối.
+                    "M12 2C6.5 2 2 6.5 2 12C2 17.5 6.5 22 12 22C12.926 22 13.648 21.254 13.648 20.312C13.648 19.875 13.468 19.477 13.211 19.187C12.921 18.898 12.773 18.535 12.773 18.062A1.64 1.64 0 0 1 14.441 16.394H16.437C19.488 16.394 21.992 13.891 21.992 10.84C21.965 6.012 17.461 2 12 2Z"]
+        case .sun:
+            return [circle(12, 12, 4), "M12 2v2", "M12 20v2", "M4.93 4.93l1.41 1.41", "M17.66 17.66l1.41 1.41",
+                    "M2 12h2", "M20 12h2", "M6.34 17.66l-1.41 1.41", "M19.07 4.93l-1.41 1.41"]
+        case .moon:
+            return ["M12 3a6 6 0 0 0 9 9 9 9 0 1 1 -9 -9Z"]
+        case .smartphone:
+            return ["M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z", "M12 18h.01"]
         case .stop:
             return ["M7 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"]
         }
