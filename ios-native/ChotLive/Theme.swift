@@ -214,6 +214,12 @@ final class AppUI: ObservableObject {
     func push(_ r: Route) { path.append(r) }
     func pop() { if !path.isEmpty { path.removeLast() } }
 
+    /// Thay màn hiện tại bằng màn khác (không chồng thêm vào stack).
+    func replaceTop(_ r: Route) {
+        if !path.isEmpty { path.removeLast() }
+        path.append(r)
+    }
+
     func present<V: View>(dim: Double = 0.45, @ViewBuilder _ content: () -> V) {
         sheet = SheetItem(dim: dim, content: AnyView(content()))
     }

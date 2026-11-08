@@ -391,7 +391,7 @@ struct OrderDetailView: View {
             T("Đơn đã gom chưa gửi (\(others.count))", 14, .bold, Theme.gomInk).padding(.bottom, 3)
             ForEach(Array(others.enumerated()), id: \.element.id) { index, x in
                 if index > 0 { HairLine() }
-                Button { ui.push(.order(x.id)) } label: {
+                Button { ui.replaceTop(.order(x.id)) } label: {
                     HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 2) {
                             T("Đơn \(dayMonth(x.lastTs)) · \(timeText(x.lastTs))", 14, .bold).lineLimit(1)
