@@ -7,39 +7,29 @@ struct OrdersView: View {
     @EnvironmentObject var printer: PrinterManager
     @EnvironmentObject var ui: AppUI
     @State private var search = ""
-    @State private var filter = 0 // 0 tất cả, 1 mới, 2 đã in, 3 đang giao, 4 đã giao
+    /// 0 tất cả (mọi ngày), 1 đơn mới, 2 chờ gửi, 3 gom sau, 4 đang giao (theo ngày đang chọn)
+    @State private var filter = 0
     @State private var dateFilter = DateFilter.make(.today)
-
-    private var all: [Order] { store.orders(in: dateFilter) }
 
     private func matches(_ o: Order, _ tab: Int) -> Bool {
         switch tab {
-        case 1: return o.status == .new
-        case 2: return o.status == .printed
-        case 3: return o.status == .shipping
-        case 4: return o.status == .delivered
+        case 1: return Vtp.state(o) == .ask
+        case 2: return Vtp.state(o) == .ready
+        case 3: return Vtp.state(o) == .hold
+        case 4: return o.status == .shipping
         default: return true
         }
     }
 
-    private var list: [Order] {
-        var l = all.filter { matches($0, filter) }
-        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        if !q.isEmpty {
-            l = l.filter { $0.customer.nickname.lowercased().contains(q) || $0.customer.uniqueId.lowercased().contains(q) }
-        }
-        return l
-    }
-
-    private var subtitle: String {
-        let date = dateFilter.isSingleDay ? "\(weekdayLabel(dateFilter.startDay)) \(shortDate(dateFilter.startDay))" : dateFilter.pillLabel
-        return "\(all.count) đơn \(dateFilter.scopeLabel) · \(date)"
-    }
-
     var body: some View {
+        let every = store.allOrders()
+        let scoped = every.filter { dateFilter.contains($0.lastTs) }
+        let groups = Vtp.readyGroups(every)
+        let shown = list(every: every, scoped: scoped)
         ScrollView(showsIndicators: false) {
             VStack(spacing: Metrics.gap) {
-                PageHeader(subtitle: subtitle, title: "Đơn hàng") {
+                PageHeader(subtitle: filter == 0 ? "\(every.count) đơn · mọi ngày" : "\(scoped.count) đơn · \(dateFilter.pillLabel)",
+                           title: "Đơn hàng") {
                     HeaderAddButton(title: "Tạo đơn") { ui.push(.orderCreate) }
                 }
                 HStack(spacing: 8) {
@@ -50,23 +40,29 @@ struct OrdersView: View {
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        statusChip("Tất cả", 0)
-                        statusChip("Đơn mới", 1)
-                        statusChip("Đã in", 2)
-                        statusChip("Đang giao", 3)
-                        statusChip("Đã giao", 4)
+                        Chip(title: "Tất cả · \(every.count)", selected: filter == 0) { filter = 0 }
+                        statusChip("Đơn mới", 1, scoped)
+                        statusChip("Chờ gửi", 2, scoped)
+                        statusChip("Gom sau", 3, scoped)
+                        statusChip("Đang giao", 4, scoped)
                     }
                     .padding(.horizontal, Metrics.gutter)
                 }
                 .padding(.horizontal, -Metrics.gutter)
 
-                if list.isEmpty {
+                if !groups.isEmpty {
+                    ReadyExportBanner(groups: groups) {
+                        ui.present(dim: 0.42) { VtpExportSheet() }
+                    }
+                }
+
+                if shown.isEmpty {
                     T("Chưa có đơn nào. Bấm nút in trên một bình luận hoặc “Tạo đơn” để thêm đơn.", 13, .medium, Theme.muted)
                         .multilineTextAlignment(.center)
                         .padding(.top, 30)
                 }
                 LazyVStack(spacing: 11) {
-                    ForEach(list) { o in card(o) }
+                    ForEach(shown) { o in card(o, every: every) }
                 }
             }
             .padding(.horizontal, Metrics.gutter)
@@ -77,12 +73,33 @@ struct OrdersView: View {
         .background(Theme.bg)
     }
 
-    private func statusChip(_ title: String, _ tab: Int) -> some View {
-        Chip(title: "\(title) · \(all.filter { matches($0, tab) }.count)", selected: filter == tab) { filter = tab }
+    /// Tab Tất cả: đơn mọi ngày, tìm cả đơn ngày cũ. Các tab khác: theo ngày đang chọn.
+    private func list(every: [Order], scoped: [Order]) -> [Order] {
+        var l = (filter == 0 ? every : scoped).filter { matches($0, filter) }
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        if !q.isEmpty {
+            l = l.filter {
+                $0.customer.nickname.lowercased().contains(q) || $0.customer.uniqueId.lowercased().contains(q)
+                    || ($0.code ?? "").lowercased().contains(q) || ($0.customer.address?.phone ?? "").contains(q)
+            }
+        }
+        return l
     }
 
-    private func card(_ o: Order) -> some View {
-        VStack(spacing: 15) {
+    private func statusChip(_ title: String, _ tab: Int, _ scoped: [Order]) -> some View {
+        Chip(title: "\(title) · \(scoped.filter { matches($0, tab) }.count)", selected: filter == tab) { filter = tab }
+    }
+
+    private func openReview(_ o: Order) {
+        ui.present(dim: 0.42) { ShipReviewSheet(orderId: o.id) }
+    }
+
+    private func card(_ o: Order, every: [Order]) -> some View {
+        let st = Vtp.state(o)
+        let older = st.isPending ? Vtp.olderPending(o, in: every) : []
+        let hasOldGom = st == .ask && !older.isEmpty
+        let day = Clock.isToday(o.lastTs) ? "" : " · \(dayMonth(o.lastTs))"
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Avatar(text: o.customer.initials, size: 40, fontSize: 14, seed: o.customer.id)
                     .offset(y: 1)
@@ -93,26 +110,39 @@ struct OrdersView: View {
                         T(money(o.total), 17, .heavy, Theme.ink, track: -0.4).lineLimit(1).fixedSize()
                     }
                     HStack(spacing: 6) {
-                        T("@\(o.customer.uniqueId) · \(o.productCount) sản phẩm · \(timeText(o.lastTs))", 12, .medium, Theme.muted)
+                        T("@\(o.customer.uniqueId) · \(o.productCount) sản phẩm · \(timeText(o.lastTs))\(day)", 12, .medium, Theme.muted)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.85)
+                            .minimumScaleFactor(0.8)
                             .offset(y: 1)
                         Spacer(minLength: 0)
-                        StatusBadge(status: o.status).offset(y: 2)
+                        if st == .ask { Badge(text: "Đơn mới").offset(y: 2) }
                     }
                 }
             }
             .contentShape(Rectangle())
             .onTapGesture { ui.push(.order(o.id)) }
 
+            if hasOldGom {
+                Button { openReview(o) } label: {
+                    tag("Có \(older.count) đơn gom từ \(dayMonth(older[0].lastTs)) · bấm để gộp", Theme.gomInk, Theme.gomTag)
+                }
+                .buttonStyle(.plain)
+            } else if !older.isEmpty {
+                tag("Còn \(older.count) đơn cũ chưa gửi · từ \(dayMonth(older[0].lastTs))", Theme.gomInk, Theme.gomTag)
+            } else if st == .hold {
+                tag("Khách hẹn gom sau", Theme.gomInk, Theme.gomTag)
+            } else if st == .ready {
+                tag("Sẵn sàng gửi", Theme.accent, Theme.peachSoft)
+            }
+
             HStack(spacing: 8) {
-                OutlineButton(title: "In đơn", icon: .printer, filled: !o.isPrinted) {
+                OutlineButton(title: o.isPrinted ? "In lại" : "In đơn", icon: .printer, filled: !o.isPrinted) {
                     Task { @MainActor in
                         ui.notify(await printOrder(o, store: store, printer: printer))
                     }
                 }
-                OutlineButton(title: deliveryLabel(o), icon: .truck, color: o.status == .delivered ? Theme.green : Theme.ink) {
-                    store.advanceDelivery(o)
+                OutlineButton(title: shipButtonLabel(o), icon: st == .ask ? .check : .truck, color: shipButtonColor(o)) {
+                    openReview(o)
                 }
                 Button {
                     ui.present { OrderActionSheet(orderId: o.id) }
@@ -123,19 +153,21 @@ struct OrdersView: View {
                 }
                 .buttonStyle(.plain)
             }
+            .padding(.top, 3)
         }
         .padding(.horizontal, 15)
         .padding(.top, 15)
         .padding(.bottom, 14)
-        .cardStyle(20)
+        .cardStyle(20, fill: hasOldGom ? Theme.gomFill : Theme.card, border: hasOldGom ? Theme.gomLine : Theme.line)
     }
-}
 
-func deliveryLabel(_ o: Order) -> String {
-    switch o.status {
-    case .new, .printed: return "Giao hàng"
-    case .shipping: return "Đang giao"
-    case .delivered: return "Đã giao"
+    private func tag(_ text: String, _ color: Color, _ fill: Color) -> some View {
+        T(text, 12, .semibold, color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(Capsule().fill(fill))
     }
 }
 
@@ -232,7 +264,7 @@ struct OrderDetailView: View {
     var body: some View {
         let order = store.order(id: orderId)
         SubPage(title: "Chi tiết đơn hàng", trailing: {
-            if let o = order { StatusBadge(status: o.status, fontSize: 12, height: 25) }
+            if let o = order { ShipBadge(order: o) }
         }) {
             if let o = order {
                 ScrollView(showsIndicators: false) {
@@ -318,10 +350,11 @@ struct OrderDetailView: View {
         VStack(spacing: 8) {
             PrimaryButton(title: "Chỉnh sửa đơn", icon: .pencil, fontSize: 15) { ui.push(.orderEdit(o.id)) }
             HStack(spacing: 8) {
-                OutlineButton(title: deliveryLabel(o), icon: .truck, color: o.status == .delivered ? Theme.green : Theme.ink, height: 48) {
-                    store.advanceDelivery(o)
+                OutlineButton(title: shipButtonLabel(o), icon: Vtp.state(o) == .ask ? .check : .truck,
+                              color: shipButtonColor(o), height: 48) {
+                    ui.present(dim: 0.42) { ShipReviewSheet(orderId: o.id) }
                 }
-                OutlineButton(title: "In đơn", icon: .printer, height: 48) {
+                OutlineButton(title: o.isPrinted ? "In lại" : "In đơn", icon: .printer, height: 48) {
                     Task { @MainActor in
                         ui.notify(await printOrder(o, store: store, printer: printer))
                     }

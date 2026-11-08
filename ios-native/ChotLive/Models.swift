@@ -66,6 +66,10 @@ struct OrderItem: Identifiable, Codable, Equatable {
     var code: String? = nil
     /// Bình luận sinh ra món này (1 bình luận có thể chốt nhiều mã). nil = dữ liệu cũ: id chính là id bình luận.
     var commentId: String? = nil
+    /// Thông tin giao Viettel Post của đơn chứa món này (giống `order.ship` của web); các món cùng đơn giữ cùng giá trị.
+    var ship: ShipInfo? = nil
+    /// Mã đơn do server cấp ("HD26110901"), ghi vào cột mã đơn của file Viettel Post.
+    var orderCode: String? = nil
 
     var lineTotal: Int { price * max(qty, 1) }
 
@@ -110,6 +114,81 @@ struct OrderItem: Identifiable, Codable, Equatable {
         groupId = try c.decodeIfPresent(String.self, forKey: .groupId)
         code = try c.decodeIfPresent(String.self, forKey: .code)
         commentId = try c.decodeIfPresent(String.self, forKey: .commentId)
+        ship = try? c.decodeIfPresent(ShipInfo.self, forKey: .ship)
+        orderCode = try? c.decodeIfPresent(String.self, forKey: .orderCode)
+    }
+}
+
+/// Thông tin giao của đơn, cùng JSON với `order.ship` trên web (public/js/vtp-export.js):
+/// state ask | hold | ready | exported; pay cod | paid; payer receiver | sender;
+/// deposit, shipFee, codOverride (đồng), weightG (gram), exportedAt (mili giây).
+struct ShipInfo: Codable, Equatable {
+    var state: String? = nil
+    var pay: String? = nil
+    var payer: String? = nil
+    var deposit: Int? = nil
+    var shipFee: Int? = nil
+    var codOverride: Int? = nil
+    var weightG: Int? = nil
+    var exportedAt: Double? = nil
+    var batchId: String? = nil
+    /// Kích thước kiện (cm), bắt buộc khi nặng từ 10kg.
+    var lengthCm: Int? = nil
+    var widthCm: Int? = nil
+    var heightCm: Int? = nil
+
+    init(state: String? = nil, pay: String? = nil, payer: String? = nil, deposit: Int? = nil, shipFee: Int? = nil,
+         codOverride: Int? = nil, weightG: Int? = nil, exportedAt: Double? = nil, batchId: String? = nil,
+         lengthCm: Int? = nil, widthCm: Int? = nil, heightCm: Int? = nil) {
+        self.state = state; self.pay = pay; self.payer = payer; self.deposit = deposit; self.shipFee = shipFee
+        self.codOverride = codOverride; self.weightG = weightG; self.exportedAt = exportedAt; self.batchId = batchId
+        self.lengthCm = lengthCm; self.widthCm = widthCm; self.heightCm = heightCm
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case state, pay, payer, deposit, shipFee, codOverride, weightG, exportedAt, batchId, lengthCm, widthCm, heightCm
+    }
+
+    /// Web có thể lưu số dạng chuỗi hoặc số lẻ: đọc được thì lấy, không thì bỏ qua thay vì làm hỏng cả gói.
+    private static func number(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Double? {
+        if let v = try? c.decodeIfPresent(Double.self, forKey: key) { return v.isFinite ? v : nil }
+        if let s = try? c.decodeIfPresent(String.self, forKey: key) { return Double(s.trimmingCharacters(in: .whitespaces)) }
+        return nil
+    }
+
+    private static func money(_ v: Double?) -> Int? { v.map { max(0, Int($0.rounded())) } }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = try? c.decodeIfPresent(String.self, forKey: .state)
+        pay = try? c.decodeIfPresent(String.self, forKey: .pay)
+        payer = try? c.decodeIfPresent(String.self, forKey: .payer)
+        deposit = Self.money(Self.number(c, .deposit))
+        shipFee = Self.money(Self.number(c, .shipFee))
+        codOverride = Self.money(Self.number(c, .codOverride))
+        weightG = Self.money(Self.number(c, .weightG))
+        exportedAt = Self.number(c, .exportedAt)
+        batchId = try? c.decodeIfPresent(String.self, forKey: .batchId)
+        lengthCm = Self.money(Self.number(c, .lengthCm))
+        widthCm = Self.money(Self.number(c, .widthCm))
+        heightCm = Self.money(Self.number(c, .heightCm))
+    }
+
+    /// Ghi cả giá trị rỗng (null) để server xoá đúng trường đã bỏ, ví dụ COD nhập tay.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(state, forKey: .state)
+        try c.encode(pay, forKey: .pay)
+        try c.encode(payer, forKey: .payer)
+        try c.encode(deposit, forKey: .deposit)
+        try c.encode(shipFee, forKey: .shipFee)
+        try c.encode(codOverride, forKey: .codOverride)
+        try c.encode(weightG, forKey: .weightG)
+        try c.encode(exportedAt, forKey: .exportedAt)
+        try c.encode(batchId, forKey: .batchId)
+        try c.encode(lengthCm, forKey: .lengthCm)
+        try c.encode(widthCm, forKey: .widthCm)
+        try c.encode(heightCm, forKey: .heightCm)
     }
 }
 
@@ -138,6 +217,9 @@ struct Order: Identifiable {
     var lastTs: Date { items.map(\.ts).max() ?? .distantPast }
     var firstTs: Date { items.map(\.ts).min() ?? .distantPast }
     var isPrinted: Bool { !items.isEmpty && items.allSatisfy(\.printed) }
+    /// Món thêm sau khi duyệt chưa có `ship`: lấy theo món đã có.
+    var ship: ShipInfo? { items.first { $0.ship != nil }?.ship }
+    var code: String? { items.compactMap(\.orderCode).first }
 
     var status: OrderStatus {
         guard !items.isEmpty else { return .new }

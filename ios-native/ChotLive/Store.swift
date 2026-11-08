@@ -331,6 +331,85 @@ final class Store: ObservableObject {
         save()
     }
 
+    // MARK: - Duyệt đơn & Viettel Post
+
+    /// Ghi thông tin giao vào mọi món của từng đơn (id đơn → ship). `shipping`: true chuyển Đang giao,
+    /// false đưa về chưa giao, nil giữ nguyên. Server đọc `ship` để web thấy đúng trạng thái.
+    func setShip(_ changes: [String: ShipInfo], shipping: Bool? = nil) {
+        var touched: Set<String> = []
+        for (orderId, ship) in changes {
+            guard let o = order(id: orderId), let ci = customers.firstIndex(where: { $0.id == o.customer.id }) else { continue }
+            let ids = Set(o.items.map(\.id))
+            for ii in customers[ci].items.indices where ids.contains(customers[ci].items[ii].id) {
+                customers[ci].items[ii].ship = ship
+                if let shipping {
+                    customers[ci].items[ii].shipping = shipping
+                    customers[ci].items[ii].delivered = false
+                }
+            }
+            touched.insert(o.customer.id)
+        }
+        guard !touched.isEmpty else { return }
+        touched.forEach { touchCustomer($0) }
+        save()
+    }
+
+    /// Bảng Duyệt đơn: chuyển các đơn được tick sang Chờ gửi (`ready`) hoặc Gom sau (`hold`).
+    /// Tiền cọc ghi ở đơn đầu tiên, các cài đặt khác ghi ở mọi đơn, giống web.
+    func approve(_ orderIds: [String], state: ShipState, base: ShipInfo) {
+        var changes: [String: ShipInfo] = [:]
+        for (i, id) in orderIds.enumerated() {
+            var s = base
+            s.state = state.rawValue
+            if i > 0 { s.deposit = 0 }
+            s.exportedAt = nil
+            s.batchId = nil
+            changes[id] = s
+        }
+        setShip(changes)
+    }
+
+    /// Đã xuất file Viettel Post: các đơn chuyển Đang giao và rời khỏi thanh Sẵn sàng xuất.
+    func markExported(_ orders: [Order], at now: Date = Clock.now) {
+        let batch = "vtp_" + String(Int(now.timeIntervalSince1970 * 1000), radix: 36)
+        var changes: [String: ShipInfo] = [:]
+        for o in orders {
+            var s = o.ship ?? ShipInfo()
+            s.state = ShipState.exported.rawValue
+            s.exportedAt = (now.timeIntervalSince1970 * 1000).rounded()
+            s.batchId = batch
+            changes[o.id] = s
+        }
+        setShip(changes, shipping: true)
+    }
+
+    /// Hoàn tác xuất: đơn cùng lần xuất của khách về lại Chờ gửi.
+    func undoExport(_ o: Order) {
+        let batch = o.ship?.batchId
+        let list = orders(of: o.customer).filter { $0.id == o.id || (batch != nil && $0.ship?.batchId == batch) }
+        var changes: [String: ShipInfo] = [:]
+        for x in list {
+            var s = x.ship ?? ShipInfo()
+            s.state = ShipState.ready.rawValue
+            s.exportedAt = nil
+            s.batchId = nil
+            changes[x.id] = s
+        }
+        setShip(changes, shipping: false)
+    }
+
+    /// Đang giao ↔ Đã giao.
+    func setDelivered(_ o: Order, _ delivered: Bool) {
+        let ids = Set(o.items.map(\.id))
+        guard let ci = customers.firstIndex(where: { $0.id == o.customer.id }) else { return }
+        for ii in customers[ci].items.indices where ids.contains(customers[ci].items[ii].id) {
+            customers[ci].items[ii].delivered = delivered
+            customers[ci].items[ii].shipping = !delivered
+        }
+        touchCustomer(o.customer.id)
+        save()
+    }
+
     /// Mọi đơn, mới nhất trước.
     func allOrders() -> [Order] {
         customers.flatMap(orders(of:)).sorted { $0.lastTs > $1.lastTs }

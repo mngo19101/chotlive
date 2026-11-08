@@ -5,7 +5,7 @@ import SwiftUI
 enum IconName {
     case chart, messageLines, message, messageSquare, users, bag, user, calendar, plus, minus, chevronLeft, chevronRight, chevronDown, chevronUp
     case arrowRight, arrowDown, radio, search, filter, printer, truck, more, check, tag, bell, help, logout, cart, trash, close, pencil, pin, stop
-    case palette, sun, moon, smartphone
+    case palette, sun, moon, smartphone, download
 
     fileprivate var paths: [String] {
         switch self {
@@ -92,6 +92,8 @@ enum IconName {
             return ["M12 3a6 6 0 0 0 9 9 9 9 0 1 1 -9 -9Z"]
         case .smartphone:
             return ["M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z", "M12 18h.01"]
+        case .download:
+            return ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10 12 15 17 10", "M12 15V3"]
         case .stop:
             return ["M7 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"]
         }

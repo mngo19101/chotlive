@@ -2,15 +2,16 @@ import SwiftUI
 
 // MARK: - Dữ liệu địa giới hành chính
 
-/// AddressData.json nhúng trong app, để chọn khu vực không cần mạng.
-/// - "new" (34 tỉnh, 3.321 phường/xã): thanglequoc/vietnamese-provinces-database v5.2.0 (MIT),
-///   cập nhật tới Nghị quyết 388/NQ-UBTVQH16, hiệu lực 20/9/2026.
-/// - "old" (63 tỉnh, 696 quận/huyện, 10.035 phường/xã): kenzouno1/DiaGioiHanhChinhVN,
-///   cấu trúc 3 cấp trước khi bỏ cấp huyện ngày 1/7/2025.
+/// AddressData.json nhúng trong app, để chọn khu vực không cần mạng. Cùng danh mục Viettel Post với web
+/// (tạo bằng scripts/build-ios-address-data.mjs), nên tên chọn ở đây file Excel Viettel Post nhận ngay.
+/// - "new" (34 tỉnh, 3.321 phường/xã): "TP.Hà Nội" → "Phường Cầu Giấy".
+/// - "old" (63 tỉnh, 701 quận/huyện, 10.396 phường/xã): "TP.Hồ Chí Minh" → "Q.1" → "P.Bến Nghé".
 struct AreaUnit: Decodable {
     let n: String
     let d: [AreaUnit]?
     let w: [String]?
+    /// Địa chỉ cũ: phường mới tương ứng của từng phường trong `w` ("Phường Sài Gòn, TP.Hồ Chí Minh").
+    let e: [String]?
 }
 
 enum AddressBook {
@@ -38,10 +39,10 @@ enum AddressBook {
         names.sorted { $0.compare($1, options: [.numeric], range: nil, locale: vietnamese) == .orderedAscending }
     }
 
-    /// Tỉnh xếp theo tên riêng, không theo chữ "TP." / "Tỉnh".
+    /// Tỉnh xếp theo tên riêng, không theo chữ "TP." / "T.".
     static func sortedProvinces(_ names: [String]) -> [String] {
         func key(_ s: String) -> String {
-            for prefix in ["TP. ", "Tỉnh "] where s.hasPrefix(prefix) { return String(s.dropFirst(prefix.count)) }
+            for prefix in ["TP.", "T."] where s.hasPrefix(prefix) { return String(s.dropFirst(prefix.count)) }
             return s
         }
         return names.sorted { key($0).compare(key($1), options: [.numeric], range: nil, locale: vietnamese) == .orderedAscending }
@@ -177,7 +178,20 @@ struct AddressEditView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            if let regionWarning {
+                T(regionWarning, 12.5, .medium, Theme.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 2)
+                    .padding(.top, 2)
+            }
         }
+    }
+
+    /// Khu vực đã lưu không khớp danh mục Viettel Post (dữ liệu cũ, gõ tay trên web): báo để chọn lại trước khi xuất.
+    private var regionWarning: String? {
+        guard !address.region.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        let r = VtpAddress.resolve(DeliveryAddress(street: "-", region: address.region))
+        return r.ok ? nil : "Khu vực này chưa đúng danh mục Viettel Post, bấm để chọn lại."
     }
 
     /// Tên tỉnh không bị tách làm hai dòng ("TP." một dòng, "Hồ Chí Minh" một dòng).
@@ -240,25 +254,30 @@ struct AreaPickerSheet: View {
         _level = State(initialValue: startLevel)
     }
 
-    /// Đọc lại khu vực đang lưu; không khớp dữ liệu thì bắt đầu từ đầu.
+    /// Đọc lại khu vực đang lưu, kể cả cách viết cũ ("Phường Tân Định, Quận 1, TP. Hồ Chí Minh"):
+    /// khớp danh mục Viettel Post thì chọn sẵn đúng tên, không khớp thì giữ tỉnh nếu nhận ra, còn lại chọn từ đầu.
     private static func parse(_ region: String) -> (mode: Mode, province: String?, district: String?, ward: String?) {
-        let parts = region.components(separatedBy: ", ").map { $0.trimmingCharacters(in: .whitespaces) }
-        guard let provinceName = parts.last else { return (.new, nil, nil, nil) }
-        if parts.count == 3,
-           let d = AddressBook.old.first(where: { $0.n == provinceName })?.d?.first(where: { $0.n == parts[1] }),
-           d.w?.contains(parts[0]) == true {
-            return (.old, provinceName, parts[1], parts[0])
-        }
-        if parts.count == 2 {
-            if AddressBook.new.first(where: { $0.n == provinceName })?.w?.contains(parts[0]) == true {
-                return (.new, provinceName, nil, parts[0])
+        let parts = VtpAddress.split(region: region)
+        guard !parts.province.isEmpty else { return (.new, nil, nil, nil) }
+        if !parts.district.isEmpty {
+            if let r = VtpAddress.findOld(province: parts.province, district: parts.district, ward: parts.ward) {
+                return (.old, r.province, r.district, r.ward)
             }
-            // Huyện đảo không có cấp xã.
-            if AddressBook.old.first(where: { $0.n == provinceName })?.d?.contains(where: { $0.n == parts[0] }) == true {
-                return (.old, provinceName, parts[0], nil)
-            }
+            let p = AddressBook.old.first { VtpAddress.sameUnit($0.n, parts.province, ["t", "tp"]) }
+            return (.old, p?.n, nil, nil)
         }
-        return (.new, nil, nil, nil)
+        if let r = VtpAddress.findNew(province: parts.province, ward: parts.ward) {
+            return (.new, r.province, nil, r.ward)
+        }
+        let p = AddressBook.new.first { VtpAddress.normalize($0.n) == VtpAddress.normalize(parts.province) }
+        return (.new, p?.n, nil, nil)
+    }
+
+    /// Địa chỉ cũ: phường mới mà Viettel Post gộp phường đang chọn vào, để đối chiếu với khách.
+    private var equivalent: String? {
+        guard mode == .old, let ward, let wards = districtUnit?.w, let i = wards.firstIndex(of: ward),
+              let e = districtUnit?.e, e.indices.contains(i), !e[i].isEmpty else { return nil }
+        return e[i]
     }
 
     private var provinces: [AreaUnit] { mode == .old ? AddressBook.old : AddressBook.new }
@@ -302,8 +321,8 @@ struct AreaPickerSheet: View {
             VStack(alignment: .leading, spacing: 0) {
                 SheetTitle(title: "Chọn khu vực", size: 23).padding(.top, 7)
                 modeSwitch.padding(.top, 16)
-                T(mode == .old ? "Theo đơn vị hành chính cũ: Tỉnh / Thành phố → Quận / Huyện → Phường / Xã"
-                               : "Theo đơn vị hành chính mới: Tỉnh / Thành phố → Phường / Xã", 12.5, .medium, Theme.muted)
+                T(mode == .old ? "Danh mục cũ của Viettel Post: Tỉnh / Thành phố → Quận / Huyện → Phường / Xã"
+                               : "Danh mục mới của Viettel Post: Tỉnh / Thành phố → Phường / Xã", 12.5, .medium, Theme.muted)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 2)
@@ -330,6 +349,9 @@ struct AreaPickerSheet: View {
             VStack(alignment: .leading, spacing: 3) {
                 T("Địa chỉ đã chọn", 12.5, .medium, Theme.muted)
                 T(summary.isEmpty ? " " : summary, 15, .bold).lineLimit(1).minimumScaleFactor(0.75)
+                if let equivalent {
+                    T("Theo địa chỉ mới: \(equivalent)", 12.5, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.75)
+                }
                 PrimaryButton(title: "Xác nhận", fontSize: 18, height: 55.5, enabled: isComplete) {
                     onConfirm(summary)
                     ui.dismissSheet()

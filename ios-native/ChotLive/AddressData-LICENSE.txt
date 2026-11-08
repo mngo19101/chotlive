@@ -1,29 +1,7 @@
 AddressData.json
 
-"new": dữ liệu từ thanglequoc/vietnamese-provinces-database v5.2.0 (phát hành theo giấy phép MIT bên dưới), cập nhật tới Nghị quyết 388/NQ-UBTVQH16.
-"old": dữ liệu từ kenzouno1/DiaGioiHanhChinhVN, cấu trúc 3 cấp trước ngày 1/7/2025.
-Đã đổi định dạng: rút gọn trường, "Thành phố" viết thành "TP.", chuẩn hoá dấu nháy và viết hoa chữ đầu.
-
-----
-
-MIT License
-
-Copyright (c) 2021 Thang Le Quoc
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Danh mục địa chỉ lấy nguyên văn từ Viettel Post (cùng bộ với web: public/js/vtp-address.js và vtp-address-old.js):
+- "new": api.viettelpost.vn/api/setting/listAllProvinceAfterMerge, listAllWardAfterMerge (34 tỉnh, 3.321 phường/xã).
+- "old": api.viettelpost.vn/api/setting/listallprovince, listalldistrict, listallwards (63 tỉnh, 701 quận/huyện, 10.396 phường/xã),
+  kèm "e": phường mới mà Viettel Post gộp phường cũ vào.
+Lấy ngày 08/11/2026. Tạo lại bằng: node scripts/build-ios-address-data.mjs
