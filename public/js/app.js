@@ -5,7 +5,6 @@ import {
   updateOrderStatus,
   removeOrder,
   addPrint,
-  mergeDuplicateOrders,
   areSameCustomer,
   updateCustomerInfo,
   getActiveAccount,
@@ -14,7 +13,8 @@ import {
   initialComments,
   initialSalesMetrics,
   applyRemoteState,
-  onRemoteStateApplied
+  onRemoteStateApplied,
+  pendingChangeCount
 } from './store.js';
 import {
   connectSync,
@@ -33,14 +33,20 @@ import {
   clearAuthSession,
   apiFetch,
   onForceLogout,
-  onAdminUsersSync
-} from './sync.js?v=2';
+  onAdminUsersSync,
+  onSupportMessage,
+  onAccountAccess,
+  onOfflineChanges
+} from './sync.js?v=3';
+import { countdownClock, countdownText, remainingText } from './countdown.js';
 import {
   parsePrice,
   parsePriceInput,
   formatVND,
   formatPhone,
-  extractProductInfo
+  extractProductInfo,
+  isOnlyCodes,
+  stripAccents
 } from './price.js';
 import { renderTicket, ensureFonts } from './ticket.js';
 import { canvasToEscPos } from './escpos.js';
@@ -59,6 +65,7 @@ import {
 import { startSession, saveComment } from './history.js';
 import { fakeLiveComment } from './demo.js';
 import { exportOrdersToCSV } from './export.js';
+import { computeSales } from './sales.js';
 
 /* ============================================================
    Helper & DOM Utilities
@@ -96,6 +103,9 @@ function toast(msg, icon = '✓', ms = 2400) {
     setTimeout(() => el.remove(), 200);
   }, ms);
 }
+
+/** Chỉ nói "đồng bộ" khi đang nối server; mất mạng thì thay đổi mới nằm trên máy. */
+const syncedWord = () => (syncStatus.connected ? ' & đồng bộ' : '');
 
 /* ============================================================
    Micro-interaction helpers
@@ -280,6 +290,28 @@ function updateSidebarShopUI() {
    1. TAB BÌNH LUẬN & TIMELINE 24H (SCREEN 2)
    ============================================================ */
 let liveFilter = 'all';
+/** Đang xem bình luận của phiên nào. Rỗng = tất cả. */
+let commentScopeSessionId = '';
+/** Các live server đang theo dõi. */
+let activeLives = [];
+/** Bình luận cũ tải thêm từ server (ngoài 500 bình luận mới nhất đã có sẵn). */
+const olderComments = new Map();
+const COMMENT_PAGE = 200;
+let commentRenderLimit = COMMENT_PAGE;
+let olderExhausted = false;
+/** Đang tải bình luận từ server cho phiên đang xem. */
+let olderLoading = false;
+let sessionDayFilter = 'Hôm nay';
+/** Những bình luận đã vẽ, để chỉ dòng mới có hiệu ứng xuất hiện. */
+const renderedCommentIds = new Set();
+
+/** Đọc tên tài khoản từ chữ nhập vào hoặc link phiên live. */
+function parseLiveId(raw = '') {
+  const s = String(raw).trim();
+  const inLink = s.match(/@([\w.-]+)/);
+  if (inLink) return inLink[1];
+  return /^[^/?#&\s]+$/.test(s) ? s : '';
+}
 
 function getLiveComments() {
   if (!Array.isArray(state.comments)) {
@@ -388,75 +420,218 @@ function renderSessionsOverview() {
     return;
   }
 
-  if ($('#overview-cnt-sessions')) $('#overview-cnt-sessions').textContent = String(sessions.length);
-  if ($('#overview-cnt-comments')) $('#overview-cnt-comments').textContent = String(comments.length);
-  if ($('#overview-cnt-guests')) $('#overview-cnt-guests').textContent = String(guests.length);
-  if ($('#overview-cnt-orders')) $('#overview-cnt-orders').textContent = String(orders.length);
-  if ($('#overview-sessions-sub')) $('#overview-sessions-sub').textContent = `${sessions.length} phiên`;
+  const inDay = (ts) => isInSessionDayFilter(ts);
+  const shownSessions = sessions
+    // Phiên đang live chỉ hiện ở khoảng ngày có hôm nay, không lẫn sang "Hôm qua".
+    .filter((s) => inDay(s.startTs || 0) || (s.isLive && sessionDayFilter !== 'Hôm qua'))
+    .sort((a, b) => (b.startTs || 0) - (a.startTs || 0));
+  const shownOrders = orders.filter((o) => inDay(Number(o.ts) || 0));
+  const shownGuests = new Set(shownOrders.map((o) => (o.uniqueId || o.nickname || '').toLowerCase()));
+  const totalComments = shownSessions.reduce((n, s) => n + (Number(s.commentCount) || 0), 0);
 
-  $$('.timeline-live-chunk').forEach((el) => {
-    el.style.display = sessions.length > 0 ? 'block' : 'none';
-  });
+  if ($('#overview-cnt-sessions')) $('#overview-cnt-sessions').textContent = String(shownSessions.length);
+  if ($('#overview-cnt-comments')) $('#overview-cnt-comments').textContent = String(totalComments);
+  if ($('#overview-cnt-guests')) $('#overview-cnt-guests').textContent = String(shownGuests.size);
+  if ($('#overview-cnt-orders')) $('#overview-cnt-orders').textContent = String(shownOrders.length);
+  if ($('#overview-sessions-sub')) $('#overview-sessions-sub').textContent = `${shownSessions.length} phiên`;
+  if ($('.sessions-section-heading h3')) $('.sessions-section-heading h3').textContent = `Các phiên · ${sessionDayFilter}`;
+  if (sessionDayFilter === 'Hôm nay' && $('#lbl-current-nav-date')) {
+    const now = new Date();
+    const wd = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][now.getDay()];
+    $('#lbl-current-nav-date').textContent = `Hôm nay · ${wd} ${pad2(now.getDate())}/${pad2(now.getMonth() + 1)}`;
+  }
+  renderTimelineChunks(sessions);
 
   const listBox = $('#sessions-list-container');
   if (listBox) {
-    if (sessions.length === 0) {
+    if (shownSessions.length === 0) {
       listBox.innerHTML = `
         <div style="padding:32px 16px;text-align:center;color:var(--text-sub);background:#fff;border-radius:16px;border:1px solid var(--border-light)">
           <div style="font-weight:700;font-size:15px;color:var(--text-main);margin-bottom:6px">Chưa có phiên live nào</div>
-          <div style="font-size:13px">Bấm nút <b>+ Live mới</b> ở góc trên bên phải để kết nối TikTok Live.</div>
+          <div style="font-size:13px">Bấm nút <b>+ Live mới</b> ở góc trên bên phải để theo dõi TikTok Live.</div>
         </div>
       `;
     } else {
-      listBox.innerHTML = sessions
-        .map(
-          (s) => `
+      listBox.innerHTML = shownSessions
+        .map((s) => {
+          const sessOrders = orders.filter((o) => (o.items || []).some((it) => it.sessionId === s.id));
+          const sessGuests = new Set(sessOrders.map((o) => (o.uniqueId || o.nickname || '').toLowerCase()));
+          return `
           <div class="session-row-card" data-select-session="${esc(s.id)}">
             <div class="session-time-col">
               <span class="session-time-main">${esc(s.timeStr || 'Live')}</span>
               <span class="session-time-stem"></span>
-              <span class="session-time-status">${s.isLive ? 'Đang<br/>live' : esc(s.endStr || ' Xong')}</span>
+              <span class="session-time-status">${s.isLive ? 'Đang<br/>live' : esc(s.endStr || 'Xong')}</span>
             </div>
             <div class="session-info-bubble ${s.isLive ? 'active-live-bubble' : ''}">
               <div class="session-bubble-left">
                 <div class="session-bubble-title-line">
                   <span class="session-bubble-title">${esc(s.name || 'Phiên Live')}</span>
                   ${s.isLive ? '<span class="badge-live-tag"><span class="live-red-dot"></span>Live</span>' : ''}
-                  <span class="session-bubble-duration">${esc(s.duration || 'Vừa tạo')}</span>
+                  <span class="session-bubble-duration">${esc(s.isLive ? liveDuration(s.startTs) : s.duration || '')}</span>
                 </div>
+                <div style="font-size:12px;color:var(--text-sub);margin-bottom:4px">${s.tiktok ? '@' + esc(s.tiktok) : ''}</div>
                 <div class="session-bubble-stats-row">
-                  <span><b>${comments.length}</b> bình luận</span>
-                  <span><b>${guests.length}</b> khách</span>
-                  <span><b>${orders.length}</b> đơn</span>
+                  <span><b>${Number(s.commentCount) || 0}</b> bình luận</span>
+                  <span><b>${sessGuests.size}</b> khách</span>
+                  <span><b>${sessOrders.length}</b> đơn</span>
                 </div>
               </div>
               <span class="session-chevron">›</span>
             </div>
           </div>
-        `
-        )
+        `;
+        })
         .join('');
     }
   }
 
-  const actAcc = getActiveAccount();
-  if ($('#session-title-text')) $('#session-title-text').textContent = sessions[0]?.name || 'Phiên trực tiếp';
-  if ($('#session-live-tag')) $('#session-live-tag').style.display = sessions.some((s) => s.isLive) ? 'inline-flex' : 'none';
+  renderCommentScopeHeader();
+}
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function liveDuration(startTs) {
+  const mins = Math.max(Math.floor((Date.now() - (Number(startTs) || Date.now())) / 60000), 0);
+  return mins >= 60 ? `${Math.floor(mins / 60)}g ${mins % 60}p` : `${mins}p`;
+}
+
+function isInSessionDayFilter(ts) {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const t0 = startOfToday.getTime();
+  const DAY = 86400000;
+  if (sessionDayFilter === 'Hôm qua') return ts >= t0 - DAY && ts < t0;
+  if (sessionDayFilter === '7 ngày') return ts >= t0 - 6 * DAY;
+  if (sessionDayFilter === 'Tháng này') {
+    const first = new Date(startOfToday);
+    first.setDate(1);
+    return ts >= first.getTime();
+  }
+  return ts >= t0;
+}
+
+/** Vẽ các đoạn phiên trên thanh 24 giờ theo dữ liệu thật của hôm nay. */
+function renderTimelineChunks(sessions) {
+  const bar = $('.timeline-track-bar');
+  if (!bar) return;
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const t0 = startOfToday.getTime();
+  const DAY = 86400000;
+  const now = Date.now();
+  const pct = (t) => Math.min(Math.max(((t - t0) / DAY) * 100, 0), 100);
+  const chunks = sessions
+    .filter((s) => s.startTs && (s.isLive || (s.endTs || s.startTs) >= t0))
+    .map((s) => {
+      const left = pct(s.startTs);
+      const width = Math.max(pct(s.isLive ? now : s.endTs || s.startTs) - left, 0.6);
+      return `<div class="timeline-live-chunk ${s.isLive ? 'active-chunk' : ''}" style="left:${left}%;width:${width}%"></div>`;
+    })
+    .join('');
+  bar.innerHTML = `${chunks}<div class="timeline-cursor-line" style="left:${pct(now)}%"></div>`;
+}
+
+function renderCommentScopeHeader() {
+  const session = (state.sessions || []).find((s) => s.id === commentScopeSessionId);
+  const sessions = Array.isArray(state.sessions) ? state.sessions : [];
+  const stats = session ? [session] : sessions;
+  const total = stats.reduce((n, s) => n + (Number(s.commentCount) || 0), 0);
+  const guests = state.customers?.length || 0;
+  const orders = state.orders?.length || 0;
+  if ($('#session-title-text')) $('#session-title-text').textContent = session ? session.name || 'Phiên live' : 'Tất cả bình luận';
+  if ($('#session-live-tag')) {
+    $('#session-live-tag').style.display = (session ? session.isLive : sessions.some((s) => s.isLive)) ? 'inline-flex' : 'none';
+  }
   if ($('#session-subtitle-text')) {
-    $('#session-subtitle-text').textContent = actAcc.isEmpty
-      ? 'Chưa kết nối tài khoản TikTok'
-      : `Tài khoản ${actAcc.handle}`;
+    $('#session-subtitle-text').textContent = session
+      ? `Từ ${session.timeStr || ''}${session.tiktok ? ' · @' + session.tiktok : ''}`
+      : activeLives.length
+      ? `Đang theo dõi ${activeLives.map((l) => '@' + l.username).join(', ')}`
+      : 'Chưa theo dõi live nào';
   }
   if ($('#session-stats-counter')) {
-    $('#session-stats-counter').textContent = `${comments.length} bình luận · ${guests.length} khách · ${orders.length} đơn`;
+    if (session) {
+      const sessOrders = (state.orders || []).filter((o) => (o.items || []).some((it) => it.sessionId === session.id));
+      const sessGuests = new Set(sessOrders.map((o) => (o.uniqueId || o.nickname || '').toLowerCase()));
+      $('#session-stats-counter').textContent = `${total} bình luận · ${sessGuests.size} khách · ${sessOrders.length} đơn`;
+    } else {
+      $('#session-stats-counter').textContent = `${total} bình luận · ${guests} khách · ${orders} đơn`;
+    }
   }
 }
 
+/** Thanh các live đang theo dõi: bấm để xem riêng từng live, nút × để dừng đúng live đó. */
+function renderActiveLives() {
+  const box = $('#active-lives-strip');
+  if (!box) return;
+  if (activeLives.length === 0) {
+    box.style.display = 'none';
+    box.innerHTML = '';
+    return;
+  }
+  box.style.display = 'flex';
+  const counts = new Map((state.sessions || []).map((s) => [s.id, Number(s.commentCount) || 0]));
+  const label = { connecting: 'đang nối', reconnecting: 'đang nối lại' };
+  const allChip =
+    activeLives.length > 1
+      ? `<button type="button" class="live-chip all ${commentScopeSessionId ? '' : 'active'}" data-live-scope="">Tất cả ${activeLives.length} live</button>`
+      : '';
+  box.innerHTML =
+    allChip +
+    activeLives
+      .map((l) => {
+        const meta = label[l.state]
+          ? label[l.state]
+          : `${counts.get(l.sessionId) || 0} bình luận · ${l.viewers || 0} xem`;
+        const isActive = l.sessionId && l.sessionId === commentScopeSessionId;
+        return `
+        <div class="live-chip ${isActive ? 'active' : ''}" data-live-scope="${esc(l.sessionId)}" role="button" tabindex="0">
+          <span class="live-chip-dot ${esc(l.state)}"></span>
+          <span>@${esc(l.username)}</span>
+          <span class="live-chip-meta">${esc(meta)}</span>
+          <button type="button" class="live-chip-stop" data-stop-live="${esc(l.username)}" aria-label="Dừng theo dõi @${esc(l.username)}">×</button>
+        </div>`;
+      })
+      .join('');
+}
+
+function setCommentScope(sessionId) {
+  if (commentScopeSessionId !== sessionId) {
+    commentRenderLimit = COMMENT_PAGE;
+    olderExhausted = false;
+    // Phần đã tải chỉ liền mạch trong phạm vi cũ; giữ lại thì trang sau sẽ nhảy qua bình luận của live khác.
+    olderComments.clear();
+  }
+  commentScopeSessionId = sessionId;
+  renderActiveLives();
+  renderCommentScopeHeader();
+  renderCommentStream();
+  // Phiên cũ không còn trong phần bình luận mới nhất đã có sẵn: tự tải về, khỏi phải bấm "Xem thêm".
+  if (sessionId && !isDemoAccount() && !olderExhausted && commentsInScope().length < COMMENT_PAGE) {
+    loadOlderComments({ grow: false });
+  }
+}
+
+$('#active-lives-strip')?.addEventListener('click', (e) => {
+  const stop = e.target.closest('[data-stop-live]');
+  if (stop) {
+    e.stopPropagation();
+    const username = stop.dataset.stopLive;
+    if (!window.confirm(`Dừng theo dõi live @${username}?`)) return;
+    if (!sendLiveCommand('disconnect', username)) toast('Chưa nối được server, thử lại sau', '⚠️');
+    return;
+  }
+  const chip = e.target.closest('[data-live-scope]');
+  if (chip) {
+    setCommentScope(chip.dataset.liveScope);
+    setLiveViewSegment('live');
+  }
+});
+
 function renderLiveView() {
-  mergeDuplicateOrders();
   renderSessionsOverview();
   renderCommentStream();
-  renderClosedOrderPanel(getSelectedCustomerUid());
 }
 
 function formatCommentText(rawText) {
@@ -466,89 +641,232 @@ function formatCommentText(rawText) {
   return text;
 }
 
+/** Từ khoá chốt đơn, giống mặc định của app iPhone và Android. */
+const CLOSING_KEYWORDS = ['chot', 'lay'];
+
+/**
+ * Bình luận chốt đơn: đã in, có từ khoá chốt, hoặc chỉ ghi mã.
+ * Có số thôi chưa đủ: "35 tuổi" hay "Cho em xem mã 25 với" không phải chốt đơn.
+ */
+function isClosingComment(c) {
+  if (c.printed) return true;
+  const text = stripAccents(String(c.comment || '').toLowerCase());
+  if (CLOSING_KEYWORDS.some((k) => text.includes(k))) return true;
+  return isOnlyCodes(c.comment, priceOpts());
+}
+
+const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
+const isRealUserId = (id) => /^\d{8,}$/.test(String(id || ''));
+
+/**
+ * Khách mới: lần đầu có đơn đúng vào ngày của phiên live, giống app điện thoại.
+ * Trả về hàm kiểm tra cho từng bình luận.
+ */
+function newCustomerChecker() {
+  const byUser = new Map();
+  const byUid = new Map();
+  const keep = (map, key, ts) => {
+    if (key && !(map.get(key) <= ts)) map.set(key, ts);
+  };
+  for (const o of state.orders || []) {
+    if (o.status === 'cancelled') continue;
+    for (const it of o.items || []) {
+      const ts = Number(it.ts) || Number(o.ts) || 0;
+      if (!ts) continue;
+      if (isRealUserId(o.userId)) keep(byUser, String(o.userId), ts);
+      keep(byUid, String(o.uniqueId || '').toLowerCase(), ts);
+    }
+  }
+  const sessionStart = new Map((state.sessions || []).map((x) => [x.id, Number(x.startTs) || 0]));
+  return (c) => {
+    const first = (isRealUserId(c.userId) && byUser.get(String(c.userId))) || byUid.get(String(c.uniqueId || '').toLowerCase());
+    if (!first) return false;
+    return sameDay(first, sessionStart.get(c.sessionId) || Number(c.ts) || Date.now());
+  };
+}
+
+function customerKeyOf(c) {
+  return isRealUserId(c.userId) ? String(c.userId) : String(c.uniqueId || '').toLowerCase();
+}
+
+function matchesLiveFilter(c, isNewCustomer) {
+  if (liveFilter === 'deals') return isClosingComment(c);
+  if (liveFilter === 'new') return isNewCustomer(c);
+  return true;
+}
+
 function renderCommentStream() {
   const container = $('#comment-stream-container');
   if (!container) return;
 
-  const liveComments = getLiveComments();
-  const selectedUid = getSelectedCustomerUid();
-
-  const filtered = liveComments.filter((c) => {
-    if (liveFilter === 'deals') return c.price > 0;
-    if (liveFilter === 'new') return c.tag === 'Mới';
-    return true;
-  });
-
   const isDemo = isDemoAccount();
+  const liveComments = commentsInScope();
+  const isNewCustomer = newCustomerChecker();
+
+  const filtered = liveComments.filter((c) => matchesLiveFilter(c, isNewCustomer));
+
+  const scopeSessions = (state.sessions || []).filter((s) => !commentScopeSessionId || s.id === commentScopeSessionId);
   const countAll = isDemo
     ? liveComments.length >= 6
       ? 208 + liveComments.length
       : liveComments.length
-    : liveComments.length;
-  const countDeals = isDemo
-    ? 28 + liveComments.filter((c) => c.price > 0).length
-    : liveComments.filter((c) => c.price > 0).length;
-  const countNew = isDemo ? 9 : liveComments.filter((c) => c.tag === 'Mới').length;
+    : Math.max(scopeSessions.reduce((n, s) => n + (Number(s.commentCount) || 0), 0), liveComments.length);
+  // Bình luận đã chốt có thể chưa được tải về: đếm cả các món đã lưu thành đơn trong phiên.
+  const scopeIds = new Set(scopeSessions.map((s) => s.id));
+  const scopeItems = (state.orders || [])
+    .filter((o) => o.status !== 'cancelled')
+    .flatMap((o) => (o.items || []).filter((it) => scopeIds.has(it.sessionId)).map((it) => ({ o, it })));
+  const dealIds = new Set(liveComments.filter(isClosingComment).map((c) => String(c.id)));
+  for (const { it } of scopeItems) dealIds.add(String(it.commentId || it.id));
+  const countDeals = isDemo ? 28 + dealIds.size : dealIds.size;
+  const newKeys = new Set(liveComments.filter(isNewCustomer).map(customerKeyOf));
+  for (const { o, it } of scopeItems) {
+    if (isNewCustomer({ userId: o.userId, uniqueId: o.uniqueId, sessionId: it.sessionId, ts: it.ts })) newKeys.add(customerKeyOf(o));
+  }
+  const countNew = isDemo ? 9 : newKeys.size;
   if ($('#chip-live-all')) $('#chip-live-all').textContent = `Tất cả ${countAll}`;
   if ($('#chip-live-deals')) $('#chip-live-deals').textContent = `Chốt đơn ${countDeals}`;
   if ($('#chip-live-new')) $('#chip-live-new').textContent = `Khách mới ${countNew}`;
 
+  // Chỉ dựng số dòng vừa đủ để trang không chậm dần; phần còn lại mở bằng nút "Xem thêm".
+  const shownRows = filtered.slice(0, commentRenderLimit);
+  const moreBtn = $('#btn-load-older-comments');
+  if (moreBtn) {
+    const canLoadMore = !isDemo && !olderExhausted && countAll > liveComments.length;
+    moreBtn.style.display = filtered.length > shownRows.length || canLoadMore || olderLoading ? 'block' : 'none';
+    moreBtn.disabled = olderLoading;
+    moreBtn.textContent = olderLoading ? 'Đang tải...' : 'Xem thêm bình luận cũ hơn';
+  }
+
   if (filtered.length === 0) {
+    const scopeLive = commentScopeSessionId && activeLives.some((l) => l.sessionId === commentScopeSessionId);
     container.innerHTML = `
       <div style="padding:32px 16px;text-align:center;color:var(--text-sub);font-size:13.5px">
-        Chưa có bình luận nào. Bấm <b>+ Live mới</b> để kết nối phiên live TikTok.
+        ${
+          olderLoading
+            ? 'Đang tải bình luận của phiên này...'
+            : commentScopeSessionId && liveComments.length && liveFilter !== 'all'
+            ? 'Không có bình luận nào hợp bộ lọc này.'
+            : commentScopeSessionId && !scopeLive
+            ? olderExhausted
+              ? 'Phiên này không có bình luận nào.'
+              : 'Chưa tải được bình luận. Bấm <b>Xem thêm</b> bên dưới để thử lại.'
+            : activeLives.length
+            ? 'Đang chờ bình luận từ live đang theo dõi...'
+            : 'Chưa có bình luận nào. Bấm <b>+ Live mới</b> để theo dõi phiên live TikTok.'
+        }
       </div>
     `;
     return;
   }
 
-  container.innerHTML = filtered
+  const showLiveTag = !commentScopeSessionId && new Set(liveComments.slice(0, 200).map((c) => c.live || '')).size > 1;
+  const prevHeight = container.scrollHeight;
+  const prevTop = container.scrollTop;
+  const isFirstPaint = renderedCommentIds.size === 0;
+
+  container.innerHTML = shownRows
     .map((c) => {
-      const isSelected = c.uniqueId === selectedUid;
       const tagBadge =
-        c.tag === 'Mới'
-          ? '<span class="badge-pill-tag badge-tag-new">Mới</span>'
-          : c.tag === 'Mua nhiều'
+        c.tag === 'Mua nhiều'
           ? '<span class="badge-pill-tag badge-tag-loyal">Mua nhiều</span>'
+          : isNewCustomer(c)
+          ? '<span class="badge-pill-tag badge-tag-new">Mới</span>'
           : '';
 
-      const custOrders = state.orders.filter((o) =>
-        areSameCustomer(o, { uniqueId: c.uniqueId, nickname: c.nickname })
-      );
-      const hasOrder = c.price > 0;
       const isPrinted = Boolean(c.printed);
-
-      const printBtnHtml = hasOrder
-        ? `
+      // Bình luận nào cũng in được: không có giá thì vẫn lưu vào khách với giá 0.
+      const printBtnHtml = `
         <button class="btn-cmt-quick-print ${isPrinted ? 'printed' : ''}" data-cmt-print-id="${esc(c.id)}" data-cmt-print-user="${esc(c.uniqueId)}">
           <span>🖨</span>
-          <span>${isPrinted ? 'Đã in' : 'In đơn'}</span>
+          <span>${isPrinted ? 'Đã in' : 'In'}</span>
         </button>
-      `
-        : '';
+      `;
 
       const warmClass = isWarmAvatar(c) ? 'warm' : '';
+      const isNewRow = !isFirstPaint && !renderedCommentIds.has(String(c.id));
+      renderedCommentIds.add(String(c.id));
 
       return `
-        <div class="comment-row-item ${isSelected ? 'selected' : ''}" data-comment-user="${esc(c.uniqueId)}">
+        <div class="comment-row-item ${isNewRow ? 'is-new' : ''}" data-comment-user="${esc(c.uniqueId)}">
           <div class="comment-left">
             <div class="user-circle-avatar ${warmClass}">${avatarInitial(c.nickname || c.uniqueId)}</div>
             <div class="comment-content-wrap">
               <div class="comment-user-row">
                 <span class="comment-user-name">${esc(c.nickname || c.uniqueId)}</span>
                 ${tagBadge}
+                ${showLiveTag && c.live ? `<span class="comment-live-tag">· @${esc(c.live)}</span>` : ''}
               </div>
               <div class="comment-body-text">${formatCommentText(c.comment)}</div>
             </div>
           </div>
           <div class="comment-right-col">
-            <div class="comment-time-right">${esc(c.time || '20:42')}</div>
+            <div class="comment-time-right">${esc(c.time || (c.ts ? `${pad2(new Date(c.ts).getHours())}:${pad2(new Date(c.ts).getMinutes())}` : ''))}</div>
             ${printBtnHtml}
           </div>
         </div>
       `;
     })
     .join('');
+
+  // Đang đọc ở dưới thì giữ nguyên chỗ đọc khi bình luận mới chen vào phía trên.
+  if (prevTop > 40) container.scrollTop = prevTop + (container.scrollHeight - prevHeight);
+}
+
+/** Bình luận thuộc phạm vi đang xem, mới nhất trước. */
+function commentsInScope() {
+  const merged = new Map();
+  for (const c of getLiveComments()) merged.set(String(c.id), c);
+  for (const c of olderComments.values()) if (!merged.has(String(c.id))) merged.set(String(c.id), c);
+  const list = [...merged.values()].filter((c) => !commentScopeSessionId || c.sessionId === commentScopeSessionId);
+  return list.sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0));
+}
+
+$('#btn-load-older-comments')?.addEventListener('click', () => {
+  const isNewCustomer = newCustomerChecker();
+  const filteredCount = commentsInScope().filter((c) => matchesLiveFilter(c, isNewCustomer)).length;
+  if (commentRenderLimit < filteredCount) {
+    commentRenderLimit += COMMENT_PAGE;
+    renderCommentStream();
+    return;
+  }
+  loadOlderComments({ grow: true });
+});
+
+/** Tải trang bình luận cũ tiếp theo của phạm vi đang xem. grow: mở thêm một trang dòng hiển thị. */
+async function loadOlderComments({ grow }) {
+  if (olderLoading) return;
+  const scope = commentScopeSessionId;
+  const loaded = commentsInScope();
+  // Nhiều bình luận có thể trùng thời gian: lấy đúng bình luận cuối theo thứ tự của server (thời gian rồi id).
+  const oldest = loaded.reduce((min, c) => {
+    if (!min) return c;
+    const diff = Number(c.ts) - Number(min.ts);
+    return diff < 0 || (diff === 0 && String(c.id) < String(min.id)) ? c : min;
+  }, null);
+  olderLoading = true;
+  renderCommentStream();
+  const params = new URLSearchParams({ limit: String(COMMENT_PAGE) });
+  if (oldest?.ts) {
+    params.set('before', String(oldest.ts));
+    params.set('beforeId', String(oldest.id));
+  }
+  if (scope) params.set('sessionId', scope);
+  try {
+    const data = await apiFetch(`/api/comments?${params}`, { method: 'GET', cache: 'no-store' });
+    if (!data.ok) throw new Error(data.error || 'Không tải được');
+    // Đã chuyển sang phiên khác trong lúc tải: bỏ kết quả, phiên mới tự tải phần của nó.
+    if (scope !== commentScopeSessionId) return;
+    for (const c of data.comments || []) olderComments.set(String(c.id), c);
+    if (!data.hasMore) olderExhausted = true;
+    if (grow) commentRenderLimit += COMMENT_PAGE;
+  } catch {
+    if (scope === commentScopeSessionId) toast('Không tải được bình luận cũ, thử lại sau', '⚠️');
+  } finally {
+    olderLoading = false;
+    renderCommentStream();
+    if (scope !== commentScopeSessionId) setCommentScope(commentScopeSessionId);
+  }
 }
 
 $('#comment-stream-container')?.addEventListener('click', (e) => {
@@ -558,158 +876,8 @@ $('#comment-stream-container')?.addEventListener('click', (e) => {
     const uid = btnPrint.dataset.cmtPrintUser;
     setSelectedCustomerUid(uid);
     printSingleComment(btnPrint.dataset.cmtPrintId);
-    return;
-  }
-
-  const item = e.target.closest('.comment-row-item');
-  if (item) {
-    setSelectedCustomerUid(item.dataset.commentUser);
-    renderLiveView();
   }
 });
-
-function renderClosedOrderPanel(uniqueId) {
-  const cust =
-    state.customers.find((c) => (c.uniqueId || '').toLowerCase() === (uniqueId || '').toLowerCase()) ||
-    state.customers[0];
-
-  if (!cust) {
-    if ($('#closed-panel-sub')) $('#closed-panel-sub').textContent = 'Chưa có đơn chốt';
-    if ($('#closed-cust-avatar')) {
-      $('#closed-cust-avatar').textContent = '--';
-      $('#closed-cust-avatar').className = 'user-circle-avatar';
-    }
-    if ($('#closed-cust-name')) $('#closed-cust-name').textContent = 'Chưa có khách chốt đơn';
-    if ($('#closed-cust-handle')) $('#closed-cust-handle').textContent = '@---';
-    if ($('#closed-cust-cmt-badge')) $('#closed-cust-cmt-badge').textContent = '0 bình luận';
-    if ($('#closed-metric-session')) $('#closed-metric-session').textContent = 'Chưa có phiên';
-    if ($('#closed-metric-amount')) $('#closed-metric-amount').textContent = '0 sản phẩm · 0 ₫';
-    if ($('#closed-comments-groups')) {
-      $('#closed-comments-groups').innerHTML = `
-        <div class="closed-cmt-group">
-          <div class="closed-item-pill">
-            <span>Chưa có món hàng chốt nào</span>
-          </div>
-        </div>
-      `;
-    }
-    if ($('#mobile-sticky-order-bar')) $('#mobile-sticky-order-bar').style.display = 'none';
-    return;
-  }
-
-  const orders = state.orders.filter((o) => areSameCustomer(o, cust));
-  const activeOrder = orders.find((o) => o.status === 'new') || orders[0];
-
-  if ($('#closed-panel-sub')) {
-    $('#closed-panel-sub').textContent = `Đơn của ${cust.name} · ${activeOrder?.timeStr || '20:42'}`;
-  }
-  if ($('#closed-cust-avatar')) {
-    $('#closed-cust-avatar').textContent = avatarInitial(cust.name);
-    $('#closed-cust-avatar').className = `user-circle-avatar ${isWarmAvatar(cust) ? 'warm' : ''}`;
-  }
-  if ($('#closed-cust-name')) $('#closed-cust-name').textContent = cust.name;
-  if ($('#closed-cust-handle')) $('#closed-cust-handle').textContent = '@' + cust.uniqueId;
-
-  const liveComments = getLiveComments();
-  const custComments = liveComments.filter((c) => areSameCustomer(c, cust) && c.price > 0);
-  const commentCount = custComments.length || (activeOrder?.items?.length ? activeOrder.items.length : 2);
-  if ($('#closed-cust-cmt-badge')) $('#closed-cust-cmt-badge').textContent = `${commentCount} bình luận`;
-
-  const totalItems = activeOrder?.items?.reduce((s, x) => s + (x.qty || 1), 0) || 3;
-  const totalAmount = activeOrder?.total || 450000;
-
-  if ($('#closed-metric-session')) $('#closed-metric-session').textContent = 'Phiên tối · 19:30';
-  if ($('#closed-metric-amount')) {
-    $('#closed-metric-amount').textContent = `${totalItems} sản phẩm · ${formatVND(totalAmount)}`;
-  }
-
-  const groupsContainer = $('#closed-comments-groups');
-  if (groupsContainer) {
-    if (activeOrder && activeOrder.items && activeOrder.items.length) {
-      groupsContainer.innerHTML = activeOrder.items
-        .map(
-          (it) => `
-          <div class="closed-cmt-group">
-            <div class="closed-cmt-title-row">
-              <span class="closed-cmt-msg">${formatCommentText(it.comment || `${it.name} chốt ạ`)}</span>
-              <span class="closed-cmt-time">${esc(it.timeStr || activeOrder.timeStr || '20:40')}</span>
-            </div>
-            <div class="closed-item-pill">
-              <span>${esc(it.name)} · ${it.qty || 1} × ${formatVND(it.price || 0)}</span>
-            </div>
-          </div>
-        `
-        )
-        .join('');
-    } else {
-      groupsContainer.innerHTML = `
-        <div class="closed-cmt-group">
-          <div class="closed-item-pill">
-            <span>Chưa có món hàng chốt nào</span>
-          </div>
-        </div>
-      `;
-    }
-  }
-
-  const btnPrint = $('#btn-closed-print-order');
-  if (btnPrint) {
-    const isPrinted = activeOrder ? activeOrder.status === 'printed' || activeOrder.printCount > 0 : false;
-    btnPrint.innerHTML = isPrinted ? '<span>🖨 In lại đơn</span>' : '<span>🖨 In đơn ngay</span>';
-    btnPrint.onclick = () => {
-      if (activeOrder) {
-        handlePrintOrder(activeOrder);
-        renderLiveView();
-      } else {
-        toast(`Chưa có đơn hàng nào của ${cust.name}`, '⚠️');
-      }
-    };
-  }
-
-  const btnView = $('#btn-closed-view-order');
-  if (btnView) {
-    btnView.onclick = () => {
-      if (activeOrder) {
-        switchTab('orders');
-        openOrderDetailView(activeOrder.id);
-      } else {
-        switchTab('orders');
-      }
-    };
-  }
-
-  const stickyBar = $('#mobile-sticky-order-bar');
-  const detailsLayout = $('#live-stream-details-layout');
-  const isShowingDetails = detailsLayout && detailsLayout.style.display !== 'none';
-  if (stickyBar) {
-    if (activeOrder && isShowingDetails) {
-      stickyBar.style.display = 'flex';
-      if ($('#sticky-bar-avatar')) $('#sticky-bar-avatar').textContent = avatarInitial(cust.name);
-      if ($('#sticky-bar-name')) $('#sticky-bar-name').textContent = cust.name;
-      if ($('#sticky-bar-summary')) {
-        $('#sticky-bar-summary').textContent = `${totalItems} sản phẩm · ${formatVND(totalAmount)}`;
-      }
-      const stickyPrint = $('#btn-sticky-print-order');
-      if (stickyPrint) {
-        const isPrinted = activeOrder.status === 'printed' || activeOrder.printCount > 0;
-        stickyPrint.textContent = isPrinted ? '🖨 In lại' : '🖨 In ngay';
-        stickyPrint.onclick = () => {
-          handlePrintOrder(activeOrder);
-          renderLiveView();
-        };
-      }
-      const stickyView = $('#btn-sticky-view-order');
-      if (stickyView) {
-        stickyView.onclick = () => {
-          switchTab('orders');
-          openOrderDetailView(activeOrder.id);
-        };
-      }
-    } else {
-      stickyBar.style.display = 'none';
-    }
-  }
-}
 
 $$('[data-livefilter]').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -726,14 +894,12 @@ function setLiveViewSegment(seg) {
   const details = $('#live-stream-details-layout');
   const btnLive = $('#btn-seg-live-stream');
   const btnTimeline = $('#btn-seg-timeline');
-  const stickyBar = $('#mobile-sticky-order-bar');
 
   if (seg === 'timeline') {
     if (overview) overview.style.display = 'block';
     if (details) details.style.display = 'none';
     if (btnTimeline) btnTimeline.classList.add('active');
     if (btnLive) btnLive.classList.remove('active');
-    if (stickyBar) stickyBar.style.display = 'none';
   } else {
     if (overview) overview.style.display = 'none';
     if (details) details.style.display = 'grid';
@@ -752,6 +918,12 @@ $('#sessions-timeline-overview')?.addEventListener('click', (e) => {
   if (row) {
     const sId = row.dataset.selectSession;
     state.activeSessionId = sId;
+    if (!isDemoAccount()) {
+      setCommentScope(sId);
+      setLiveViewSegment('live');
+      sendUiEvent({ action: 'select_session', activeSessionId: sId });
+      return;
+    }
     if (sId === 's_noon') {
       $('#session-title-text').textContent = 'Phiên trưa';
       if ($('#session-live-tag')) $('#session-live-tag').style.display = 'none';
@@ -774,10 +946,12 @@ $$('[data-day-chip]').forEach((btn) => {
     $$('[data-day-chip]').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
     const lbl = btn.dataset.dayChip;
+    sessionDayFilter = lbl;
     if ($('#lbl-current-nav-date')) {
       $('#lbl-current-nav-date').textContent =
         lbl === 'Hôm nay' ? 'Hôm nay · CN 25/10' : lbl === 'Hôm qua' ? 'Hôm qua · T7 24/10' : lbl;
     }
+    renderSessionsOverview();
   });
 });
 
@@ -818,6 +992,9 @@ $('#cal-grid-tbody')?.addEventListener('click', (e) => {
 });
 
 $('#btn-open-live-modal')?.addEventListener('click', () => {
+  // Chỉ để báo sớm: server mới là nơi chặn, kể cả khi trang này chưa biết tài khoản đã hết hạn.
+  const access = getCurrentUser()?.access;
+  if (access?.status === 'expired') return showAccessExpired(access.message);
   renderSavedLiveIds();
   $('#modal-new-live')?.showModal();
 });
@@ -836,6 +1013,9 @@ function renderSavedLiveIds() {
     return;
   }
 
+  const following = new Set(activeLives.map((l) => l.username.toLowerCase()));
+  const handleOf = (acc) => String(acc.handle || '').replace(/^@/, '').toLowerCase();
+
   container.innerHTML = accounts
     .map(
       (acc) => `
@@ -847,9 +1027,13 @@ function renderSavedLiveIds() {
             <div style="font-size:12px;color:var(--text-sub)">${esc(acc.handle)} · ${esc(acc.time || 'hôm nay')}</div>
           </div>
         </div>
-        <button class="${acc.active ? 'btn-orange-pill' : 'btn-outline-pill'}" style="padding:7px 16px;font-size:13px" data-start-saved-live="${acc.id}">
+        ${
+          following.has(handleOf(acc))
+            ? '<span class="saved-live-following">Đang theo dõi</span>'
+            : `<button class="${acc.active ? 'btn-orange-pill' : 'btn-outline-pill'}" style="padding:7px 16px;font-size:13px" data-start-saved-live="${acc.id}">
           Bắt đầu
-        </button>
+        </button>`
+        }
       </div>
     `
     )
@@ -860,10 +1044,13 @@ $('#saved-live-ids-container')?.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-start-saved-live]');
   if (btn) {
     const accId = btn.dataset.startSavedLive;
-    const act = switchActiveAccount(accId);
+    // Đang theo dõi live khác thì giữ nguyên shop đang chọn, chỉ thêm live này.
+    const act = activeLives.length
+      ? state.accounts.find((a) => a.id === accId)
+      : switchActiveAccount(accId);
     $('#modal-new-live')?.close();
     updateSidebarShopUI();
-    toast(`Đã bắt đầu phiên live cho ${act.name}!`, '🔴');
+    toast(`Đang kết nối live ${act.handle}...`, '🔴');
     setLiveViewSegment('live');
     startSimulatedOrRealLive(act.handle);
   }
@@ -871,8 +1058,8 @@ $('#saved-live-ids-container')?.addEventListener('click', (e) => {
 
 $('#btn-confirm-start-live')?.addEventListener('click', () => {
   const input = $('#input-new-live-id');
-  const val = input.value.trim().replace(/^@/, '');
-  if (!val) return toast('Vui lòng nhập ID TikTok Live', '⚠️');
+  const val = parseLiveId(input.value);
+  if (!val) return toast('Vui lòng nhập ID TikTok Live hoặc dán link phiên live', '⚠️');
 
   if ($('#chk-remember-live-id')?.checked) {
     addNewAccount({ name: val, handle: '@' + val, avatar: val.slice(0, 2).toUpperCase() });
@@ -910,11 +1097,45 @@ $('#btn-apply-time-filter')?.addEventListener('click', () => {
 
 // Luồng Live thật từ Server hoặc mô phỏng đồng bộ giữa Web & App
 let liveTimer = null;
+let liveRenderTimer = null;
+
+/** Bình luận về dồn dập: gom lại vẽ tối đa 4 lần mỗi giây. */
+function scheduleLiveRender() {
+  if (liveRenderTimer) return;
+  liveRenderTimer = setTimeout(() => {
+    liveRenderTimer = null;
+    renderActiveLives();
+    if (activeTab === 'live') renderLiveView();
+  }, 250);
+}
+
+/** Bình luận thật: server đã lưu sẵn, máy này chỉ hiển thị, không gửi ngược lên. */
+function receiveServerComment(msg) {
+  const { type: _type, ...comment } = msg;
+  const comments = getLiveComments();
+  if (!comments.some((c) => c.id === comment.id)) {
+    const at = comments.findIndex((c) => (Number(c.ts) || 0) <= comment.ts);
+    if (at < 0) comments.push(comment);
+    else comments.splice(at, 0, comment);
+    if (comments.length > 500) comments.length = 500;
+    const session = state.sessions?.find((s) => s.id === comment.sessionId);
+    if (session) {
+      session.commentCount = (session.commentCount || 0) + 1;
+      if (comment.price) session.priceCount = (session.priceCount || 0) + 1;
+      session.lastActivityTs = Math.max(session.lastActivityTs || 0, comment.ts);
+    }
+    saveComment(comment);
+    if (comment.price) playCashChime();
+    scheduleLiveRender();
+  }
+}
+
+/** Bình luận mô phỏng của tài khoản demo. */
 function processIncomingComment({ uniqueId, nickname, comment, userId = '', id = '' }) {
   const price = parsePrice(comment, priceOpts());
   const info = extractProductInfo(comment, price);
   const d = new Date();
-  const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const timeStr = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 
   const newCmt = {
     id: id || 'c_' + Date.now() + Math.random().toString(36).slice(2, 5),
@@ -933,27 +1154,23 @@ function processIncomingComment({ uniqueId, nickname, comment, userId = '', id =
   const comments = getLiveComments();
   if (!comments.some((c) => c.id === newCmt.id)) {
     comments.unshift(newCmt);
-    if (comments.length > 60) comments.pop();
+    if (comments.length > 500) comments.pop();
   }
 
   saveComment(newCmt);
-
-  // Chỉ lưu bình luận; đơn/khách chỉ được tạo khi người bán bấm "In" trên bình luận đó.
-  save('new_comment');
   if (price) playCashChime();
-
-  if (activeTab === 'live') renderLiveView();
-  if (activeTab === 'orders') renderOrdersView();
-  if (activeTab === 'customers') renderCustomersView();
+  scheduleLiveRender();
 }
 
 function startSimulatedOrRealLive(username = 'shophoahong.live') {
   const cleanUser = String(username).replace(/^@/, '').trim();
-  startSession(cleanUser);
-  sendLiveCommand('connect', cleanUser);
+  if (!sendLiveCommand('connect', cleanUser)) {
+    toast('Chưa nối được server, thử lại sau ít giây', '⚠️');
+  }
 
-  if (liveTimer) clearInterval(liveTimer);
   if (isDemoAccount()) {
+    startSession(cleanUser);
+    if (liveTimer) clearInterval(liveTimer);
     liveTimer = setInterval(() => {
       const fake = fakeLiveComment();
       processIncomingComment(fake);
@@ -961,20 +1178,38 @@ function startSimulatedOrRealLive(username = 'shophoahong.live') {
   }
 }
 
-// Lắng nghe comment thật từ TikTok Live do Server đẩy về
+// Lắng nghe dữ liệu thật từ TikTok Live do Server đẩy về
 onLiveStreamEvent((msg) => {
   if (msg.type === 'chat') {
     if (liveTimer) {
       clearInterval(liveTimer);
       liveTimer = null;
     }
-    processIncomingComment(msg);
-  } else if (msg.type === 'status' && msg.state === 'connected') {
-    if (liveTimer) {
-      clearInterval(liveTimer);
-      liveTimer = null;
+    receiveServerComment(msg);
+  } else if (msg.type === 'lives') {
+    activeLives = Array.isArray(msg.lives) ? msg.lives : [];
+    renderActiveLives();
+    renderCommentScopeHeader();
+    if ($('#modal-new-live')?.open) renderSavedLiveIds();
+  } else if (msg.type === 'viewers') {
+    const live = activeLives.find((l) => l.username === msg.username);
+    if (live) {
+      live.viewers = msg.count;
+      scheduleLiveRender();
     }
-    toast(`Đã kết nối TikTok Live thật @${msg.username}!`, '🔴');
+  } else if (msg.type === 'status') {
+    if (msg.state === 'connected') {
+      if (liveTimer) {
+        clearInterval(liveTimer);
+        liveTimer = null;
+      }
+      toast(`Đã kết nối TikTok Live @${msg.username}!`, '🔴');
+    } else if (msg.state === 'error') {
+      if (msg.code === 'TRIAL_EXPIRED' || msg.code === 'PLAN_EXPIRED') showAccessExpired(msg.message);
+      else toast(msg.message || `Không theo dõi được @${msg.username}`, '⚠️', 5000);
+    } else if (msg.state === 'ended') {
+      toast(`@${msg.username}: ${msg.message || 'Phiên live đã kết thúc.'}`, 'ℹ️', 4000);
+    }
   }
 });
 
@@ -1040,12 +1275,12 @@ function renderCustomersView() {
                 <span class="cust-name">${esc(c.name || c.uniqueId)}</span>
                 ${tagBadge}
               </div>
-              <div class="cust-handle-time">@${esc(c.uniqueId)} · ${esc(c.timeDesc || '20:42 nay')}</div>
+              <div class="cust-handle-time">@${esc(c.uniqueId)}${c.timeDesc ? ` · ${esc(c.timeDesc)}` : ''}</div>
             </div>
           </div>
           <div class="cust-row-right">
             <span class="cust-total-spent">${formatVNDHtml(c.totalSpent || 0)}</span>
-            <span class="cust-orders-count">${c.orderCount || 1} đơn</span>
+            <span class="cust-orders-count">${Number(c.orderCount) || 0} đơn</span>
           </div>
         </div>
       `;
@@ -1060,11 +1295,14 @@ $('#customers-list-container')?.addEventListener('click', (e) => {
   }
 });
 
+const findCustomerByUid = (uniqueId) =>
+  state.customers.find((c) => (c.uniqueId || '').toLowerCase() === (uniqueId || '').toLowerCase());
+
+const joinRegion = ({ ward, district, province } = {}) => [ward, district, province].filter(Boolean).join(', ');
+
 function openCustomerProfileView(uniqueId) {
   currentProfileUniqueId = uniqueId;
-  const cust = state.customers.find(
-    (c) => (c.uniqueId || '').toLowerCase() === (uniqueId || '').toLowerCase()
-  );
+  const cust = findCustomerByUid(uniqueId);
   if (!cust) return;
 
   $('#subview-customers-list').style.display = 'none';
@@ -1084,22 +1322,23 @@ function openCustomerProfileView(uniqueId) {
     tagEl.style.display = cust.tag ? 'inline-flex' : 'none';
   }
 
-  $('#prof-total-spent').innerHTML = formatVNDHtml(cust.totalSpent || 0);
-  $('#prof-order-count').textContent = cust.orderCount || 1;
-  $('#prof-last-buy').textContent = cust.lastBuy || '25/10';
+  const custOrders = state.orders.filter((o) => areSameCustomer(o, cust));
 
+  $('#prof-total-spent').innerHTML = formatVNDHtml(cust.totalSpent || 0);
+  $('#prof-order-count').textContent = cust.orderCount || custOrders.length;
+  $('#prof-last-buy').textContent = cust.lastBuy || '—';
+
+  // Thiếu thông tin thì nói thiếu, không hiện dữ liệu mẫu trông như thật.
+  const region = joinRegion(cust);
   $('#prof-addr-receiver').textContent = cust.name;
-  $('#prof-addr-phone').textContent = cust.phone ? formatPhone(cust.phone) : '0905 123 456';
-  $('#prof-addr-street').textContent = cust.street || '25 Lê Lợi';
-  $('#prof-addr-region').textContent = cust.ward
-    ? `${cust.ward}, ${cust.district || 'Quận 1'}, ${cust.province || 'TP. Hồ Chí Minh'}`
-    : cust.address || 'Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh';
+  $('#prof-addr-phone').textContent = cust.phone ? formatPhone(cust.phone) : 'Chưa có số điện thoại';
+  $('#prof-addr-street').textContent = cust.street || (region ? '' : cust.address) || 'Chưa có địa chỉ';
+  $('#prof-addr-region').textContent = region;
   if ($('#prof-addr-note')) {
-    $('#prof-addr-note').textContent = cust.deliveryNote || 'Giao giờ hành chính, gọi trước khi giao';
+    $('#prof-addr-note').textContent = cust.deliveryNote || 'Không có ghi chú';
   }
 
-  const custOrders = state.orders.filter((o) => areSameCustomer(o, cust));
-  $('#prof-hist-count').textContent = `${cust.orderCount || custOrders.length || 12} đơn`;
+  $('#prof-hist-count').textContent = `${cust.orderCount || custOrders.length} đơn`;
 
   const histContainer = $('#prof-history-orders-list');
   if (histContainer) {
@@ -1157,72 +1396,81 @@ $('#input-search-customers')?.addEventListener('input', (e) => {
   renderCustomersView();
 });
 
+/** Khu vực đang sửa trong form địa chỉ; chỉ ghi vào khách khi bấm Lưu. */
+let editingArea = { ward: '', district: '', province: '' };
+
+function showEditingArea() {
+  $('#edit-addr-display-area').textContent = joinRegion(editingArea) || 'Chọn khu vực';
+}
+
+function readAreaInputs() {
+  return {
+    ward: $('#area-input-ward').value.trim(),
+    district: $('#area-input-district').value.trim(),
+    province: $('#area-input-province').value.trim()
+  };
+}
+
 $('#btn-open-edit-address')?.addEventListener('click', () => {
-  const cust =
-    state.customers.find((c) => c.uniqueId === currentProfileUniqueId) || state.customers[0];
+  const cust = findCustomerByUid(currentProfileUniqueId);
   if (!cust) return;
 
+  editingArea = { ward: cust.ward || '', district: cust.district || '', province: cust.province || '' };
   $('#edit-addr-subtitle').textContent = `${cust.name} · @${cust.uniqueId}`;
-  $('#edit-addr-input-phone').value = cust.phone || '0905 123 456';
-  $('#edit-addr-input-name').value = cust.name;
-  $('#edit-addr-input-street').value = cust.street || '25 Lê Lợi';
+  $('#edit-addr-input-phone').value = cust.phone || '';
+  $('#edit-addr-input-name').value = cust.name || '';
+  // Địa chỉ cũ chỉ có một dòng, chưa tách khu vực: đưa cả dòng vào ô địa chỉ để không mất.
+  $('#edit-addr-input-street').value = cust.street || (joinRegion(editingArea) ? '' : cust.address || '');
   if ($('#edit-addr-input-note')) {
-    $('#edit-addr-input-note').value = cust.deliveryNote || 'Giao giờ hành chính, gọi trước khi giao';
+    $('#edit-addr-input-note').value = cust.deliveryNote || '';
   }
-  $('#edit-addr-display-area').textContent = cust.ward
-    ? `${cust.ward}, ${cust.district || 'Quận 1'}, ${cust.province || 'TP. Hồ Chí Minh'}`
-    : 'Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh';
+  showEditingArea();
 
   $('#modal-edit-address')?.showModal();
 });
 
 $('#edit-addr-trigger-area')?.addEventListener('click', () => {
+  $('#area-input-province').value = editingArea.province;
+  $('#area-input-district').value = editingArea.district;
+  $('#area-input-ward').value = editingArea.ward;
+  $('#area-summary-text').textContent = joinRegion(editingArea) || 'Chưa nhập';
   $('#modal-select-area')?.showModal();
 });
 
-let selectedWard = 'Phường Bến Nghé';
-$('#area-ward-list-box')?.addEventListener('click', (e) => {
-  const item = e.target.closest('.area-ward-item');
-  if (item) {
-    $$('.area-ward-item').forEach((w) => {
-      w.classList.remove('selected');
-      const chk = w.querySelector('span:nth-child(2)');
-      if (chk) chk.remove();
-    });
-    item.classList.add('selected');
-    item.innerHTML = `<span>${esc(item.dataset.ward)}</span><span style="color:var(--primary-orange);font-weight:bold">✓</span>`;
-    selectedWard = item.dataset.ward;
-    $('#area-summary-text').textContent = `${selectedWard}, Quận 1, TP. Hồ Chí Minh`;
-  }
+$$('#area-input-province, #area-input-district, #area-input-ward').forEach((input) => {
+  input.addEventListener('input', () => {
+    $('#area-summary-text').textContent = joinRegion(readAreaInputs()) || 'Chưa nhập';
+  });
 });
 
 $('#btn-confirm-area')?.addEventListener('click', () => {
+  editingArea = readAreaInputs();
+  showEditingArea();
   $('#modal-select-area')?.close();
-  $('#edit-addr-display-area').textContent = `${selectedWard}, Quận 1, TP. Hồ Chí Minh`;
 });
 
 $('#btn-save-address-changes')?.addEventListener('click', () => {
   const name = $('#edit-addr-input-name').value.trim();
   const phone = $('#edit-addr-input-phone').value.trim();
   const street = $('#edit-addr-input-street').value.trim();
-  const note = $('#edit-addr-input-note')?.value.trim() || 'Giao giờ hành chính, gọi trước khi giao';
-  const area = $('#edit-addr-display-area').textContent.trim();
+  const note = $('#edit-addr-input-note')?.value.trim() || '';
+  if (!name) return toast('Vui lòng nhập họ tên người nhận', '⚠️');
 
   if (currentProfileUniqueId) {
     updateCustomerInfo(currentProfileUniqueId, {
       name,
       phone,
       street,
-      ward: selectedWard,
-      district: 'Quận 1',
-      province: 'TP. Hồ Chí Minh',
+      ward: editingArea.ward,
+      district: editingArea.district,
+      province: editingArea.province,
       deliveryNote: note,
-      address: `${street}, ${area}`
+      address: [street, joinRegion(editingArea)].filter(Boolean).join(', ')
     });
     openCustomerProfileView(currentProfileUniqueId);
   }
   $('#modal-edit-address')?.close();
-  toast('Đã lưu & đồng bộ địa chỉ khách hàng!', '✓');
+  toast(`Đã lưu${syncedWord()} địa chỉ khách hàng!`, '✓');
 });
 
 /* ============================================================
@@ -1428,7 +1676,7 @@ function openOrderDetailView(orderId) {
   $('#detail-cust-name').textContent = ord.nickname || ord.uniqueId;
 
   const cust = state.customers.find((c) => areSameCustomer(c, ord));
-  const orderCount = cust?.orderCount || 12;
+  const orderCount = cust?.orderCount || state.orders.filter((o) => areSameCustomer(o, ord)).length;
   $('#detail-cust-meta').textContent = `@${ord.uniqueId} · ${orderCount} đơn`;
 
   const tagEl = $('#detail-cust-tag');
@@ -1594,7 +1842,7 @@ $('#btn-save-order-items')?.addEventListener('click', () => {
     save('order_items_edited');
     openOrderDetailView(currentDetailOrderId);
     $('#modal-edit-order-items')?.close();
-    toast('Đã cập nhật & đồng bộ sản phẩm trong đơn!', '✓');
+    toast(`Đã cập nhật${syncedWord()} sản phẩm trong đơn!`, '✓');
   }
 });
 
@@ -1615,9 +1863,9 @@ $('#btn-create-order-pill')?.addEventListener('click', () => {
   if ($('#new-ord-handle')) $('#new-ord-handle').value = '';
   if ($('#new-ord-phone')) $('#new-ord-phone').value = '';
   if ($('#new-ord-address')) $('#new-ord-address').value = '';
-  if ($('#new-ord-product-name')) $('#new-ord-product-name').value = 'Mã 150';
-  if ($('#new-ord-price')) $('#new-ord-price').value = '150';
-  if ($('#new-ord-note')) $('#new-ord-note').value = 'Giao giờ hành chính, gọi trước khi giao';
+  if ($('#new-ord-product-name')) $('#new-ord-product-name').value = '';
+  if ($('#new-ord-price')) $('#new-ord-price').value = '';
+  if ($('#new-ord-note')) $('#new-ord-note').value = '';
   $('#modal-create-order')?.showModal();
 });
 
@@ -1626,12 +1874,13 @@ $('#btn-submit-create-order')?.addEventListener('click', () => {
   if (!name) return toast('Vui lòng nhập tên khách hàng', '⚠️');
 
   const handle = ($('#new-ord-handle')?.value.trim() || name.toLowerCase().replace(/\s+/g, '')).replace(/^@/, '');
-  const phone = $('#new-ord-phone')?.value.trim() || '0905 123 456';
-  const address = $('#new-ord-address')?.value.trim() || '25 Lê Lợi, TP. Hồ Chí Minh';
-  const prodName = $('#new-ord-product-name')?.value.trim() || 'Mã 150';
-  const priceRaw = $('#new-ord-price')?.value.trim() || '150';
+  const phone = $('#new-ord-phone')?.value.trim() || '';
+  const address = $('#new-ord-address')?.value.trim() || '';
+  const prodName = $('#new-ord-product-name')?.value.trim() || 'Sản phẩm';
+  const priceRaw = $('#new-ord-price')?.value.trim() || '';
   const price = parsePriceInput(priceRaw, Number(S().multiplier || 1000));
   const note = $('#new-ord-note')?.value.trim() || '';
+  if (!price) return toast('Vui lòng nhập giá sản phẩm', '⚠️');
 
   const { order } = addOrMergeOrder({
     uniqueId: handle,
@@ -1642,24 +1891,25 @@ $('#btn-submit-create-order')?.addEventListener('click', () => {
   });
 
   if (order) {
-    order.phone = phone;
-    order.address = address;
-    order.note = note;
+    if (phone) order.phone = phone;
+    if (address) order.address = address;
+    if (note) order.note = note;
   }
 
+  // Ô bỏ trống không được xoá thông tin đã có của khách quen.
   updateCustomerInfo(handle, {
     uniqueId: handle,
     name,
-    phone,
-    deliveryNote: note,
-    address
+    ...(phone ? { phone } : {}),
+    ...(note ? { deliveryNote: note } : {}),
+    ...(address ? { address } : {})
   });
 
   if (S().sound !== false) playCashChime(0.5);
 
   $('#modal-create-order')?.close();
   renderOrdersView();
-  toast(`Đã tạo & đồng bộ đơn ${order.code} cho ${name}!`, '✓');
+  toast(`Đã tạo${syncedWord()} đơn ${order.code} cho ${name}!`, '✓');
 });
 
 $('#btn-order-filter-icon')?.addEventListener('click', () => {
@@ -1751,7 +2001,7 @@ $('#btn-save-new-account')?.addEventListener('click', () => {
   renderSettingsView();
   updateSidebarShopUI();
   $('#modal-add-account')?.close();
-  toast('Đã thêm & đồng bộ tài khoản TikTok mới!', '✓');
+  toast(`Đã thêm${syncedWord()} tài khoản TikTok mới!`, '✓');
 });
 
 $('#menu-row-printer')?.addEventListener('click', () => $('#modal-printer-setup')?.showModal());
@@ -1764,7 +2014,29 @@ function openSyncSetupModal() {
     $('#input-sync-server-url').value = S().serverUrl || getServerBaseUrl();
   }
   updateSyncUI(syncStatus);
+  renderSyncGuide();
   $('#modal-sync-setup')?.showModal();
+}
+
+async function renderSyncGuide() {
+  const user = getCurrentUser();
+  if ($('#sync-guide-account')) $('#sync-guide-account').textContent = user?.username || '—';
+  const base = getServerBaseUrl();
+  if ($('#sync-guide-server')) $('#sync-guide-server').textContent = base;
+  const lanBox = $('#sync-guide-lan');
+  if (!lanBox) return;
+  let isLocal = false;
+  try {
+    const host = new URL(base).hostname;
+    isLocal = host === 'localhost' || host === '127.0.0.1' || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+  } catch {}
+  lanBox.style.display = 'none';
+  if (!isLocal) return;
+  const info = await apiFetch('/api/server-info', { method: 'GET', cache: 'no-store' }).catch(() => null);
+  if (info?.lanUrls?.length) {
+    $('#sync-guide-lan-urls').textContent = info.lanUrls.join('  hoặc  ');
+    lanBox.style.display = 'block';
+  }
 }
 
 $('#menu-row-sync')?.addEventListener('click', openSyncSetupModal);
@@ -1823,8 +2095,193 @@ $('#btn-save-notify-setup')?.addEventListener('click', () => {
   toast('Đã lưu cài đặt thông báo & giọng nói!', '✓');
 });
 
-$('#menu-row-help')?.addEventListener('click', () => {
-  $('#modal-help-guide')?.showModal();
+/* ===== Chat với quản trị viên (khách) ===== */
+let supportUnread = 0;
+
+const jsonPost = (body) => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body)
+});
+
+function renderSupportUnread() {
+  for (const id of ['#help-unread-badge']) {
+    const el = $(id);
+    if (!el) continue;
+    el.textContent = String(supportUnread);
+    el.style.display = supportUnread > 0 ? 'inline-block' : 'none';
+  }
+}
+
+async function refreshSupportUnread() {
+  const cur = getCurrentUser();
+  if (!cur || cur.role === 'admin' || !getAuthToken()) return;
+  try {
+    const res = await apiFetch('/api/support/sessions');
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      supportUnread = data.unread || 0;
+      renderSupportUnread();
+    }
+  } catch {}
+}
+
+const supportChatIsOpen = () => Boolean($('#modal-support-chat')?.open);
+let supportView = null; // null = danh sách, 'new' = phiên mới chưa gửi, còn lại = id phiên
+let supportThreads = [];
+
+const supportDay = (ts) => new Date(ts).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+const supportClock = (ts) => new Date(ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+
+function renderMySupportList() {
+  const hasOpen = supportThreads.some((s) => s.open);
+  $('#support-new-session').style.display = hasOpen ? 'none' : '';
+  $('#support-toolbar').style.display = '';
+  $('#support-cards').innerHTML = supportThreads.length
+    ? supportThreads
+        .map((s) => {
+          const last = s.messages[s.messages.length - 1];
+          return `<button type="button" class="support-row2" data-support-open="${esc(s.id)}">
+            <i class="support-dot ${s.open ? '' : 'off'}"></i>
+            <span class="support-row2-main"><b>Phiên ${esc(supportDay(s.createdAt))}</b>
+              <span>${last ? (last.sender === 'admin' ? 'Quản trị viên: ' : 'Bạn: ') + esc(last.text) : 'Chưa có tin nhắn'}</span></span>
+            <span class="support-row2-side"><b class="${s.open ? 'on' : ''}">${s.open ? 'Đang mở' : 'Đã đóng'}</b>
+              <small>${esc(supportClock(last ? last.ts : s.lastAt))}</small></span></button>`;
+        })
+        .join('')
+    : '<p class="support-empty">Chưa có phiên chat nào. Bấm “Phiên mới” để nhắn cho quản trị viên.</p>';
+}
+
+function renderMySupportThread() {
+  const s = supportThreads.find((x) => x.id === supportView);
+  const canType = supportView === 'new' || (s && s.open);
+  $('#support-toolbar').style.display = 'none';
+  const msgs = s
+    ? s.messages
+        .map(
+          (m) => `<div class="support-msg ${m.sender === 'user' ? 'mine' : ''}">${esc(m.text)}<small>${m.sender === 'admin' ? 'Quản trị viên · ' : ''}${esc(supportClock(m.ts))}</small></div>`
+        )
+        .join('')
+    : '';
+  $('#support-cards').innerHTML = `<div class="support-thread-wrap">
+    <div class="support-thread-head"><button type="button" class="support-back" id="support-back">‹ Các phiên</button>
+      <b>${s ? 'Phiên ' + esc(supportDay(s.createdAt)) : 'Phiên mới'}</b>
+      ${s && s.open ? '<button type="button" class="support-end" id="support-end">Kết thúc</button>' : '<span style="width:70px"></span>'}</div>
+    <div class="support-thread-body support-user-body" id="support-user-body">${msgs || '<p class="support-empty">Nhắn cho quản trị viên nếu bạn cần hỗ trợ. Khi có trả lời, bạn sẽ được báo ngay.</p>'}</div>
+    ${
+      canType
+        ? `<div class="support-reply"><textarea id="support-user-text" rows="2" maxlength="2000" placeholder="Nhập tin nhắn… (Enter để gửi)"></textarea>
+           <button type="button" class="btn-orange-pill" id="support-user-send" style="height:44px;padding:0 20px">Gửi</button></div>`
+        : '<div class="support-reply-closed">Phiên này đã đóng. Quay lại danh sách và bấm “Phiên mới” để nhắn tiếp.</div>'
+    }</div>`;
+  const body = $('#support-user-body');
+  if (body) body.scrollTop = body.scrollHeight;
+}
+
+let supportSig = '';
+async function loadSupportChat(quiet = false) {
+  const box = $('#support-cards');
+  if (!box) return;
+  const draft = $('#support-user-text')?.value || '';
+  const hadFocus = document.activeElement?.id === 'support-user-text';
+  try {
+    const res = await apiFetch('/api/support/sessions?full=1');
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error();
+    const sig = JSON.stringify(data.sessions) + '|' + supportView;
+    if (quiet && sig === supportSig) return; // không đổi: khỏi vẽ lại, giữ nguyên con trỏ đang gõ
+    supportSig = sig;
+    supportThreads = data.sessions;
+    if (supportView === null) renderMySupportList();
+    else renderMySupportThread();
+    if (draft && $('#support-user-text')) $('#support-user-text').value = draft;
+    if (hadFocus) $('#support-user-text')?.focus();
+    if (supportView !== null && supportView !== 'new') {
+      await apiFetch('/api/support/read', jsonPost({}));
+      supportUnread = 0;
+      renderSupportUnread();
+    }
+  } catch {
+    box.innerHTML = '<p class="support-empty">Không tải được tin nhắn, thử lại sau.</p>';
+  }
+}
+
+async function sendSupportMessage() {
+  const input = $('#support-user-text');
+  const text = (input?.value || '').trim();
+  if (!text) return;
+  const btn = $('#support-user-send');
+  btn.disabled = true;
+  try {
+    const res = await apiFetch('/api/support/messages', jsonPost({ text }));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) toast(data.error || 'Không gửi được', '⚠️');
+    else {
+      input.value = '';
+      supportView = data.message.sessionId;
+      await loadSupportChat();
+    }
+  } catch {
+    toast('Không gửi được, thử lại sau', '⚠️');
+  } finally {
+    if (btn.isConnected) btn.disabled = false;
+  }
+}
+
+function openSupportChat() {
+  supportView = null;
+  $('#modal-support-chat')?.showModal();
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+  loadSupportChat();
+}
+
+$('#menu-row-help')?.addEventListener('click', openSupportChat);
+setInterval(() => {
+  if (supportChatIsOpen() && !document.hidden) loadSupportChat(true);
+}, 3000);
+$('#support-new-session')?.addEventListener('click', () => {
+  supportView = 'new';
+  renderMySupportThread();
+  $('#support-user-text')?.focus();
+});
+$('#support-cards')?.addEventListener('click', async (e) => {
+  const row = e.target.closest('[data-support-open]');
+  if (row) {
+    supportView = row.dataset.supportOpen;
+    return loadSupportChat();
+  }
+  if (e.target.closest('#support-back')) {
+    supportView = null;
+    return loadSupportChat();
+  }
+  if (e.target.closest('#support-user-send')) return sendSupportMessage();
+  if (e.target.closest('#support-end')) {
+    await apiFetch('/api/support/end', jsonPost({})).catch(() => {});
+    loadSupportChat();
+  }
+});
+$('#support-cards')?.addEventListener('keydown', (e) => {
+  if (e.target.id === 'support-user-text' && e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendSupportMessage();
+  }
+});
+
+onSupportMessage((msg) => {
+  const cur = getCurrentUser();
+  if (!cur || cur.role === 'admin' || msg.message.sender !== 'admin') return;
+  if (supportChatIsOpen() && supportView !== null && supportView !== 'new') {
+    loadSupportChat();
+    return;
+  }
+  supportUnread = msg.unread ?? supportUnread + 1;
+  renderSupportUnread();
+  toast(`Admin: ${msg.message.text.slice(0, 60)}`, '💬', 4000);
+  if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification('Admin đã trả lời', { body: msg.message.text.slice(0, 120) });
+    } catch {}
+  }
 });
 
 /* ============================================================
@@ -1859,12 +2316,10 @@ function switchAuthTab(mode = 'login') {
 $('#tab-auth-login')?.addEventListener('click', () => switchAuthTab('login'));
 $('#tab-auth-register')?.addEventListener('click', () => switchAuthTab('register'));
 
-$('#btn-fill-admin-cred')?.addEventListener('click', () => {
-  if ($('#auth-login-username')) $('#auth-login-username').value = 'admin';
-  if ($('#auth-login-password')) $('#auth-login-password').value = 'admin123';
-  showAuthBanner('Đã điền tài khoản Admin mặc định. Bấm Đăng nhập để vào!', 'success');
-});
-
+// Trên trình duyệt, web luôn nối về chính máy chủ đang mở trang nên không cần chỉnh địa chỉ.
+if (location.protocol === 'http:' || location.protocol === 'https:') {
+  $('#btn-auth-server-config')?.closest('.auth-card-footer')?.remove();
+}
 $('#btn-auth-server-config')?.addEventListener('click', () => {
   openSyncSetupModal();
 });
@@ -1876,11 +2331,98 @@ $('#nav-btn-admin-shortcut')?.addEventListener('click', () => {
   }, 80);
 });
 
+const timeLeft = (access) => remainingText(access.endsAt - Date.now());
+const accessDate = (ms) => new Date(ms).toLocaleDateString('vi-VN');
+
+function showAccessExpired(message) {
+  if ($('#access-expired-message')) $('#access-expired-message').textContent = message;
+  const dialog = $('#modal-access-expired');
+  if (dialog && !dialog.open) {
+    $('#modal-new-live')?.close();
+    dialog.showModal();
+  }
+}
+
+let trialCountdownTimer = null;
+let trialCheckedAt = 0;
+
+/** Tới 0 thì hỏi lại server thay vì tự kết luận: đồng hồ máy có thể lệch, và server chỉ báo hết hạn cho máy đang theo dõi live. */
+async function recheckAccessFromServer() {
+  try {
+    const res = await apiFetch('/api/auth/me');
+    const data = await res.json();
+    if (res.ok && data.user && getAuthToken()) {
+      setAuthSession(getAuthToken(), data.user);
+      renderOwnAccess(data.user.access);
+    }
+  } catch {}
+}
+
+function tickTrialCountdown(access) {
+  const remaining = access.endsAt - Date.now();
+  if ($('#current-auth-access')) $('#current-auth-access').textContent = `Dùng thử miễn phí còn ${countdownText(remaining)}`;
+  if ($('#sidebar-access-value')) $('#sidebar-access-value').textContent = countdownClock(remaining);
+  if (remaining <= 0 && Date.now() - trialCheckedAt >= 5000) {
+    trialCheckedAt = Date.now();
+    recheckAccessFromServer();
+  }
+}
+
+function renderSidebarAccess(access) {
+  const badge = $('#btn-sidebar-access');
+  if (!badge) return;
+  const show = access?.status === 'trial' || access?.status === 'expired';
+  badge.style.display = show ? 'block' : 'none';
+  badge.classList.toggle('expired', access?.status === 'expired');
+  if (access?.status === 'trial') {
+    $('#sidebar-access-label').textContent = 'Dùng thử miễn phí còn';
+  } else if (access?.status === 'expired') {
+    $('#sidebar-access-label').textContent = 'Hết hạn sử dụng';
+    $('#sidebar-access-value').textContent = access.code === 'PLAN_EXPIRED' ? 'Gói đã hết hạn' : 'Đã hết dùng thử';
+  }
+}
+
+/** Thẻ tài khoản ở màn Tôi, ô ở thanh bên và dòng nhắc ở màn Bình luận. Thời gian còn lại chỉ để xem, server mới là nơi chặn. */
+function renderOwnAccess(access) {
+  const line = $('#current-auth-access');
+  const notice = $('#live-access-notice');
+  const text =
+    access?.status === 'expired'
+      ? access.message
+      : access?.status === 'plan'
+        ? `Gói còn hiệu lực đến ${accessDate(access.endsAt)} (còn ${timeLeft(access)})`
+        : '';
+  const isTrial = access?.status === 'trial';
+  if (line) {
+    line.textContent = text;
+    line.className = `auth-user-access ${access?.status || ''}`;
+    line.style.display = text || isTrial ? 'block' : 'none';
+  }
+  if (notice) {
+    notice.textContent = access?.status === 'expired' ? access.message : '';
+    notice.style.display = access?.status === 'expired' ? 'block' : 'none';
+  }
+  renderSidebarAccess(access);
+
+  clearInterval(trialCountdownTimer);
+  trialCountdownTimer = null;
+  if (isTrial) {
+    tickTrialCountdown(access);
+    trialCountdownTimer = setInterval(() => tickTrialCountdown(access), 1000);
+  }
+}
+
+onAccountAccess(renderOwnAccess);
+
+$('#btn-sidebar-access')?.addEventListener('click', () => switchTab('settings', false));
+
 function applyAuthUserToUI(user) {
   const overlay = $('#auth-screen-overlay');
+  renderOwnAccess(user?.access);
   if (!user || !getAuthToken()) {
     overlay?.classList.remove('hidden');
     if ($('#admin-accounts-panel')) $('#admin-accounts-panel').style.display = 'none';
+    if ($('#admin-support-panel')) $('#admin-support-panel').style.display = 'none';
     if ($('#nav-btn-admin-shortcut')) $('#nav-btn-admin-shortcut').style.display = 'none';
     return;
   }
@@ -1911,10 +2453,130 @@ function applyAuthUserToUI(user) {
     $('#nav-btn-admin-shortcut').style.display = isAdmin ? 'flex' : 'none';
   }
 
+  if ($('#admin-support-panel')) $('#admin-support-panel').style.display = isAdmin ? 'block' : 'none';
   if (isAdmin) {
     loadAdminUsers();
+    loadSupportList();
+  } else {
+    refreshSupportUnread();
   }
 }
+
+/* ===== Hỗ trợ khách (Admin): danh sách khách, xem lịch sử các phiên, trả lời ===== */
+let supportRows = [];
+let supportOpenUserId = null;
+
+const supportTime = (ts) =>
+  new Date(ts).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+
+async function loadSupportList() {
+  const cur = getCurrentUser();
+  if (!cur || cur.role !== 'admin') return;
+  try {
+    const res = await apiFetch('/api/admin/support/sessions');
+    const data = await res.json();
+    if (!res.ok || !data.ok) return;
+    supportRows = data.sessions;
+    renderSupportList(data.unread);
+  } catch {}
+}
+
+function renderSupportList(unread) {
+  const box = $('#support-admin-list');
+  if (!box) return;
+  const total = unread ?? supportRows.reduce((n, s) => n + s.unread, 0);
+  if ($('#admin-support-unread')) $('#admin-support-unread').textContent = `${total} tin mới`;
+  if (!supportRows.length) {
+    box.innerHTML = '<p class="support-empty">Chưa có khách nào nhắn.</p>';
+    return;
+  }
+  box.innerHTML = supportRows
+    .map(
+      (s) => `<button type="button" class="support-row ${s.userId === supportOpenUserId ? 'is-active' : ''}" data-support-user="${esc(s.userId)}">
+        <span class="support-row-top"><span>${esc(s.username || s.userId)}</span>${s.unread ? `<span class="support-badge">${s.unread}</span>` : ''}</span>
+        <span class="support-row-last">${s.lastSender === 'admin' ? 'Bạn: ' : ''}${esc(s.lastText)}</span>
+        <span class="support-state ${s.open ? '' : 'closed'}">${s.open ? 'Đang mở' : 'Đã đóng'} · ${esc(supportTime(s.lastAt))}</span>
+      </button>`
+    )
+    .join('');
+}
+
+async function openSupportThread(userId, { markRead = true } = {}) {
+  supportOpenUserId = userId;
+  const thread = $('#support-admin-thread');
+  if (!thread) return;
+  try {
+    const res = await apiFetch(`/api/admin/support/history?userId=${encodeURIComponent(userId)}`);
+    const data = await res.json();
+    if (!res.ok || !data.ok) return;
+    const sessions = [...data.sessions].reverse(); // cũ trước, mới sau
+    const latest = data.sessions[0];
+    const body = sessions
+      .map(
+        (s) =>
+          `<div class="support-sep">Phiên ${esc(supportTime(s.createdAt))} · ${s.open ? 'đang mở' : 'đã đóng'}</div>` +
+          s.messages
+            .map(
+              (m) => `<div class="support-msg ${m.sender === 'admin' ? 'admin' : ''}">${esc(m.text)}<small>${esc(supportTime(m.ts))}</small></div>`
+            )
+            .join('')
+      )
+      .join('');
+    const footer =
+      latest && latest.open
+        ? `<div class="support-reply"><textarea id="support-reply-text" rows="2" maxlength="2000" placeholder="Nhập trả lời…"></textarea>
+             <button type="button" class="btn-orange-pill" id="support-reply-send" data-session="${esc(latest.id)}" style="height:40px;padding:0 18px">Gửi</button></div>`
+        : '<div class="support-reply-closed">Phiên đã đóng (quá 24 giờ không có tin mới). Khi khách nhắn lại sẽ mở phiên mới.</div>';
+    thread.innerHTML = `<div class="support-thread-title">${esc(data.username || userId)}</div>
+      <div class="support-thread-body" id="support-thread-body">${body || '<p class="support-empty">Chưa có tin nhắn.</p>'}</div>${footer}`;
+    const tb = $('#support-thread-body');
+    if (tb) tb.scrollTop = tb.scrollHeight;
+    if (markRead) {
+      await apiFetch('/api/admin/support/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
+      });
+    }
+    loadSupportList();
+  } catch {}
+}
+
+$('#support-admin-list')?.addEventListener('click', (e) => {
+  const row = e.target.closest('[data-support-user]');
+  if (row) openSupportThread(row.dataset.supportUser);
+});
+
+$('#support-admin-thread')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('#support-reply-send');
+  if (!btn) return;
+  const input = $('#support-reply-text');
+  const text = (input?.value || '').trim();
+  if (!text) return;
+  btn.disabled = true;
+  try {
+    const res = await apiFetch('/api/admin/support/reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: btn.dataset.session, text })
+    });
+    const data = await res.json();
+    if (!res.ok) toast(data.error || 'Không gửi được', '⚠️');
+    else await openSupportThread(supportOpenUserId, { markRead: false });
+  } catch {
+    toast('Không gửi được, thử lại sau', '⚠️');
+  }
+});
+
+onSupportMessage((msg) => {
+  const cur = getCurrentUser();
+  if (!cur || cur.role !== 'admin' || msg.message.sender !== 'user') return;
+  if (msg.message.userId === supportOpenUserId) openSupportThread(supportOpenUserId);
+  else {
+    toast(`${msg.username || 'Khách'}: ${msg.message.text.slice(0, 60)}`, '💬', 4000);
+    loadSupportList();
+  }
+});
 
 // Xử lý Form Đăng nhập
 $('#form-auth-login')?.addEventListener('submit', async (e) => {
@@ -1971,8 +2633,8 @@ $('#form-auth-register')?.addEventListener('submit', async (e) => {
   if (!username) {
     return showAuthBanner('Vui lòng nhập tên tài khoản');
   }
-  if (password.length < 4) {
-    return showAuthBanner('Mật khẩu phải có ít nhất 4 ký tự');
+  if (password.length < 6) {
+    return showAuthBanner('Mật khẩu phải có ít nhất 6 ký tự');
   }
   if (password !== confirmPassword) {
     return showAuthBanner('Xác nhận mật khẩu không khớp!');
@@ -2070,6 +2732,53 @@ async function loadAdminUsers() {
   } catch (_err) {}
 }
 
+function adminAccessText(access) {
+  if (access?.status === 'plan') return `Có gói đến ${accessDate(access.endsAt)} (còn ${timeLeft(access)})`;
+  if (access?.status === 'trial') return `Dùng thử còn ${timeLeft(access)}`;
+  if (access?.status === 'expired') return access.code === 'PLAN_EXPIRED' ? 'Gói đã hết hạn' : 'Đã hết dùng thử';
+  return '';
+}
+
+function adminAccessBadge(access) {
+  if (!access || access.status === 'admin') return '';
+  const icon = { plan: '🎫', trial: '⏳', expired: '⛔' }[access.status];
+  const short = access.status === 'plan' ? `Gói đến ${accessDate(access.endsAt)}` : adminAccessText(access);
+  return `<span class="status-pill-badge ${access.status === 'expired' ? 'locked' : access.status}">${icon} ${esc(short)}</span>`;
+}
+
+let targetPlanUserId = null;
+
+/** Gửi yêu cầu đổi gói; server trả về danh sách mới. */
+async function submitPlanChange(options, successMessage) {
+  if (!targetPlanUserId) return;
+  try {
+    const res = await apiFetch(`/api/admin/users/${encodeURIComponent(targetPlanUserId)}/plan`, options);
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      return toast(data.error || 'Không thể cập nhật gói', '⚠️');
+    }
+    $('#modal-admin-plan')?.close();
+    toast(successMessage(data.user), '🎫', 3500);
+    adminUsersList = data.users;
+    renderAdminUsersTable();
+  } catch (_err) {
+    toast('Lỗi kết nối máy chủ', '⚠️');
+  }
+}
+
+$('#btn-submit-admin-plan')?.addEventListener('click', () => {
+  const months = Number($('#admin-plan-months')?.value);
+  submitPlanChange({ method: 'POST', body: JSON.stringify({ months }) }, (user) => {
+    return `Đã cấp gói cho "${user.username}", hết hạn ngày ${accessDate(user.access.endsAt)}`;
+  });
+});
+
+$('#btn-revoke-admin-plan')?.addEventListener('click', () => {
+  const user = adminUsersList.find((u) => u.id === targetPlanUserId);
+  if (!user || !confirm(`Thu hồi gói của tài khoản "${user.username}"?`)) return;
+  submitPlanChange({ method: 'DELETE' }, (u) => `Đã thu hồi gói của "${u.username}"`);
+});
+
 function renderAdminUsersTable() {
   const container = $('#admin-users-list');
   if (!container) return;
@@ -2120,6 +2829,7 @@ function renderAdminUsersTable() {
                 <span class="status-pill-badge ${u.locked ? 'locked' : 'active'}">
                   ${u.locked ? '🔒 Đã khoá' : '✓ Hoạt động'}
                 </span>
+                ${adminAccessBadge(u.access)}
               </div>
               <div class="admin-user-meta-line">
                 ${onlineBadge}
@@ -2131,6 +2841,13 @@ function renderAdminUsersTable() {
           </div>
 
           <div class="admin-user-actions-group">
+            ${
+              u.role !== 'admin'
+                ? `<button type="button" class="btn-admin-act plan-btn" data-admin-plan-id="${esc(u.id)}">
+                    🎫 Cấp gói
+                  </button>`
+                : ''
+            }
             ${
               !isPrimaryAdmin && !isSelf
                 ? `<button type="button" class="btn-admin-act ${u.locked ? 'unlock-btn' : 'lock-btn'}" data-admin-lock-id="${esc(u.id)}" data-admin-locked="${u.locked ? '1' : '0'}">
@@ -2190,6 +2907,21 @@ $('#admin-users-list')?.addEventListener('click', async (e) => {
     return;
   }
 
+  // Nút Cấp gói
+  const planBtn = e.target.closest('[data-admin-plan-id]');
+  if (planBtn) {
+    targetPlanUserId = planBtn.dataset.adminPlanId;
+    const user = adminUsersList.find((u) => u.id === targetPlanUserId);
+    if ($('#admin-plan-account')) $('#admin-plan-account').textContent = user?.username || '';
+    if ($('#admin-plan-current')) $('#admin-plan-current').textContent = adminAccessText(user?.access);
+    if ($('#admin-plan-months')) $('#admin-plan-months').value = '1';
+    if ($('#btn-revoke-admin-plan')) {
+      $('#btn-revoke-admin-plan').style.display = user?.access?.status === 'plan' ? 'inline-flex' : 'none';
+    }
+    $('#modal-admin-plan')?.showModal();
+    return;
+  }
+
   // 2. Nút Đổi mật khẩu từ Admin
   const passBtn = e.target.closest('[data-admin-pass-id]');
   if (passBtn) {
@@ -2232,8 +2964,8 @@ $('#btn-confirm-admin-reset-pass')?.addEventListener('click', async () => {
   const newPassword = $('#admin-input-new-pass')?.value || '';
   const confirmPassword = $('#admin-input-confirm-pass')?.value || '';
 
-  if (newPassword.length < 4) {
-    return toast('Mật khẩu mới phải có ít nhất 4 ký tự', '⚠️');
+  if (newPassword.length < 6) {
+    return toast('Mật khẩu mới phải có ít nhất 6 ký tự', '⚠️');
   }
   if (newPassword !== confirmPassword) {
     return toast('Xác nhận mật khẩu mới không khớp!', '⚠️');
@@ -2272,7 +3004,7 @@ $('#btn-submit-admin-create-user')?.addEventListener('click', async () => {
   const role = $('#admin-create-role')?.value || 'user';
 
   if (!username) return toast('Vui lòng nhập tên tài khoản', '⚠️');
-  if (password.length < 4) return toast('Mật khẩu phải có ít nhất 4 ký tự', '⚠️');
+  if (password.length < 6) return toast('Mật khẩu phải có ít nhất 6 ký tự', '⚠️');
   if (password !== confirmPassword) return toast('Xác nhận mật khẩu không khớp!', '⚠️');
 
   try {
@@ -2355,28 +3087,42 @@ function renderSalesView() {
   const labelsContainer = $('#barchart-labels-container');
 
   if (!isDemo) {
-    const realOrders = state.orders || [];
-    const realRev = realOrders.reduce((s, o) => s + (Number(o.total) || 0), 0);
-    const guestsCount = (state.customers || []).length;
-    const newGuestsCount = (state.customers || []).filter((c) => c.tag === 'Mới').length;
+    const sales = computeSales(state.orders, { sessions: state.sessions });
+    const signed = (pct) => `${pct > 0 ? '+' : ''}${pct}%`;
 
+    if ($('#sales-header-date')) {
+      const dateText = new Date().toLocaleDateString('vi-VN', {
+        weekday: 'long',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+      $('#sales-header-date').textContent = dateText.charAt(0).toUpperCase() + dateText.slice(1);
+    }
     if ($('#sales-live-badge')) {
       const hasLive = Array.isArray(state.sessions) && state.sessions.some((s) => s.isLive);
       $('#sales-live-badge').style.display = hasLive ? 'inline-flex' : 'none';
     }
-    if ($('#sales-hero-revenue')) $('#sales-hero-revenue').innerHTML = formatVNDHtml(realRev);
-    if ($('#sales-today-growth-pct')) $('#sales-today-growth-pct').textContent = '0%';
-    if ($('#sales-today-guests')) $('#sales-today-guests').textContent = String(guestsCount);
-    if ($('#sales-new-guests-sub')) $('#sales-new-guests-sub').textContent = `${newGuestsCount} khách mới`;
-    if ($('#sales-month-revenue')) $('#sales-month-revenue').innerHTML = formatVNDHtml(realRev);
-    if ($('#sales-month-growth')) $('#sales-month-growth').textContent = '0% so với tháng trước';
+    if ($('#sales-hero-revenue')) $('#sales-hero-revenue').innerHTML = formatVNDHtml(sales.todayRevenue);
+    if ($('#sales-today-growth-pct')) {
+      $('#sales-today-growth-pct').textContent = sales.todayGrowthPct === null ? '—' : signed(sales.todayGrowthPct);
+      const arrow = $('#sales-today-growth-pct').parentElement?.querySelector('svg');
+      if (arrow) arrow.style.transform = sales.todayGrowthPct < 0 ? 'rotate(180deg)' : '';
+    }
+    if ($('#sales-today-guests')) $('#sales-today-guests').textContent = String(sales.todayGuests);
+    if ($('#sales-new-guests-sub')) $('#sales-new-guests-sub').textContent = `${sales.newGuests} khách mới`;
+    if ($('#sales-month-label')) $('#sales-month-label').textContent = `Doanh thu tháng ${sales.monthNumber}`;
+    if ($('#sales-month-revenue')) $('#sales-month-revenue').innerHTML = formatVNDHtml(sales.monthRevenue);
+    if ($('#sales-month-growth')) {
+      $('#sales-month-growth').textContent =
+        sales.monthGrowthPct === null
+          ? 'Chưa có số liệu tháng trước'
+          : `${signed(sales.monthGrowthPct)} so với cùng kỳ tháng ${sales.prevMonthNumber}`;
+      $('#sales-month-growth').className = `stat-box-sub ${sales.monthGrowthPct < 0 ? 'orange' : 'green'}`;
+    }
 
-    const cntNew = realOrders.filter((o) => o.status === 'new').length;
-    const cntPrinted = realOrders.filter((o) => o.status === 'printed').length;
-    const cntShipping = realOrders.filter((o) => o.status === 'shipping').length;
-    const cntDone = realOrders.filter((o) => o.status === 'done').length;
-    const totalOrd = realOrders.length;
-    const pctNew = totalOrd > 0 ? Math.round((cntNew / totalOrd) * 100) : 0;
+    const { new: cntNew, printed: cntPrinted, shipping: cntShipping, done: cntDone } = sales.statusCounts;
+    const pctNew = sales.todayOrderCount > 0 ? Math.round((cntNew / sales.todayOrderCount) * 100) : 0;
 
     if ($('#sales-donut-pct')) $('#sales-donut-pct').textContent = `${pctNew}%`;
     if ($('#sales-donut-circle')) {
@@ -2386,71 +3132,48 @@ function renderSalesView() {
     if ($('#sales-cnt-printed')) $('#sales-cnt-printed').textContent = String(cntPrinted);
     if ($('#sales-cnt-shipping')) $('#sales-cnt-shipping').textContent = String(cntShipping);
     if ($('#sales-cnt-done')) $('#sales-cnt-done').textContent = String(cntDone);
-    if ($('#sales-rate-pct')) $('#sales-rate-pct').textContent = totalOrd > 0 ? '100%' : '0%';
-    if ($('#sales-aov-val')) {
-      $('#sales-aov-val').textContent = totalOrd > 0 ? formatVND(Math.round(realRev / totalOrd)) : '0 ₫';
+    if ($('#sales-rate-pct')) {
+      $('#sales-rate-pct').textContent = sales.closeRatePct === null ? '—' : `${sales.closeRatePct}%`;
     }
+    if ($('#sales-aov-val')) $('#sales-aov-val').textContent = formatVND(sales.averageOrderValue);
 
-    if (salesChartMode === '30days') {
-      const weeksData = [
-        { day: 'Tuần 1', height: 4, text: '' },
-        { day: 'Tuần 2', height: 4, text: '' },
-        { day: 'Tuần 3', height: 4, text: '' },
-        { day: 'Tuần 4', height: realRev > 0 ? 45 : 4, text: realRev > 0 ? formatVND(realRev) : '0đ', highlight: true }
-      ];
-      if (barsContainer) {
-        barsContainer.innerHTML = weeksData
-          .map(
-            (d) => `
-            <div class="barchart-col ${d.highlight ? 'highlight' : ''}" style="width:20%">
-              ${d.text ? `<span class="barchart-tooltip-val">${d.text}</span>` : ''}
-              <div class="barchart-pill-bar" style="height:${d.height}%"></div>
+    const bars = salesChartMode === '30days' ? sales.periods : sales.days;
+    const colStyle = salesChartMode === '30days' ? ' style="width:20%"' : '';
+    const maxAmount = Math.max(...bars.map((b) => b.amount), 0);
+    if (barsContainer) {
+      barsContainer.innerHTML = bars
+        .map((b) => {
+          const height = b.amount > 0 && maxAmount > 0 ? Math.max(4, Math.round((b.amount / maxAmount) * 80)) : 4;
+          const amountText = formatVND(b.amount);
+          return `
+            <div class="barchart-col ${b.isCurrent ? 'highlight' : ''}"${colStyle} title="${esc(b.label)}: ${esc(amountText)}">
+              ${b.isCurrent ? `<span class="barchart-tooltip-val">${esc(amountText)}</span>` : ''}
+              <div class="barchart-pill-bar" style="height:${height}%"></div>
             </div>
-          `
-          )
-          .join('');
-      }
-      if (labelsContainer) {
-        labelsContainer.innerHTML = weeksData
-          .map(
-            (d) => `
-            <span class="barchart-day-label ${d.highlight ? 'highlight' : ''}" style="width:20%">${d.day}</span>
-          `
-          )
-          .join('');
-      }
-    } else {
-      const days = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
-      if (barsContainer) {
-        barsContainer.innerHTML = days
-          .map((day, idx) => {
-            const isToday = idx === 6;
-            const h = isToday && realRev > 0 ? 50 : 4;
-            const txt = isToday ? (realRev > 0 ? formatVND(realRev) : '0đ') : '';
-            return `
-              <div class="barchart-col ${isToday ? 'highlight' : ''}">
-                ${txt ? `<span class="barchart-tooltip-val">${txt}</span>` : ''}
-                <div class="barchart-pill-bar" style="height:${h}%"></div>
-              </div>
-            `;
-          })
-          .join('');
-      }
-      if (labelsContainer) {
-        labelsContainer.innerHTML = days
-          .map(
-            (day, idx) => `
-            <span class="barchart-day-label ${idx === 6 ? 'highlight' : ''}">${day}</span>
-          `
-          )
-          .join('');
-      }
+          `;
+        })
+        .join('');
+    }
+    if (labelsContainer) {
+      labelsContainer.innerHTML = bars
+        .map(
+          (b) => `
+          <span class="barchart-day-label ${b.isCurrent ? 'highlight' : ''}"${colStyle}>${esc(b.label)}</span>
+        `
+        )
+        .join('');
     }
     return;
   }
 
   if ($('#sales-live-badge')) $('#sales-live-badge').style.display = 'inline-flex';
-  if ($('#sales-today-growth-pct')) $('#sales-today-growth-pct').textContent = '+18%';
+  if ($('#sales-header-date')) $('#sales-header-date').textContent = 'Chủ nhật, 25/10/2026';
+  if ($('#sales-month-label')) $('#sales-month-label').textContent = 'Doanh thu tháng 10';
+  if ($('#sales-today-growth-pct')) {
+    $('#sales-today-growth-pct').textContent = '+18%';
+    const arrow = $('#sales-today-growth-pct').parentElement?.querySelector('svg');
+    if (arrow) arrow.style.transform = '';
+  }
   if ($('#sales-donut-pct')) $('#sales-donut-pct').textContent = '75%';
   if ($('#sales-donut-circle')) $('#sales-donut-circle').setAttribute('stroke-dashoffset', '60');
   if ($('#sales-cnt-new')) $('#sales-cnt-new').textContent = '12';
@@ -2533,18 +3256,26 @@ function renderSalesView() {
    ============================================================ */
 /** In đúng 1 bình luận: lưu vào đơn/khách của người đó rồi in tem riêng cho bình luận này. */
 function printSingleComment(commentId) {
-  const c = getLiveComments().find((x) => x.id === commentId);
-  if (!c || !(c.price > 0)) return toast('Bình luận này chưa có giá để in', '⚠️');
+  let c = getLiveComments().find((x) => x.id === commentId);
+  if (!c && olderComments.has(String(commentId))) {
+    // Bình luận cũ tải thêm: đưa vào danh sách để trạng thái "đã in" được gửi lên server.
+    c = olderComments.get(String(commentId));
+    getLiveComments().push(c);
+  }
+  if (!c) return toast('Không tìm thấy bình luận này', '⚠️');
+  const hasPrice = c.price > 0;
 
   const { order, newItem, isDuplicate } = addOrMergeOrder({
     uniqueId: c.uniqueId,
     userId: c.userId || '',
     nickname: c.nickname,
-    productName: c.productName || 'Sản phẩm',
-    price: c.price,
+    // Bình luận không có giá vẫn lưu lại được: lấy chính nội dung làm tên món, giá 0.
+    productName: (hasPrice && c.productName) || String(c.comment || '').trim().slice(0, 60) || 'Sản phẩm',
+    price: hasPrice ? c.price : 0,
     qty: c.qty || 1,
     comment: c.comment,
-    commentId: c.id
+    commentId: c.id,
+    sessionId: c.sessionId || ''
   });
   const item = newItem || order.items.find((it) => it.commentId === c.id);
   if (!item) return toast('Không lưu được bình luận vào khách', '⚠️');
@@ -2568,16 +3299,19 @@ async function handlePrintOrder(order, isRemoteTrigger = false, onlyItem = null)
 
   try {
     await ensureFonts();
-    const canvas = renderTicket(S(), {
-      code: order.code,
+    // onlyItem chỉ có khi in từ 1 bình luận đang live: tem rút gọn, giờ là lúc bấm in.
+    const canvas = renderTicket(S(), onlyItem ? {
+      uniqueId: order.uniqueId,
+      nickname: order.nickname,
+      liveComment: onlyItem.comment || onlyItem.name || '',
+      ts: Date.now()
+    } : {
       uniqueId: order.uniqueId,
       userId: order.userId || '',
       nickname: order.nickname,
-      phone: order.phone || '',
-      address: order.address || '',
-      items: onlyItem ? [onlyItem] : order.items || [],
-      total: onlyItem ? (Number(onlyItem.price) || 0) * (Number(onlyItem.qty) || 1) : order.total || 0,
-      ts: onlyItem?.ts || order.ts
+      items: order.items || [],
+      total: order.total || 0,
+      ts: order.ts
     });
 
     const bytes = canvasToEscPos(canvas);
@@ -2738,21 +3472,31 @@ onRemoteUiEvent((msg) => {
   }
 });
 
+onOfflineChanges((kind, count) => {
+  if (kind === 'saved') {
+    toast('Mất kết nối: thay đổi được giữ trên máy, có mạng sẽ tự gửi. Đừng xoá dữ liệu trình duyệt.', '📴', 5000);
+  } else {
+    toast(`Đã gửi ${count} thay đổi lúc mất mạng lên server`, '✓', 3500);
+  }
+});
+
 function updateSyncUI(st) {
   const connected = st.connected;
   const count = st.clientsCount || 1;
+  const waiting = connected ? 0 : pendingChangeCount();
+  const waitingText = waiting ? ` (${waiting} thay đổi chờ gửi)` : '';
   if ($('#sidebar-sync-led')) {
     $('#sidebar-sync-led').style.background = connected ? '#16a34a' : '#f59e0b';
   }
   if ($('#sidebar-sync-text')) {
     $('#sidebar-sync-text').textContent = connected
       ? `Đồng bộ Live (${count} thiết bị)`
-      : 'Đang kết nối lại...';
+      : `Đang kết nối lại...${waitingText}`;
   }
   if ($('#lbl-sync-conn-state')) {
     $('#lbl-sync-conn-state').textContent = connected
       ? `Đang đồng bộ (${count})`
-      : 'Đang kết nối...';
+      : `Đang kết nối...${waitingText}`;
   }
   if ($('#modal-sync-status-title')) {
     $('#modal-sync-status-title').textContent = connected
@@ -2760,11 +3504,15 @@ function updateSyncUI(st) {
       : '○ Đang kết nối tới máy chủ...';
   }
   if ($('#modal-sync-devices-sub')) {
-    $('#modal-sync-devices-sub').textContent = `Số thiết bị (Web / App IPA) đang mở cùng lúc: ${count}`;
+    $('#modal-sync-devices-sub').textContent =
+      count > 1
+        ? `${count} thiết bị đang cùng đồng bộ`
+        : 'Mới có 1 thiết bị. Nếu điện thoại đang mở app mà số này không tăng thì điện thoại đang dùng server hoặc tài khoản khác.';
   }
 }
 
 onSyncStatusChange(updateSyncUI);
+window.addEventListener('chotlive-sync-error', (e) => toast(String(e.detail || ''), '⚠️', 6000));
 
 /* ============================================================
    Khởi động ban đầu & Kiểm tra phiên đăng nhập

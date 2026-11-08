@@ -20,6 +20,9 @@ services:
         sync: false
       - key: TOKEN_TTL_DAYS
         value: "30"
+      # Render đứng trước server một lớp proxy; cần để giới hạn đăng nhập tính đúng IP từng người.
+      - key: TRUST_PROXY
+        value: "1"
       # Tuỳ chọn: API key Euler Stream nếu bị giới hạn lượt kết nối
       - key: SIGN_API_KEY
         sync: false

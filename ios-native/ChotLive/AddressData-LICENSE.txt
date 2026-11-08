@@ -1,0 +1,7 @@
+AddressData.json
+
+Danh mục địa chỉ lấy nguyên văn từ Viettel Post (cùng bộ với web: public/js/vtp-address.js và vtp-address-old.js):
+- "new": api.viettelpost.vn/api/setting/listAllProvinceAfterMerge, listAllWardAfterMerge (34 tỉnh, 3.321 phường/xã).
+- "old": api.viettelpost.vn/api/setting/listallprovince, listalldistrict, listallwards (63 tỉnh, 701 quận/huyện, 10.396 phường/xã),
+  kèm "e": phường mới mà Viettel Post gộp phường cũ vào.
+Lấy ngày 08/11/2026. Tạo lại bằng: node scripts/build-ios-address-data.mjs

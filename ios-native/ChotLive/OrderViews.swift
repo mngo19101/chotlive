@@ -1,0 +1,595 @@
+import SwiftUI
+
+// MARK: - Đơn hàng
+
+struct OrdersView: View {
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var printer: PrinterManager
+    @EnvironmentObject var ui: AppUI
+    @State private var search = ""
+    /// 0 tất cả (mọi ngày), 1 đơn mới, 2 chờ gửi, 3 gom sau, 4 đang giao (theo ngày đang chọn)
+    @State private var filter = 0
+    @State private var dateFilter = DateFilter.make(.today)
+
+    private func matches(_ o: Order, _ tab: Int) -> Bool {
+        switch tab {
+        case 1: return Vtp.state(o) == .ask
+        case 2: return Vtp.state(o) == .ready
+        case 3: return Vtp.state(o) == .hold
+        case 4: return o.status == .shipping
+        default: return true
+        }
+    }
+
+    var body: some View {
+        let every = store.allOrders()
+        let scoped = every.filter { dateFilter.contains($0.lastTs) }
+        let groups = Vtp.readyGroups(every)
+        let shown = list(every: every, scoped: scoped)
+        GeometryReader { geo in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: Metrics.gap) {
+                    PageHeader(subtitle: filter == 0 ? "\(every.count) đơn · mọi ngày" : "\(scoped.count) đơn · \(dateFilter.pillLabel)",
+                               title: "Đơn hàng") {
+                        HeaderAddButton(title: "Tạo đơn") { ui.push(.orderCreate) }
+                    }
+                    HStack(spacing: 8) {
+                        SearchField(text: $search)
+                        CircleButton(icon: .filter) {
+                            ui.present(dim: 0.9) { DateFilterSheet(filter: dateFilter) { dateFilter = $0 } }
+                        }
+                    }
+                    // Cả 5 tab nằm gọn một hàng, không phải kéo ngang. Hàng chip cuộn ngang cũ (lề âm)
+                    // làm trang rộng hơn màn hình nên kéo qua lại bị lộ khoảng trắng.
+                    HStack(spacing: 4) {
+                        StatusTab(title: "Tất cả", count: every.count, selected: filter == 0) { filter = 0 }
+                        statusTab("Đơn mới", 1, scoped)
+                        statusTab("Chờ gửi", 2, scoped)
+                        statusTab("Gom sau", 3, scoped)
+                        statusTab("Đang giao", 4, scoped)
+                    }
+                    .padding(4)
+                    .cardStyle(18)
+
+                    if !groups.isEmpty {
+                        ReadyExportBanner(groups: groups) {
+                            ui.present(dim: 0.42) { VtpExportSheet() }
+                        }
+                    }
+
+                    if shown.isEmpty {
+                        T("Chưa có đơn nào. Bấm nút in trên một bình luận hoặc “Tạo đơn” để thêm đơn.", 13, .medium, Theme.muted)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 30)
+                    }
+                    LazyVStack(spacing: 11) {
+                        ForEach(shown) { o in card(o, every: every) }
+                    }
+                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.top, 2)
+                .padding(.bottom, 16)
+                // Khoá đúng bề ngang màn hình: thẻ đơn nào lỡ rộng hơn (thẻ chỉ dựng khi cuộn tới) cũng không
+                // làm trang rộng ra rồi kéo ngang được, lộ khoảng trắng hai bên.
+                .frame(width: geo.size.width)
+            }
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .background(Theme.bg)
+    }
+
+    /// Tab Tất cả: đơn mọi ngày, tìm cả đơn ngày cũ. Các tab khác: theo ngày đang chọn.
+    private func list(every: [Order], scoped: [Order]) -> [Order] {
+        var l = (filter == 0 ? every : scoped).filter { matches($0, filter) }
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        if !q.isEmpty {
+            l = l.filter {
+                $0.customer.nickname.lowercased().contains(q) || $0.customer.uniqueId.lowercased().contains(q)
+                    || ($0.code ?? "").lowercased().contains(q) || ($0.customer.address?.phone ?? "").contains(q)
+            }
+        }
+        return l
+    }
+
+    private func statusTab(_ title: String, _ tab: Int, _ scoped: [Order]) -> some View {
+        StatusTab(title: title, count: scoped.filter { matches($0, tab) }.count, selected: filter == tab) { filter = tab }
+    }
+
+    private func openReview(_ o: Order) {
+        ui.present(dim: 0.42) { ShipReviewSheet(orderId: o.id) }
+    }
+
+    private func card(_ o: Order, every: [Order]) -> some View {
+        let st = Vtp.state(o)
+        let older = st.isPending ? Vtp.olderPending(o, in: every) : []
+        let hasOldGom = st == .ask && !older.isEmpty
+        let day = Clock.isToday(o.lastTs) ? "" : " · \(dayMonth(o.lastTs))"
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Avatar(text: o.customer.initials, size: 40, fontSize: 14, seed: o.customer.id)
+                    .offset(y: 1)
+                VStack(spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        T(o.customer.nickname, 15, .bold).lineLimit(1).offset(y: 2)
+                        Spacer(minLength: 0)
+                        T(money(o.total), 17, .heavy, Theme.ink, track: -0.4).lineLimit(1).fixedSize()
+                    }
+                    HStack(spacing: 6) {
+                        T("@\(o.customer.uniqueId) · \(o.productCount) sản phẩm · \(timeText(o.lastTs))\(day)", 12, .medium, Theme.muted)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .offset(y: 1)
+                        Spacer(minLength: 0)
+                        if st == .ask { Badge(text: "Đơn mới").offset(y: 2) }
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { ui.push(.order(o.id)) }
+
+            if !older.isEmpty && !Vtp.alreadyMerged(o, with: older) {
+                // Bấm để thêm đơn này vào đơn đã gom trước đó: bảng Duyệt đơn tick sẵn mọi đơn chưa gửi của khách.
+                Button { openReview(o) } label: {
+                    tag(hasOldGom ? "Có \(older.count) đơn gom từ \(dayMonth(older[0].lastTs)) · bấm để gộp"
+                                  : "Còn \(older.count) đơn cũ từ \(dayMonth(older[0].lastTs)) · bấm để gộp",
+                        Theme.gomInk, Theme.gomTag)
+                }
+                .buttonStyle(.plain)
+            } else if !older.isEmpty {
+                tag("Gửi chung với \(older.count) đơn từ \(dayMonth(older[0].lastTs))", Theme.accent, Theme.peachSoft)
+            } else if st == .hold {
+                tag("Khách hẹn gom sau", Theme.gomInk, Theme.gomTag)
+            } else if st == .ready {
+                tag("Sẵn sàng gửi", Theme.accent, Theme.peachSoft)
+            }
+
+            HStack(spacing: 8) {
+                OutlineButton(title: o.isPrinted ? "In lại" : "In đơn", icon: .printer, filled: !o.isPrinted) {
+                    Task { @MainActor in
+                        ui.notify(await printOrder(o, store: store, printer: printer))
+                    }
+                }
+                OutlineButton(title: shipButtonLabel(o), icon: st == .ask ? .check : .truck, color: shipButtonColor(o)) {
+                    openReview(o)
+                }
+                Button {
+                    ui.present { OrderActionSheet(orderId: o.id) }
+                } label: {
+                    Icon(name: .more, size: 20, weight: 2.6)
+                        .frame(width: 44, height: 44)
+                        .background(Circle().fill(Theme.card).overlay(Circle().strokeBorder(Theme.line, lineWidth: 1)))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 3)
+        }
+        .padding(.horizontal, 15)
+        .padding(.top, 15)
+        .padding(.bottom, 14)
+        .cardStyle(20, fill: hasOldGom ? Theme.gomFill : Theme.card, border: hasOldGom ? Theme.gomLine : Theme.line)
+    }
+
+    private func tag(_ text: String, _ color: Color, _ fill: Color) -> some View {
+        T(text, 12, .semibold, color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(Capsule().fill(fill))
+    }
+}
+
+/// Một ô trong hàng tab trạng thái đơn: số đơn to ở trên, tên tab nhỏ ở dưới, chia đều chiều ngang.
+private struct StatusTab: View {
+    let title: String
+    let count: Int
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 1) {
+                T("\(count)", 16, .heavy, selected ? Theme.ink : (count > 0 ? Theme.ink : Theme.muted))
+                    .lineLimit(1)
+                T(title, 11.5, selected ? .bold : .semibold, selected ? Theme.ink : Theme.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .padding(.horizontal, 2)
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(selected ? Theme.orange : Color.clear))
+            .onAccent(selected)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+@MainActor
+func confirmDelete(_ o: Order, store: Store, ui: AppUI, then: @escaping () -> Void = {}) {
+    ui.confirm = ConfirmItem(title: "Xoá đơn của \(o.customer.nickname)?",
+                             message: "Không thể khôi phục sau khi xoá.", action: "Xoá đơn") {
+        store.deleteOrder(o)
+        then()
+    }
+}
+
+// MARK: - Sheet thao tác đơn
+
+struct OrderActionSheet: View {
+    let orderId: String
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var ui: AppUI
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let o = store.order(id: orderId) {
+                HStack(spacing: 12) {
+                    Avatar(text: o.customer.initials, size: 40, fontSize: 14, seed: o.customer.id)
+                    VStack(alignment: .leading, spacing: 2) {
+                        T(o.customer.nickname, 16, .bold).lineLimit(1)
+                        T("\(o.productCount) sản phẩm · \(timeText(o.lastTs))", 12, .medium, Theme.muted)
+                    }
+                    Spacer(minLength: 4)
+                    T(money(o.total), 17, .heavy, Theme.ink, track: -0.4).lineLimit(1).fixedSize()
+                }
+                .padding(.horizontal, 4)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                HairLine().padding(.bottom, 12)
+
+                row(.cart, Theme.accent, Theme.peachSoft, "Sản phẩm (\(o.productCount))", Theme.ink, "Xem và sửa sản phẩm trong đơn") {
+                    ui.dismissSheet()
+                    ui.push(.order(o.id))
+                }
+                HairLine()
+                row(.message, Theme.accent, Theme.peachSoft, "Bình luận", Theme.ink, "Xem các comment khách đã chốt đơn") {
+                    ui.dismissSheet()
+                    ui.push(.orderComments(o.id))
+                }
+                HairLine()
+                row(.trash, Theme.red, Theme.redSoft, "Xoá đơn", Theme.red, "Không thể khôi phục sau khi xoá") {
+                    ui.dismissSheet()
+                    confirmDelete(o, store: store, ui: ui)
+                }
+            }
+            Button { ui.dismissSheet() } label: {
+                T("Đóng", 15, .bold)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(Capsule().fill(Theme.field))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 14)
+        }
+        .padding(.horizontal, Metrics.gutter)
+    }
+
+    private func row(_ icon: IconName, _ tint: Color, _ fill: Color, _ title: String, _ titleColor: Color,
+                     _ subtitle: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Icon(name: icon, size: 17, weight: 2.3, color: tint)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(fill))
+                VStack(alignment: .leading, spacing: 3) {
+                    T(title, 15, .bold, titleColor)
+                    T(subtitle, 12, .medium, Theme.muted).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Icon(name: .chevronRight, size: 16, color: Theme.muted)
+            }
+            .padding(.horizontal, 4)
+            .frame(height: 63)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Chi tiết đơn hàng
+
+struct OrderDetailView: View {
+    let orderId: String
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var printer: PrinterManager
+    @EnvironmentObject var ui: AppUI
+
+    var body: some View {
+        let order = store.order(id: orderId)
+        SubPage(title: "Chi tiết đơn hàng", trailing: {
+            if let o = order { ShipBadge(order: o) }
+        }) {
+            if let o = order {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: Metrics.gap) {
+                        customerCard(o)
+                        productsCard(o)
+                        let others = Vtp.state(o).isPending
+                            ? Vtp.pendingOrders(of: o.customer.id, in: store.allOrders()).filter { $0.id != o.id } : []
+                        if !others.isEmpty { gomCard(o, others) }
+                    }
+                    .padding(.horizontal, Metrics.gutter)
+                    .padding(.bottom, 12)
+                }
+                actions(o)
+            } else {
+                Spacer()
+                T("Đơn không còn tồn tại", 14, .medium, Theme.muted)
+                Spacer()
+            }
+        }
+    }
+
+    private func customerCard(_ o: Order) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button { ui.push(.customer(o.customer.id)) } label: {
+                HStack(spacing: 12) {
+                    Avatar(text: o.customer.initials, size: 52, fontSize: 18, seed: o.customer.id)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 10) {
+                            T(o.customer.nickname, 17, .bold).lineLimit(1).minimumScaleFactor(0.8)
+                            if o.customer.isBigSpender { Badge(text: "Mua nhiều") }
+                        }
+                        T("@\(o.customer.uniqueId) · \(store.orders(of: o.customer).count) đơn", 13, .medium, Theme.muted).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Icon(name: .chevronRight, size: 16, color: Theme.muted)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            HairLine()
+            HStack(spacing: 8) {
+                Icon(name: .calendar, size: 15, color: Theme.muted)
+                T("Tạo lúc \(timeText(o.firstTs)) · \(weekdayLabel(o.firstTs)) \(fullDate(o.firstTs))", 13, .medium, Theme.muted)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+            }
+        }
+        .padding(.horizontal, 15)
+        .padding(.vertical, 14)
+        .cardStyle(20)
+    }
+
+    private func productsCard(_ o: Order) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            T("Sản phẩm (\(o.productCount))", 14, .bold).padding(.bottom, 3)
+            ForEach(Array(o.items.enumerated()), id: \.element.id) { index, it in
+                if index > 0 { HairLine() }
+                HStack(spacing: 11) {
+                    T("\(index + 1)", 11, .bold, Theme.muted)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Theme.field))
+                    T(it.productLabel, 14, .bold).lineLimit(1)
+                    T("\(it.qty) × \(money(it.price))", 12, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+                    Spacer(minLength: 4)
+                    T(money(it.lineTotal), 14, .bold).lineLimit(1).fixedSize()
+                }
+                .frame(height: 42)
+            }
+            HStack {
+                T("Tổng tiền", 14, .semibold)
+                Spacer()
+                T(money(o.total), 18, .heavy, Theme.ink, track: -0.4).lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.peachSoft))
+            .padding(.top, 7)
+        }
+        .padding(.horizontal, 15)
+        .padding(.top, 14)
+        .padding(.bottom, 15)
+        .cardStyle(20)
+    }
+
+    /// Các đơn chưa gửi khác của khách (đơn gom ngày trước…): xem nhanh và gộp đơn này vào chung một vận đơn.
+    private func gomCard(_ o: Order, _ others: [Order]) -> some View {
+        let merged = Vtp.alreadyMerged(o, with: others)
+        return VStack(alignment: .leading, spacing: 0) {
+            T("Đơn đã gom chưa gửi (\(others.count))", 14, .bold, Theme.gomInk).padding(.bottom, 3)
+            ForEach(Array(others.enumerated()), id: \.element.id) { index, x in
+                if index > 0 { HairLine() }
+                Button { ui.replaceTop(.order(x.id)) } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            T("Đơn \(dayMonth(x.lastTs)) · \(timeText(x.lastTs))", 14, .bold).lineLimit(1)
+                            T("\(x.productCount) sản phẩm · \(shipButtonLabel(x))", 12, .medium, Theme.muted).lineLimit(1)
+                        }
+                        Spacer(minLength: 4)
+                        T(money(x.total), 14, .bold).lineLimit(1).fixedSize()
+                        Icon(name: .chevronRight, size: 14, color: Theme.muted)
+                    }
+                    .frame(height: 50)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            HStack {
+                T(merged ? "Gửi chung, tổng" : "Tổng nếu gộp", 14, .semibold)
+                Spacer()
+                T(money(others.reduce(o.total) { $0 + $1.total }), 18, .heavy, Theme.ink, track: -0.4).lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.gomTag))
+            .padding(.top, 7)
+            if !merged {
+                OutlineButton(title: "Gộp vào đơn đã gom", icon: .truck, color: Theme.gomInk, height: 44) {
+                    ui.present(dim: 0.42) { ShipReviewSheet(orderId: o.id) }
+                }
+                .padding(.top, 10)
+            }
+        }
+        .padding(.horizontal, 15)
+        .padding(.top, 14)
+        .padding(.bottom, 15)
+        .cardStyle(20, fill: Theme.gomFill, border: Theme.gomLine)
+    }
+
+    private func actions(_ o: Order) -> some View {
+        VStack(spacing: 8) {
+            PrimaryButton(title: "Chỉnh sửa đơn", icon: .pencil, fontSize: 15) { ui.push(.orderEdit(o.id)) }
+            HStack(spacing: 8) {
+                OutlineButton(title: shipButtonLabel(o), icon: Vtp.state(o) == .ask ? .check : .truck,
+                              color: shipButtonColor(o), height: 48) {
+                    ui.present(dim: 0.42) { ShipReviewSheet(orderId: o.id) }
+                }
+                OutlineButton(title: o.isPrinted ? "In lại" : "In đơn", icon: .printer, height: 48) {
+                    Task { @MainActor in
+                        ui.notify(await printOrder(o, store: store, printer: printer))
+                    }
+                }
+                OutlineButton(title: "Xoá đơn", icon: .trash, color: Theme.red, height: 48) {
+                    confirmDelete(o, store: store, ui: ui) { ui.pop() }
+                }
+            }
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.top, 4)
+        .padding(.bottom, Metrics.safeBottom > 0 ? -5 : 10)
+    }
+}
+
+// MARK: - Sửa / tạo đơn
+
+/// Một dòng sản phẩm trong màn sửa đơn.
+struct ItemEditor: View {
+    @Binding var item: OrderItem
+    let onDelete: () -> Void
+    @State private var priceText = ""
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
+                    T("Mã sản phẩm", 12, .medium, Theme.muted)
+                    TextField("150", text: $item.codeText)
+                        .font(.bv(15, .semibold))
+                        .padding(.horizontal, 13)
+                        .frame(height: 44)
+                        .cardStyle(14, fill: Theme.field)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    T("Đơn giá (₫)", 12, .medium, Theme.muted)
+                    TextField("150000", text: $priceText)
+                        .keyboardType(.numberPad)
+                        .font(.bv(15, .semibold))
+                        .padding(.horizontal, 13)
+                        .frame(height: 44)
+                        .cardStyle(14, fill: Theme.field)
+                        .onChange(of: priceText) { value in
+                            item.price = Int(value.filter(\.isNumber)) ?? 0
+                        }
+                }
+            }
+            HStack(spacing: 10) {
+                T("Số lượng", 13, .medium, Theme.muted)
+                Button { item.qty = max(item.qty - 1, 1) } label: {
+                    Icon(name: .minus, size: 16).frame(width: 34, height: 34).background(Circle().fill(Theme.field))
+                }
+                .buttonStyle(.plain)
+                T("\(item.qty)", 15, .bold).frame(minWidth: 20)
+                Button { item.qty += 1 } label: {
+                    Icon(name: .plus, size: 16).frame(width: 34, height: 34).background(Circle().fill(Theme.field))
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Button(action: onDelete) {
+                    Icon(name: .trash, size: 17, color: Theme.red)
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(Theme.redSoft))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .cardStyle(18)
+        .onAppear { if priceText.isEmpty && item.price > 0 { priceText = String(item.price) } }
+    }
+}
+
+struct OrderEditView: View {
+    let orderId: String
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var ui: AppUI
+    @State private var items: [OrderItem] = []
+    @State private var loaded = false
+
+    private var order: Order? { store.order(id: orderId) }
+
+    var body: some View {
+        SubPage(title: "Chỉnh sửa đơn") {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 10) {
+                    ForEach($items) { $it in
+                        ItemEditor(item: $it) { items.removeAll { $0.id == it.id } }
+                    }
+                    OutlineButton(title: "Thêm sản phẩm", icon: .plus, height: 48) {
+                        let template = order?.items.last
+                        items.append(OrderItem(id: UUID().uuidString, comment: "", price: 0, ts: template?.ts ?? Clock.now,
+                                               sessionId: template?.sessionId, groupId: template?.groupId))
+                    }
+                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.bottom, 12)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            PrimaryButton(title: items.isEmpty ? "Lưu (đơn sẽ bị xoá)" : "Lưu đơn · \(money(items.reduce(0) { $0 + $1.lineTotal }))") {
+                if let o = order { store.updateOrder(o, items: items) }
+                ui.pop()
+            }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.vertical, 12)
+        }
+        .onAppear {
+            guard !loaded else { return }
+            loaded = true
+            items = order?.items ?? []
+        }
+    }
+}
+
+struct OrderCreateView: View {
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var ui: AppUI
+    @State private var nickname = ""
+    @State private var handle = ""
+    @State private var items = [OrderItem(id: UUID().uuidString, comment: "", price: 0, ts: Clock.now)]
+
+    private var canSave: Bool {
+        !items.isEmpty && !(nickname.trimmingCharacters(in: .whitespaces).isEmpty && handle.trimmingCharacters(in: .whitespaces).isEmpty)
+    }
+
+    var body: some View {
+        SubPage(title: "Tạo đơn") {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 10) {
+                    VStack(spacing: 14) {
+                        LabeledField(label: "Tên khách", placeholder: "Linh Nguyễn", text: $nickname)
+                        LabeledField(label: "Tài khoản TikTok", placeholder: "@linh.nguyen98", text: $handle, capitalize: false)
+                    }
+                    .padding(14)
+                    .cardStyle(18)
+                    ForEach($items) { $it in
+                        ItemEditor(item: $it) { items.removeAll { $0.id == it.id } }
+                    }
+                    OutlineButton(title: "Thêm sản phẩm", icon: .plus, height: 48) {
+                        items.append(OrderItem(id: UUID().uuidString, comment: "", price: 0, ts: Clock.now))
+                    }
+                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.bottom, 12)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            PrimaryButton(title: "Tạo đơn · \(money(items.reduce(0) { $0 + $1.lineTotal }))", enabled: canSave) {
+                let id = store.createOrder(nickname: nickname, uniqueId: handle, items: items)
+                ui.pop()
+                ui.push(.order(id))
+            }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.vertical, 12)
+        }
+    }
+}

@@ -1,0 +1,80 @@
+name: iOS screenshots (so với mẫu thiết kế)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ios-native/**'
+      - '.github/workflows/ios-screenshots.yml'
+
+jobs:
+  screenshots:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cài XcodeGen
+        run: brew install xcodegen
+
+      - name: Tạo icon 1024
+        run: sips -z 1024 1024 public/img/icon-512.png --out ios-native/ChotLive/Assets.xcassets/AppIcon.appiconset/icon.png
+
+      - name: Tạo project Xcode
+        working-directory: ios-native
+        run: xcodegen generate
+
+      - name: Build cho simulator (Debug, có dữ liệu demo)
+        working-directory: ios-native
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ChotLive.xcodeproj \
+            -scheme ChotLive \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build | tail -n 60
+
+      - name: Khởi động simulator 390×844 và chụp màn hình
+        working-directory: ios-native
+        run: |
+          DEVICE_NAME=""
+          for name in "iPhone 16e" "iPhone 15" "iPhone 14" "iPhone 13" "iPhone 17" "iPhone 16"; do
+            if xcrun simctl list devices available | grep -q "$name ("; then DEVICE_NAME="$name"; break; fi
+          done
+          if [ -z "$DEVICE_NAME" ]; then
+            DEVICE_NAME="$(xcrun simctl list devices available | grep -E 'iPhone' | head -n 1 | sed -E 's/^ +//; s/ \(.*//')"
+          fi
+          echo "Dùng máy: $DEVICE_NAME"
+          UDID="$(xcrun simctl list devices available | grep "$DEVICE_NAME (" | head -n 1 | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time "20:55" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
+          xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/ChotLive.app
+          mkdir -p screenshots
+          for screen in login register sales live dateFilter customers orders me meExpired orderActions orderDetail customerDetail \
+                        liveNew areaPicker session orderEdit orderCreate orderComments addressEdit addAccount printer keywords notifications help; do
+            xcrun simctl terminate "$UDID" com.chotlive.native || true
+            xcrun simctl launch "$UDID" com.chotlive.native -demoScreen "$screen"
+            sleep 5
+            xcrun simctl io "$UDID" screenshot "screenshots/$screen.png"
+          done
+          # Giao diện: màn chọn màu và vài màn ở nền Tối với các màu chủ đạo khác.
+          for combo in appearance:light:vang appearance:dark:xanh me:dark:vang sales:dark:vang live:dark:hong                        orders:dark:ngoc orderDetail:dark:tim customers:light:la dateFilter:dark:vang; do
+            IFS=: read -r screen mode accent <<< "$combo"
+            xcrun simctl terminate "$UDID" com.chotlive.native || true
+            xcrun simctl launch "$UDID" com.chotlive.native -demoScreen "$screen" -demoAppearance "$mode" -demoAccent "$accent"
+            sleep 5
+            xcrun simctl io "$UDID" screenshot "screenshots/theme-$screen-$mode-$accent.png"
+          done
+          echo "$DEVICE_NAME" > screenshots/device.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-screenshots
+          path: ios-native/screenshots
+          retention-days: 14

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ra Internet dùng HTTPS. http chỉ để nối server chạy trên máy tính cùng Wi-Fi (ví dụ http://192.168.1.x:3000),
+     giống NSAllowsLocalNetworking của bản iPhone: Android không lọc được theo dải IP nội bộ nên cho phép http chung. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

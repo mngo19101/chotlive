@@ -16,7 +16,12 @@ enum TicketRenderer {
         escpos(from: render(comment: comment))
     }
 
-    static func render(comment c: LiveComment) -> UIImage {
+    /// Tem in từ 1 bình luận đang live: không có giá, giờ là lúc bấm in.
+    static func liveTicketBytes(comment: LiveComment) -> Data {
+        escpos(from: render(comment: comment, live: true))
+    }
+
+    static func render(comment c: LiveComment, live: Bool = false) -> UIImage {
         let shop = UserDefaults.standard.string(forKey: "shopName") ?? "ChốtLive"
         let f = DateFormatter()
         f.dateFormat = "HH:mm  dd/MM/yyyy"
@@ -25,23 +30,23 @@ enum TicketRenderer {
         var blocks: [Block] = [
             .text(shop.uppercased(), .systemFont(ofSize: 40, weight: .heavy), .center),
             .dashed,
-            .text(name, .systemFont(ofSize: 38, weight: .heavy), .left),
+            .text("Tên TikTok: " + name, .systemFont(ofSize: 38, weight: .heavy), .left),
             .text("ID TikTok: @" + c.uniqueId, .systemFont(ofSize: 28, weight: .semibold), .left),
-        ]
-        if !c.userId.isEmpty {
-            blocks.append(.text("Mã số: " + c.userId, .systemFont(ofSize: 22, weight: .regular), .left))
-        }
-        blocks += [
-            .text("Giờ: " + f.string(from: c.ts), .systemFont(ofSize: 26, weight: .regular), .left),
+            .text(live ? "Giờ in: " + f.string(from: Date()) : "Giờ: " + f.string(from: c.ts),
+                  .systemFont(ofSize: 26, weight: .regular), .left),
             .dashed,
             .text("Bình luận:", .systemFont(ofSize: 24, weight: .regular), .left),
             .text(c.text, .systemFont(ofSize: 36, weight: .bold), .left),
             .dashed,
-            .text(vnd(c.price), .systemFont(ofSize: 64, weight: .heavy), .center),
-            .gap(10),
-            .dashed,
-            .gap(20),
         ]
+        if !live {
+            blocks += [
+                .text(vnd(c.price), .systemFont(ofSize: 64, weight: .heavy), .center),
+                .gap(10),
+                .dashed,
+            ]
+        }
+        blocks.append(.gap(20))
 
         let width = paperWidth
         let margin: CGFloat = 16

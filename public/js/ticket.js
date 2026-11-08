@@ -1,6 +1,6 @@
 /**
  * Vẽ tem in khổ 80mm (576 điểm) / 58mm (384 điểm) lên canvas.
- * Hỗ trợ: In TikTok CarID / UserID, SĐT, danh sách từng sản phẩm đã mua của khách.
+ * Hỗ trợ: In TikTok ID và danh sách từng sản phẩm đã mua của khách.
  */
 import { formatVND } from './price.js';
 
@@ -47,8 +47,9 @@ function fmtTime(ts) {
 
 /**
  * @param {object} settings
- * @param {{code:string, uniqueId:string, userId?:string, nickname?:string, phone?:string,
- *          items:{name:string, price:number, comment?:string}[], total:number, ts:number}} t
+ * @param {{uniqueId:string, userId?:string, nickname?:string,
+ *          items?:{name:string, price:number, comment?:string}[], total?:number, ts:number,
+ *          liveComment?:string}} t  Có liveComment: in tem bình luận live (không có sản phẩm, giá).
  * @returns {HTMLCanvasElement}
  */
 export function renderTicket(settings, t) {
@@ -104,94 +105,67 @@ export function renderTicket(settings, t) {
     y += Math.max(Math.round(rs * 1.22), lines.length * Math.round(ls * 1.22)) + Math.round(6 * S);
   };
 
+  const isLive = t.liveComment != null;
+  const custName = t.nickname && t.nickname !== t.uniqueId ? t.nickname : ('@' + t.uniqueId);
+
   // ===== ĐẦU TEM =====
   text((settings.shopName || 'susu').toUpperCase(), { w: 800, px: 52, align: 'center', gap: 0 });
-  if (settings.shopSub) text(settings.shopSub, { w: 400, px: 22, align: 'center', gap: 2 });
+  if (!isLive && settings.shopSub) text(settings.shopSub, { w: 400, px: 22, align: 'center', gap: 2 });
   dashed(16);
 
-  // Mã đơn + thời gian
-  row(`ĐƠN ${t.code}`, settings.showTime !== false ? fmtTime(t.ts) : '', { lw: 800, lpx: 32, rw: 400, rpx: 22 });
-  dashed(16);
-
-  // ===== THÔNG TIN KHÁCH HÀNG =====
-  const custName = t.nickname && t.nickname !== t.uniqueId ? t.nickname : ('@' + t.uniqueId);
-  text(custName, { w: 800, px: 38, gap: 2 });
-  
-  if (t.uniqueId && t.uniqueId !== custName) {
-    text('@' + t.uniqueId, { w: 500, px: 24, gap: 2 });
-  }
-
-  // CarID TikTok / User ID
-  if (t.userId) {
-    text(`TikTok ID: ${t.userId}`, { w: 600, px: 24, gap: 2 });
-  }
-
-  // Số điện thoại nếu có
-  if (t.phone) {
-    text(`SĐT: ${t.phone}`, { w: 800, px: 28, gap: 4 });
-  }
-
-  // Địa chỉ giao hàng nếu có
-  if (t.address) {
-    text(`Đ/C: ${t.address}`, { w: 600, px: 24, gap: 4 });
-  }
-
-  y += Math.round(6 * S);
-  dashed(14);
-
-  // ===== DANH SÁCH TỪNG SẢN PHẨM MUA =====
-  text(`DANH SÁCH SẢN PHẨM (${items.length} món):`, { w: 700, px: 24, gap: 6 });
-
-  items.forEach((it, i) => {
-    const itemName = it.name || it.content || `Sản phẩm ${i + 1}`;
-    const itemQty = (it.qty && it.qty > 1) ? ` (×${it.qty})` : '';
-    const itemPrice = it.price ? formatVND(it.price * (it.qty || 1)) : '0đ';
-    row(`${i + 1}. ${itemName}${itemQty}`, itemPrice, {
-      lw: 500, lpx: 26, rw: 700, rpx: 26
-    });
-    if (it.comment) {
-      text(`Bình luận: "${it.comment}"`, { w: 600, px: 24, gap: 6, indent: 14, maxW: CW - 14 });
+  if (isLive) {
+    // ===== TEM BÌNH LUẬN LIVE =====
+    text(`Tên TikTok: ${custName}`, { w: 800, px: 34, gap: 2 });
+    text(`ID TikTok: @${t.uniqueId}`, { w: 600, px: 26, gap: 2 });
+    text(`Giờ in: ${fmtTime(t.ts)}`, { w: 400, px: 24, gap: 0 });
+    dashed(14);
+    text('Bình luận:', { w: 400, px: 24, gap: 2 });
+    text(t.liveComment, { w: 700, px: 34, gap: 0 });
+  } else {
+    // Thời gian
+    if (settings.showTime !== false) {
+      text(fmtTime(t.ts), { w: 400, px: 22, align: 'center', gap: 0 });
+      dashed(16);
     }
-  });
 
-  dashed(16);
+    // ===== THÔNG TIN KHÁCH HÀNG =====
+    text(custName, { w: 800, px: 38, gap: 2 });
 
-  // Tiền phụ thu / Giảm giá nếu có
-  if (t.shippingFee) {
-    row('Phí vận chuyển:', formatVND(t.shippingFee), { lw: 500, lpx: 24, rw: 700, rpx: 24 });
-  }
-  if (t.discount) {
-    row('Giảm giá ưu đãi:', '-' + formatVND(t.discount), { lw: 500, lpx: 24, rw: 700, rpx: 24 });
-  }
+    if (t.uniqueId && t.uniqueId !== custName) {
+      text('@' + t.uniqueId, { w: 500, px: 24, gap: 2 });
+    }
 
-  // ===== TỔNG TIỀN =====
-  row('TỔNG CỘNG:', t.total ? formatVND(t.total) : '0đ', {
-    lw: 800, lpx: 32, rw: 800, rpx: 52
-  });
-  dashed(16);
+    // CarID TikTok / User ID
+    if (t.userId) {
+      text(`TikTok ID: ${t.userId}`, { w: 600, px: 24, gap: 2 });
+    }
 
-  // In mã vạch quét đơn (Barcode Code39)
-  const barH = Math.round(38 * S);
-  const barW = Math.min(CW, Math.round(360 * S));
-  const barX = Math.round((W - barW) / 2);
-  const codeStr = '*' + (t.code || 'HD0001') + '*';
-  const totalBars = codeStr.length * 8;
-  const unitW = barW / totalBars;
+    y += Math.round(6 * S);
+    dashed(14);
 
-  ctx.fillStyle = '#000';
-  for (let c = 0; c < codeStr.length; c++) {
-    const val = codeStr.charCodeAt(c);
-    for (let b = 0; b < 7; b++) {
-      if ((val >> (b % 6)) & 1) {
-        ctx.fillRect(barX + (c * 8 + b) * unitW, y, unitW * 0.95, barH);
+    // ===== DANH SÁCH TỪNG SẢN PHẨM MUA =====
+    text(`DANH SÁCH SẢN PHẨM (${items.length} món):`, { w: 700, px: 24, gap: 6 });
+
+    items.forEach((it, i) => {
+      const itemName = it.name || it.content || `Sản phẩm ${i + 1}`;
+      const itemQty = (it.qty && it.qty > 1) ? ` (×${it.qty})` : '';
+      const itemPrice = it.price ? formatVND(it.price * (it.qty || 1)) : '0đ';
+      row(`${i + 1}. ${itemName}${itemQty}`, itemPrice, {
+        lw: 500, lpx: 26, rw: 700, rpx: 26
+      });
+      if (it.comment) {
+        text(`Bình luận: "${it.comment}"`, { w: 600, px: 24, gap: 6, indent: 14, maxW: CW - 14 });
       }
-    }
-  }
-  y += barH + Math.round(6 * S);
-  text(t.code, { w: 600, px: 20, align: 'center', gap: 6 });
+    });
 
-  // Lời cảm ơn
-  if (settings.footer) text(settings.footer, { w: 400, px: 22, align: 'center', gap: 0 });
+    dashed(16);
+
+    // ===== TỔNG TIỀN =====
+    row('TỔNG CỘNG:', t.total ? formatVND(t.total) : '0đ', {
+      lw: 800, lpx: 32, rw: 800, rpx: 52
+    });
+  }
+  dashed(16);
   y += Math.round(24 * S);
 
   // Cắt và chuyển sang 1-bit đen trắng cho máy in nhiệt

@@ -77,6 +77,23 @@ export function parsePrice(text, opts = {}) {
   return parsePriceWithMatch(text, opts).price;
 }
 
+const CODE_FILLERS = /(?<![a-z\d])(?:ma|va|voi)(?![a-z\d])|[\s,;+&/.-]/g;
+
+/**
+ * Bình luận chỉ ghi mã/giá, ví dụ "280", "mã 150, 180". "Mã 130 giá sao" là hỏi giá nên không tính.
+ * Giống PriceParser.isOnlyCodes của app iPhone và Android.
+ */
+export function isOnlyCodes(text, opts = {}) {
+  const s = stripAccents(String(text || '').toLowerCase());
+  let found = false;
+  const rest = s.replace(RE, (match) => {
+    if (!parsePrice(match, opts)) return match;
+    found = true;
+    return ' ';
+  });
+  return found && rest.replace(CODE_FILLERS, '') === '';
+}
+
 /** Giá nhập tay */
 export function parsePriceInput(text, multiplier = 1000) {
   if (text === '' || text == null) return 0;

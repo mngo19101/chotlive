@@ -2,9 +2,15 @@ name: Build iOS IPA native (ChốtLive SwiftUI)
 
 on:
   workflow_dispatch:
+    inputs:
+      server_url:
+        description: 'Địa chỉ server gắn vào app, ví dụ https://ten-mien-cua-ban.vn (bỏ trống = dùng biến CHOTLIVE_SERVER_URL của repo)'
+        required: false
+        default: ''
   push:
     paths:
       - 'ios-native/**'
+      - 'public/img/icon-512.png'
       - '.github/workflows/build-native-ipa.yml'
 
 jobs:
@@ -26,13 +32,21 @@ jobs:
 
       - name: Build (không ký - ESign sẽ ký lại)
         working-directory: ios-native
+        env:
+          SERVER_URL: ${{ inputs.server_url || vars.CHOTLIVE_SERVER_URL }}
         run: |
+          if [ -z "$SERVER_URL" ]; then
+            echo "::warning::Chưa đặt địa chỉ server: bản này là bản thử nghiệm, người dùng phải tự nhập địa chỉ khi đăng nhập."
+          else
+            echo "Gắn sẵn server: $SERVER_URL"
+          fi
           xcodebuild \
             -project ChotLive.xcodeproj \
             -scheme ChotLive \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
+            CHOTLIVE_SERVER_URL="$SERVER_URL" \
             CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
             build
 

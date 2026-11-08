@@ -26,7 +26,32 @@ export function openDb(file) {
       PRIMARY KEY (user_id, id)
     )`);
   }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS live_comments (
+      user_id TEXT NOT NULL, id TEXT NOT NULL, session_id TEXT, ts INTEGER NOT NULL, data TEXT NOT NULL,
+      PRIMARY KEY (user_id, id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_live_comments_ts ON live_comments (user_id, ts);
+    CREATE INDEX IF NOT EXISTS idx_live_comments_session ON live_comments (user_id, session_id, ts);
+    CREATE TABLE IF NOT EXISTS ip_registrations (
+      ip TEXT NOT NULL, user_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+      PRIMARY KEY (ip, user_id)
+    );
+  `);
   return db;
+}
+
+/* Tài khoản đã tạo từ mỗi IP. Xoá tài khoản không xoá dòng này, nếu không xoá đi tạo lại sẽ né được giới hạn. */
+export function countIpRegistrations(db, ip) {
+  return Number(db.prepare('SELECT COUNT(*) AS n FROM ip_registrations WHERE ip = ?').get(ip).n);
+}
+
+export function addIpRegistration(db, ip, userId, at) {
+  db.prepare('INSERT INTO ip_registrations (ip, user_id, created_at) VALUES (?, ?, ?)').run(ip, userId, at);
+}
+
+export function removeIpRegistration(db, ip, userId) {
+  db.prepare('DELETE FROM ip_registrations WHERE ip = ? AND user_id = ?').run(ip, userId);
 }
 
 export function tx(db, fn) {
@@ -113,5 +138,111 @@ export function deleteUserData(db, userId) {
   tx(db, () => {
     db.prepare('DELETE FROM settings WHERE user_id = ?').run(userId);
     for (const t of Object.values(TABLE_OF)) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
+    db.prepare('DELETE FROM live_comments WHERE user_id = ?').run(userId);
   });
+}
+
+/* Lịch sử bình luận: mỗi bình luận một dòng, trùng mã thì bỏ qua. */
+const commentRow = (c) => [String(c.id), c.sessionId ? String(c.sessionId) : null, Number(c.ts) || 0, JSON.stringify(c)];
+
+/** Trả về true nếu là bình luận mới. */
+export function insertComment(db, userId, c) {
+  const r = db
+    .prepare('INSERT OR IGNORE INTO live_comments (user_id, id, session_id, ts, data) VALUES (?, ?, ?, ?, ?)')
+    .run(userId, ...commentRow(c));
+  return Number(r.changes) > 0;
+}
+
+export function insertComments(db, userId, comments) {
+  tx(db, () => {
+    for (const c of comments) if (c && c.id != null) insertComment(db, userId, c);
+  });
+}
+
+export function updateComment(db, userId, c) {
+  db.prepare('UPDATE live_comments SET data = ? WHERE user_id = ? AND id = ?').run(JSON.stringify(c), userId, String(c.id));
+}
+
+export function markCommentPrinted(db, userId, id) {
+  const row = db.prepare('SELECT data FROM live_comments WHERE user_id = ? AND id = ?').get(userId, id);
+  if (!row) return;
+  const c = JSON.parse(row.data);
+  if (c.printed) return;
+  c.printed = true;
+  updateComment(db, userId, c);
+}
+
+export function listComments(db, userId, { sessionId = '', before = 0, beforeId = '', since = 0, limit = 200 } = {}) {
+  const where = ['user_id = ?'];
+  const args = [userId];
+  if (sessionId) {
+    where.push('session_id = ?');
+    args.push(sessionId);
+  }
+  if (before && beforeId) {
+    // Nhiều bình luận có thể trùng mốc thời gian: phải kèm id thì sang trang mới không sót.
+    where.push('(ts < ? OR (ts = ? AND id < ?))');
+    args.push(before, before, beforeId);
+  } else if (before) {
+    where.push('ts < ?');
+    args.push(before);
+  }
+  if (since) {
+    where.push('ts >= ?');
+    args.push(since);
+  }
+  // `since` đi từ cũ tới mới để app lấy dần phần còn thiếu; còn lại đi từ mới về cũ.
+  const order = since ? 'ASC' : 'DESC';
+  return db
+    .prepare(`SELECT data FROM live_comments WHERE ${where.join(' AND ')} ORDER BY ts ${order}, id ${order} LIMIT ?`)
+    .all(...args, limit)
+    .map((r) => JSON.parse(r.data));
+}
+
+export function clearComments(db, userId) {
+  db.prepare('DELETE FROM live_comments WHERE user_id = ?').run(userId);
+}
+
+/** Mốc thời gian trước ngày này coi là lỗi (0, tính bằng giây thay vì mili giây...): không bao giờ xóa. */
+const MIN_VALID_TS = Date.UTC(2024, 0, 1);
+/** Một lần dọn mà xóa quá tỉ lệ này thì gần như chắc là đồng hồ hay dữ liệu bị lỗi: dừng lại. */
+const MAX_PURGE_FRACTION = 0.2;
+
+/**
+ * Xóa bình luận cũ hơn `olderThanMs`, trừ bình luận đã chốt:
+ * đã in, có giá (đọc ra được số tiền) hoặc được đơn/khách tham chiếu qua `keepIds`.
+ *
+ * Chống xóa nhầm vì lỗi thời gian:
+ * - Mốc thời gian vô lý (trước 2024, hay ở tương lai) thì bỏ qua, giữ nguyên bình luận.
+ * - Tuổi bình luận tính từ bình luận mới nhất chứ không chỉ từ đồng hồ máy:
+ *   đồng hồ laptop nhảy tới năm 2030 cũng không làm mọi thứ "quá 1 năm".
+ * - Một lần mà phải xóa hơn 20% bình luận của tài khoản thì không xóa gì, báo `blocked`.
+ *   Chạy đều mỗi ngày thì mỗi lần chỉ xóa khoảng một ngày bình luận cũ.
+ */
+export function purgeOldComments(db, userId, olderThanMs, keepIds = new Set(), now = Date.now()) {
+  const { newest, total } = db
+    .prepare('SELECT MAX(ts) AS newest, COUNT(*) AS total FROM live_comments WHERE user_id = ? AND ts >= ? AND ts <= ?')
+    .get(userId, MIN_VALID_TS, now + 24 * 60 * 60 * 1000);
+  if (!newest) return { deleted: 0 };
+  const cutoff = Math.min(now, Number(newest)) - olderThanMs;
+  if (cutoff <= MIN_VALID_TS) return { deleted: 0 };
+
+  const rows = db
+    .prepare(
+      `SELECT id FROM live_comments
+       WHERE user_id = ? AND ts >= ? AND ts < ?
+         AND COALESCE(json_extract(data, '$.printed'), 0) = 0
+         AND COALESCE(json_extract(data, '$.price'), 0) = 0`
+    )
+    .all(userId, MIN_VALID_TS, cutoff)
+    .map((r) => r.id)
+    .filter((id) => !keepIds.has(String(id)));
+  if (!rows.length) return { deleted: 0 };
+  if (rows.length > Number(total) * MAX_PURGE_FRACTION) return { deleted: 0, blocked: rows.length, total: Number(total) };
+
+  const del = db.prepare('DELETE FROM live_comments WHERE user_id = ? AND id = ?');
+  tx(db, () => {
+    for (const id of rows) del.run(userId, id);
+  });
+  return { deleted: rows.length };
 }

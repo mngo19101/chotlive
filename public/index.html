@@ -44,7 +44,7 @@
       <form id="form-auth-login" class="auth-form-body" autocomplete="on">
         <div class="form-field-group">
           <label for="auth-login-username">Tên tài khoản <span class="req">*</span></label>
-          <input type="text" class="form-field-input" id="auth-login-username" placeholder="Nhập tên tài khoản (VD: admin)" required autocomplete="username" />
+          <input type="text" class="form-field-input" id="auth-login-username" placeholder="Nhập tên tài khoản" required autocomplete="username" />
         </div>
 
         <div class="form-field-group">
@@ -55,11 +55,6 @@
         <button type="submit" class="btn-orange-pill auth-submit-btn" id="btn-submit-login">
           Đăng nhập vào hệ thống
         </button>
-
-        <div class="auth-quick-admin-hint">
-          <span>Tài khoản Admin mặc định: <b>admin</b> / Mật khẩu: <b>admin123</b></span>
-          <button type="button" class="btn-fill-admin-demo" id="btn-fill-admin-cred">Điền nhanh Admin</button>
-        </div>
       </form>
 
       <!-- FORM 2: ĐĂNG KÝ (CHỈ GỒM 3 Ô: TÊN, MẬT KHẨU, XÁC NHẬN MẬT KHẨU) -->
@@ -71,7 +66,7 @@
 
         <div class="form-field-group">
           <label for="auth-reg-password">Mật khẩu <span class="req">*</span></label>
-          <input type="password" class="form-field-input" id="auth-reg-password" placeholder="Nhập mật khẩu (tối thiểu 4 ký tự)" required autocomplete="new-password" />
+          <input type="password" class="form-field-input" id="auth-reg-password" placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)" required autocomplete="new-password" />
         </div>
 
         <div class="form-field-group">
@@ -91,6 +86,7 @@
       </div>
     </div>
   </div>
+  <script src="/js/early-auth.js"></script>
 
   <div class="app-container">
 
@@ -129,6 +125,10 @@
 
       <!-- Footer Máy In & Đồng Bộ Nhỏ Gọn Ở Sidebar -->
       <div class="sidebar-footer" style="display:flex;flex-direction:column;gap:8px">
+        <button type="button" class="sidebar-access-badge" id="btn-sidebar-access" title="Xem thời hạn tài khoản" style="display:none">
+          <span class="sidebar-access-label" id="sidebar-access-label"></span>
+          <span class="sidebar-access-value" id="sidebar-access-value"></span>
+        </button>
         <div class="quick-printer-badge" id="btn-sidebar-sync" title="Trạng thái đồng bộ Web & App IPA">
           <span class="printer-dot" id="sidebar-sync-led" style="background:#16a34a"></span>
           <span id="sidebar-sync-text">Đồng bộ Live (1 thiết bị)</span>
@@ -188,7 +188,7 @@
               <div class="stat-white-box">
                 <div class="stat-box-top">
                   <svg class="stat-box-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                  <span>Doanh thu tháng 10</span>
+                  <span id="sales-month-label">Doanh thu tháng 10</span>
                 </div>
                 <div class="stat-box-number stat-box-number-money" id="sales-month-revenue">68.450.000 <span class="vnd-underline">đ</span></div>
                 <div class="stat-box-sub green" id="sales-month-growth">+12% so với tháng 9</div>
@@ -296,6 +296,12 @@
             </button>
           </div>
         </header>
+
+        <!-- Hết dùng thử hoặc hết gói -->
+        <div class="live-access-notice" id="live-access-notice" role="alert" style="display:none"></div>
+
+        <!-- Các live đang theo dõi cùng lúc -->
+        <div class="active-lives-strip" id="active-lives-strip" style="display:none"></div>
 
         <!-- KHỐI 1: TỔNG QUAN CÁC PHIÊN LIVE & TIMELINE 24H (SCREEN 2 CHUẨN MOBILE & WEB) -->
         <div class="sessions-overview-wrapper" id="sessions-timeline-overview">
@@ -488,75 +494,11 @@
             <div class="comment-list-stream" id="comment-stream-container">
               <!-- Render động từ JavaScript -->
             </div>
+            <button type="button" class="btn-load-older-comments" id="btn-load-older-comments" style="display:none">Xem thêm bình luận cũ hơn</button>
           </div>
 
-          <!-- Cột 2: Thẻ Panel "Bình luận chốt đơn" -->
-          <aside class="order-closed-panel" id="order-closed-panel">
-            <h2 class="panel-header-title">Bình luận chốt đơn</h2>
-            <div class="panel-header-sub" id="closed-panel-sub">
-              Đơn của Linh Nguyễn · 20:42
-            </div>
-
-            <!-- Tóm tắt khách hàng -->
-            <div class="closed-customer-info">
-              <div class="closed-cust-left">
-                <div class="user-circle-avatar warm" id="closed-cust-avatar">LN</div>
-                <div>
-                  <div class="closed-cust-name" id="closed-cust-name">Linh Nguyễn</div>
-                  <div class="closed-cust-handle" id="closed-cust-handle">@linh.nguyen98</div>
-                </div>
-              </div>
-              <span class="closed-cmt-count-badge" id="closed-cust-cmt-badge">2 bình luận</span>
-            </div>
-
-            <!-- 2 Khối chỉ số tóm tắt -->
-            <div class="closed-summary-metrics">
-              <div class="summary-metric-box">
-                <span class="metric-lbl">Phiên live</span>
-                <span class="metric-val" id="closed-metric-session">Phiên tối · 19:30</span>
-              </div>
-              <div class="summary-metric-box">
-                <span class="metric-lbl">Giá trị đơn</span>
-                <span class="metric-val" id="closed-metric-amount">3 sản phẩm · 450.000 ₫</span>
-              </div>
-            </div>
-
-            <!-- Danh sách bình luận đã chốt -->
-            <h3 class="closed-section-heading">Các bình luận đã chốt</h3>
-            <div class="closed-comments-groups" id="closed-comments-groups">
-              <!-- Render động theo khách đang chọn -->
-            </div>
-
-            <!-- Hàng nút thao tác: In đơn ngay & Xem chi tiết đơn -->
-            <div class="closed-panel-actions" style="display:flex;gap:10px;margin-top:16px">
-              <button class="btn-orange-pill" style="flex:1.4;height:44px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px" id="btn-closed-print-order">
-                <span>🖨 In đơn ngay</span>
-              </button>
-              <button class="btn-outline-pill" style="flex:1;height:44px;font-weight:600;display:flex;align-items:center;justify-content:center" id="btn-closed-view-order">
-                <span>Xem đơn</span>
-              </button>
-            </div>
-          </aside>
         </div>
 
-        <!-- THANH TÁC VỤ IN NHANH CHO MÀN HÌNH NHỎ HOẶC KHI CHỌN KHÁCH HÀNG -->
-        <div class="mobile-sticky-order-bar" id="mobile-sticky-order-bar" style="display:none">
-          <div class="mobile-sticky-left">
-            <div class="user-circle-avatar warm" id="sticky-bar-avatar" style="width:36px;height:36px;font-size:12px">LN</div>
-            <div class="mobile-sticky-info">
-              <div class="sticky-bar-title" id="sticky-bar-name">Linh Nguyễn</div>
-              <div class="sticky-bar-desc" id="sticky-bar-summary">3 sản phẩm · 450.000 ₫</div>
-            </div>
-          </div>
-          <div class="mobile-sticky-actions">
-            <button class="btn-orange-pill" id="btn-sticky-print-order" style="height:36px;padding:0 14px;font-size:13px;font-weight:700">
-              🖨 In ngay
-            </button>
-            <button class="btn-outline-pill" id="btn-sticky-view-order" style="height:36px;padding:0 12px;font-size:12.5px">
-              Chi tiết
-            </button>
-          </div>
-        </div>
       </section>
 
       <!-- ================== 3. TAB KHÁCH HÀNG (SCREEN 4 & SCREEN 9) ================== -->
@@ -814,6 +756,7 @@
                 <span class="role-pill-badge admin" id="current-auth-role-badge">Quản trị viên (Admin)</span>
               </div>
               <div class="auth-user-sub" id="current-auth-desc">Toàn quyền quản lý các tài khoản khác, khoá và đổi mật khẩu</div>
+              <div class="auth-user-access" id="current-auth-access" style="display:none"></div>
             </div>
           </div>
           <div class="auth-user-actions">
@@ -846,6 +789,25 @@
 
           <div class="admin-users-list" id="admin-users-list">
             <!-- Render động danh sách tất cả tài khoản từ /api/admin/users -->
+          </div>
+        </div>
+
+        <!-- ================== HỖ TRỢ KHÁCH (CHAT) DÀNH CHO ADMIN ================== -->
+        <div class="admin-accounts-panel" id="admin-support-panel" style="display:none">
+          <div class="admin-panel-header">
+            <div>
+              <div class="admin-panel-title-row">
+                <h2 class="admin-panel-title">💬 Hỗ trợ khách</h2>
+                <span class="admin-count-pill" id="admin-support-unread">0 tin mới</span>
+              </div>
+              <p class="admin-panel-sub">Khách nhắn từ mục Trợ giúp trong app. Phiên tự đóng sau 24 giờ không có tin mới, tin nhắn lưu 30 ngày.</p>
+            </div>
+          </div>
+          <div class="support-admin-layout">
+            <div class="support-admin-list" id="support-admin-list"></div>
+            <div class="support-admin-thread" id="support-admin-thread">
+              <p class="support-empty">Chọn một khách để xem và trả lời.</p>
+            </div>
           </div>
         </div>
 
@@ -927,6 +889,7 @@
                     <span class="setting-row-title">Trợ giúp</span>
                   </div>
                   <div class="setting-row-right">
+                    <span class="support-badge" id="help-unread-badge" style="display:none"></span>
                     <span class="row-chevron">›</span>
                   </div>
                 </div>
@@ -999,7 +962,7 @@
       <div class="sheet-drag-handle"></div>
       <button class="btn-modal-close" data-close-dialog>×</button>
       <h2 class="modal-title-main">Live mới</h2>
-      <p class="modal-subtitle-text">Chọn ID đã lưu hoặc nhập ID TikTok Live mới</p>
+      <p class="modal-subtitle-text">Thêm một live để theo dõi. Các live đang theo dõi vẫn chạy tiếp.</p>
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <span style="font-size:14px;font-weight:700">ID đã lưu</span>
@@ -1032,7 +995,7 @@
       </label>
 
       <button type="button" class="btn-orange-pill" style="width:100%;height:46px" id="btn-confirm-start-live">
-        Bắt đầu live
+        Theo dõi live này
       </button>
     </div>
   </dialog>
@@ -1099,31 +1062,31 @@
       <div class="sheet-drag-handle"></div>
       <button class="btn-modal-close" data-close-dialog>×</button>
       <h2 class="modal-title-main">Sửa địa chỉ</h2>
-      <p class="modal-subtitle-text" id="edit-addr-subtitle">Linh Nguyễn · @linh.nguyen98</p>
+      <p class="modal-subtitle-text" id="edit-addr-subtitle"></p>
 
       <div class="form-section-title">● Người nhận</div>
       <div class="form-grid-2col">
         <div class="form-field-group">
-          <label>Số điện thoại <span class="req">*</span></label>
-          <input type="text" class="form-field-input" id="edit-addr-input-phone" value="0905 123 456" />
+          <label>Số điện thoại</label>
+          <input type="tel" class="form-field-input" id="edit-addr-input-phone" placeholder="Số điện thoại người nhận" />
         </div>
         <div class="form-field-group">
           <label>Họ tên <span class="req">*</span></label>
-          <input type="text" class="form-field-input" id="edit-addr-input-name" value="Linh Nguyễn" />
+          <input type="text" class="form-field-input" id="edit-addr-input-name" placeholder="Họ tên người nhận" />
         </div>
       </div>
 
       <div class="form-section-title">● Địa chỉ nhận hàng</div>
       <div class="form-grid-2col">
         <div class="form-field-group">
-          <label>Địa chỉ <span class="req">*</span></label>
-          <input type="text" class="form-field-input" id="edit-addr-input-street" value="25 Lê Lợi" />
+          <label>Địa chỉ</label>
+          <input type="text" class="form-field-input" id="edit-addr-input-street" placeholder="Số nhà, tên đường" />
         </div>
         <div class="form-field-group">
-          <label>Phường / Quận / Tỉnh <span class="req">*</span></label>
+          <label>Phường / Quận / Tỉnh</label>
           <div class="form-field-input form-select-trigger" id="edit-addr-trigger-area">
             <span id="edit-addr-display-area" style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-              Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh
+              Chọn khu vực
             </span>
             <span style="font-size:10px;color:var(--text-sub)">⌵</span>
           </div>
@@ -1132,7 +1095,7 @@
 
       <div class="form-field-group">
         <label>Ghi chú giao hàng</label>
-        <input type="text" class="form-field-input" id="edit-addr-input-note" value="Giao giờ hành chính, gọi trước khi giao" />
+        <input type="text" class="form-field-input" id="edit-addr-input-note" placeholder="Ví dụ: gọi trước khi giao" />
       </div>
 
       <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:24px">
@@ -1147,41 +1110,28 @@
     <div class="modal-content-card">
       <div class="sheet-drag-handle"></div>
       <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">Chọn khu vực</h2>
+      <h2 class="modal-title-main">Khu vực nhận hàng</h2>
 
-      <div class="area-tabs-row" style="margin-top:16px">
-        <button class="chip-pill" id="tab-area-new">Địa chỉ mới</button>
-        <button class="chip-pill active" id="tab-area-old">Địa chỉ cũ</button>
-      </div>
-      <p style="font-size:12px;color:var(--text-sub);margin:8px 0">
-        Theo đơn vị hành chính cũ: Tỉnh / Thành phố → Quận / Huyện → Phường / Xã
+      <p style="font-size:12px;color:var(--text-sub);margin:8px 0 12px">
+        Nhập đúng theo địa chỉ của khách. Địa chỉ mới không còn cấp quận / huyện thì để trống ô đó.
       </p>
 
-      <div class="area-breadcrumbs-chips">
-        <span class="chip-pill" style="font-size:12px;padding:4px 12px">✓ TP. Hồ Chí Minh</span>
-        <span class="chip-pill" style="font-size:12px;padding:4px 12px">✓ Quận 1</span>
-        <span class="chip-pill active" style="font-size:12px;padding:4px 12px">Phường Bến Nghé</span>
-      </div>
-
       <div class="form-field-group">
-        <input type="text" class="form-field-input" id="input-search-ward" placeholder="Tìm phường / xã" />
+        <label for="area-input-province">Tỉnh / Thành phố</label>
+        <input type="text" class="form-field-input" id="area-input-province" placeholder="Ví dụ: Hà Nội" />
       </div>
-
-      <div class="area-ward-list" id="area-ward-list-box">
-        <div class="area-ward-item selected" data-ward="Phường Bến Nghé">
-          <span>Phường Bến Nghé</span>
-          <span style="color:var(--primary-orange);font-weight:bold">✓</span>
-        </div>
-        <div class="area-ward-item" data-ward="Phường Bến Thành"><span>Phường Bến Thành</span></div>
-        <div class="area-ward-item" data-ward="Phường Cầu Kho"><span>Phường Cầu Kho</span></div>
-        <div class="area-ward-item" data-ward="Phường Cầu Ông Lãnh"><span>Phường Cầu Ông Lãnh</span></div>
-        <div class="area-ward-item" data-ward="Phường Cô Giang"><span>Phường Cô Giang</span></div>
-        <div class="area-ward-item" data-ward="Phường Đa Kao"><span>Phường Đa Kao</span></div>
+      <div class="form-field-group">
+        <label for="area-input-district">Quận / Huyện</label>
+        <input type="text" class="form-field-input" id="area-input-district" placeholder="Ví dụ: Quận Hoàn Kiếm" />
+      </div>
+      <div class="form-field-group">
+        <label for="area-input-ward">Phường / Xã</label>
+        <input type="text" class="form-field-input" id="area-input-ward" placeholder="Ví dụ: Phường Hàng Bài" />
       </div>
 
       <div class="area-selected-summary">
-        Địa chỉ đã chọn:
-        <b id="area-summary-text">Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh</b>
+        Địa chỉ đã nhập:
+        <b id="area-summary-text">Chưa nhập</b>
       </div>
 
       <button type="button" class="btn-orange-pill" style="width:100%;height:44px" id="btn-confirm-area">
@@ -1250,7 +1200,7 @@
       <div class="sheet-drag-handle"></div>
       <button class="btn-modal-close" data-close-dialog>×</button>
       <h2 class="modal-title-main">Đồng bộ Web &amp; App (IPA)</h2>
-      <p class="modal-subtitle-text">Dữ liệu và thao tác giữa bản Web trên mạng và App iPhone (IPA) được đồng bộ 2 chiều theo thời gian thực.</p>
+      <p class="modal-subtitle-text">Web và điện thoại chỉ đồng bộ khi cùng <b>một server</b> và cùng <b>một tài khoản</b>.</p>
 
       <div style="padding:14px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between">
         <div>
@@ -1260,11 +1210,20 @@
         <button type="button" class="btn-outline-pill" id="btn-sync-pull-now" style="padding:5px 12px;font-size:12px">Đồng bộ ngay</button>
       </div>
 
+      <div class="sync-phone-guide" id="sync-phone-guide">
+        <div class="sync-guide-row"><span>Tài khoản trên máy này</span><b id="sync-guide-account">—</b></div>
+        <div class="sync-guide-row"><span>Server đang dùng</span><b id="sync-guide-server">—</b></div>
+        <div id="sync-guide-lan" style="display:none">
+          <div class="sync-guide-note"><b>localhost</b> chỉ mở được trên máy tính này. Trên điện thoại (cùng Wi-Fi), hãy đăng nhập server:</div>
+          <div class="sync-guide-url" id="sync-guide-lan-urls"></div>
+        </div>
+      </div>
+
       <div class="form-field-group">
         <label>Địa chỉ máy chủ Web (Server URL)</label>
-        <input type="text" class="form-field-input" id="input-sync-server-url" placeholder="https://susu-live-order.onrender.com" />
+        <input type="text" class="form-field-input" id="input-sync-server-url" placeholder="https://ten-mien-cua-ban.vn" />
         <small style="color:var(--text-sub);font-size:12px;margin-top:4px">
-          Trên App IPA: nhập địa chỉ Web bạn đã đưa lên mạng (VD: <b>https://susu-live-order.onrender.com</b>) hoặc IP mạng LAN (VD: <b>http://192.168.1.10:3000</b>). Để trống nếu đang dùng trực tiếp trên trình duyệt Web.
+          Để trống nếu đang dùng trực tiếp trên trình duyệt Web. Chỉ nhập khi cần nối tới một máy chủ khác.
         </small>
       </div>
 
@@ -1504,32 +1463,18 @@
     </div>
   </dialog>
 
-  <!-- ================== MODAL: HƯỚNG DẪN SỬ DỤNG TRÊN WEB & APP IPA ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-help-guide">
+  <!-- ================== MODAL: CHAT VỚI QUẢN TRỊ VIÊN ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-support-chat">
     <div class="modal-content-card">
       <div class="sheet-drag-handle"></div>
       <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">Hướng dẫn sử dụng</h2>
-      <p class="modal-subtitle-text">Đồng bộ Web &amp; App IPA và in tem nhiệt tự động</p>
-
-      <div style="display:flex;flex-direction:column;gap:14px;margin:20px 0;font-size:13.5px;line-height:1.6">
-        <div style="padding:14px;background:#fbf9f6;border-radius:12px;border:1px solid #f2ede7">
-          <b style="color:var(--primary-orange)">1. Đồng bộ 2 chiều Web &amp; App (IPA):</b>
-          <p style="margin-top:4px;color:var(--text-sub)">Mọi thao tác tạo đơn, sửa đơn, in đơn, sửa địa chỉ khách hoặc bắt đầu Live trên Web đều hiển thị tức thì trên App iPhone và ngược lại.</p>
-        </div>
-        <div style="padding:14px;background:#fbf9f6;border-radius:12px;border:1px solid #f2ede7">
-          <b style="color:var(--primary-orange)">2. Kết nối phiên Live:</b>
-          <p style="margin-top:4px;color:var(--text-sub)">Vào mục <b>Bình luận</b>, bấm <b>+ Live mới</b>, nhập username TikTok (@shophoahong.live) và bấm bắt đầu.</p>
-        </div>
-        <div style="padding:14px;background:#fbf9f6;border-radius:12px;border:1px solid #f2ede7">
-          <b style="color:var(--primary-orange)">3. In tem nhiệt Xprinter 80mm:</b>
-          <p style="margin-top:4px;color:var(--text-sub)">Vào <b>Tôi → Máy in</b> để kết nối Bluetooth hoặc USB/LAN. Tem in chuẩn ESC/POS 80mm sắc nét.</p>
-        </div>
-      </div>
-
-      <button type="button" class="btn-orange-pill" style="width:100%;height:42px" data-close-dialog>
-        Đã hiểu
-      </button>
+      <h2 class="modal-title-main">Chat với quản trị viên</h2>
+      <p class="modal-subtitle-text">Phiên tự đóng sau 24 giờ không có tin mới. Tin nhắn lưu 30 ngày.</p>
+      <div class="support-toolbar" id="support-toolbar">
+        <span class="support-toolbar-label">Các phiên chat</span>
+        <button type="button" class="btn-orange-pill" id="support-new-session" style="height:40px;padding:0 18px">＋ Phiên mới</button>
+              </div>
+      <div class="support-cards" id="support-cards"></div>
     </div>
   </dialog>
 
@@ -1543,7 +1488,7 @@
 
       <div class="form-field-group" style="margin-top:16px">
         <label>Mật khẩu mới <span class="req">*</span></label>
-        <input type="password" class="form-field-input" id="admin-input-new-pass" placeholder="Nhập mật khẩu mới (tối thiểu 4 ký tự)" />
+        <input type="password" class="form-field-input" id="admin-input-new-pass" placeholder="Nhập mật khẩu mới (tối thiểu 6 ký tự)" />
       </div>
 
       <div class="form-field-group">
@@ -1574,7 +1519,7 @@
       <div class="form-grid-2col">
         <div class="form-field-group">
           <label>Mật khẩu <span class="req">*</span></label>
-          <input type="password" class="form-field-input" id="admin-create-password" placeholder="Tối thiểu 4 ký tự" />
+          <input type="password" class="form-field-input" id="admin-create-password" placeholder="Tối thiểu 6 ký tự" />
         </div>
         <div class="form-field-group">
           <label>Xác nhận mật khẩu <span class="req">*</span></label>
@@ -1597,6 +1542,44 @@
     </div>
   </dialog>
 
+  <!-- ================== MODAL ADMIN: CẤP GÓI ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-admin-plan">
+    <div class="modal-content-card">
+      <div class="sheet-drag-handle"></div>
+      <button class="btn-modal-close" data-close-dialog>×</button>
+      <h2 class="modal-title-main">🎫 Cấp gói</h2>
+      <p class="modal-subtitle-text">Tài khoản: <b id="admin-plan-account"></b> · <span id="admin-plan-current"></span></p>
+
+      <div class="form-field-group" style="margin-top:16px">
+        <label for="admin-plan-months">Thời hạn gói</label>
+        <select class="form-field-input" id="admin-plan-months">
+          <option value="1">1 tháng (30 ngày)</option>
+          <option value="3">3 tháng (90 ngày)</option>
+          <option value="6">6 tháng (180 ngày)</option>
+          <option value="12">12 tháng (360 ngày)</option>
+        </select>
+      </div>
+      <p class="modal-subtitle-text">Gói còn hạn thì được cộng nối tiếp vào ngày hết hạn hiện tại.</p>
+
+      <div style="display:flex;justify-content:flex-end;flex-wrap:wrap;gap:12px;margin-top:20px">
+        <button type="button" class="btn-admin-act del-btn" id="btn-revoke-admin-plan" style="display:none;height:auto;margin-right:auto">Thu hồi gói</button>
+        <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
+        <button type="button" class="btn-orange-pill" id="btn-submit-admin-plan">Cấp gói</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ================== MODAL: HẾT DÙNG THỬ / HẾT GÓI ================== -->
+  <dialog class="app-modal-dialog" id="modal-access-expired">
+    <div class="modal-content-card">
+      <h2 class="modal-title-main">Không thể theo dõi live</h2>
+      <p class="modal-subtitle-text" id="access-expired-message"></p>
+      <div style="display:flex;justify-content:flex-end;margin-top:20px">
+        <button type="button" class="btn-orange-pill" data-close-dialog>Đã hiểu</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- ================== MODAL CÁ NHÂN: TỰ ĐỔI MẬT KHẨU ĐANG ĐĂNG NHẬP ================== -->
   <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-change-own-pass">
     <div class="modal-content-card">
@@ -1612,7 +1595,7 @@
 
       <div class="form-field-group">
         <label>Mật khẩu mới <span class="req">*</span></label>
-        <input type="password" class="form-field-input" id="own-pass-new" placeholder="Nhập mật khẩu mới (tối thiểu 4 ký tự)" />
+        <input type="password" class="form-field-input" id="own-pass-new" placeholder="Nhập mật khẩu mới (tối thiểu 6 ký tự)" />
       </div>
 
       <div class="form-field-group">

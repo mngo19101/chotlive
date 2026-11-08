@@ -26,7 +26,6 @@
 .btn-logout-card,
 .btn-admin-act,
 .btn-sheet-close-grey,
-.btn-fill-admin-demo,
 .btn-edit-link,
 .auth-tab-btn,
 .btn-modal-close,
@@ -52,7 +51,6 @@
 .btn-logout-card::after,
 .btn-admin-act::after,
 .btn-sheet-close-grey::after,
-.btn-fill-admin-demo::after,
 .btn-edit-link::after,
 .auth-tab-btn::after,
 .btn-modal-close::after,
@@ -84,7 +82,6 @@
 .btn-logout-card:active::after,
 .btn-admin-act:active::after,
 .btn-sheet-close-grey:active::after,
-.btn-fill-admin-demo:active::after,
 .btn-edit-link:active::after,
 .auth-tab-btn:active::after,
 .btn-modal-close:active::after,
@@ -499,10 +496,6 @@
   transition: all 0.18s ease;
 }
 
-.comment-row-item:active {
-  transform: scale(0.98);
-  transition-duration: 0.06s;
-}
 
 .comment-row-item.selected {
   animation: commentHighlight 0.3s ease;
@@ -814,10 +807,8 @@
 /* ============================================================
    11. STAGGERED ANIMATIONS – DANH SÁCH ITEMS XUẤT HIỆN LẦN LƯỢT
    ============================================================ */
-.comment-row-item,
 .customer-row-item,
 .order-card-item,
-.session-row-card,
 .history-order-row,
 .saved-live-item,
 .sheet-option-item,
@@ -826,48 +817,61 @@
 }
 
 /* Delay lần lượt từng item bằng CSS nth-child */
-.comment-row-item:nth-child(1),
 .customer-row-item:nth-child(1),
 .order-card-item:nth-child(1),
-.session-row-card:nth-child(1),
 .admin-user-row-card:nth-child(1) {
   animation-delay: 0.02s;
 }
 
-.comment-row-item:nth-child(2),
 .customer-row-item:nth-child(2),
 .order-card-item:nth-child(2),
-.session-row-card:nth-child(2),
 .admin-user-row-card:nth-child(2) {
   animation-delay: 0.06s;
 }
 
-.comment-row-item:nth-child(3),
 .customer-row-item:nth-child(3),
 .order-card-item:nth-child(3),
 .admin-user-row-card:nth-child(3) {
   animation-delay: 0.10s;
 }
 
-.comment-row-item:nth-child(4),
 .customer-row-item:nth-child(4),
 .order-card-item:nth-child(4),
 .admin-user-row-card:nth-child(4) {
   animation-delay: 0.14s;
 }
 
-.comment-row-item:nth-child(5),
 .customer-row-item:nth-child(5),
 .order-card-item:nth-child(5),
 .admin-user-row-card:nth-child(5) {
   animation-delay: 0.18s;
 }
 
-.comment-row-item:nth-child(n+6),
 .customer-row-item:nth-child(n+6),
 .order-card-item:nth-child(n+6),
 .admin-user-row-card:nth-child(n+6) {
   animation-delay: 0.22s;
+}
+
+/* Danh sách bình luận được vẽ lại liên tục khi đang live. Hiệu ứng từ độ mờ 0 chạy lại ở
+   mỗi lần vẽ từng làm các dòng không bao giờ hiện ra, nên không dùng cho bình luận. */
+.comment-row-item.is-new {
+  animation: commentRowArrive 0.6s ease-out;
+}
+
+.comment-row-item .badge-pill-tag {
+  animation: none;
+}
+
+/* Chỉ nháy nền, chữ luôn hiện rõ dù bình luận về dồn dập. */
+@keyframes commentRowArrive {
+  from {
+    background-color: #fff1e6;
+  }
+
+  to {
+    background-color: transparent;
+  }
 }
 
 @keyframes listItemSlideIn {

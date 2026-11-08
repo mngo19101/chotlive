@@ -13,19 +13,51 @@ targets:
       path: ChotLive/Info.plist
       properties:
         CFBundleDisplayName: ChốtLive
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        # Không khoá nền Sáng: người dùng chọn Sáng / Tối / Theo máy trong Tôi › Giao diện.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        UIAppFonts:
+          - BeVietnamPro-Medium.ttf
+          - BeVietnamPro-SemiBold.ttf
+          - BeVietnamPro-Bold.ttf
+          - BeVietnamPro-ExtraBold.ttf
         NSBluetoothAlwaysUsageDescription: Ứng dụng cần Bluetooth để kết nối và in tem qua máy in nhiệt.
         NSBluetoothPeripheralUsageDescription: Ứng dụng cần Bluetooth để kết nối máy in.
+        # Giữ kết nối máy in khi người bán chuyển sang TikTok trong lúc live.
+        UIBackgroundModes:
+          - bluetooth-central
+        NSLocalNetworkUsageDescription: Ứng dụng cần mạng nội bộ để nối server ChốtLive chạy trên máy tính cùng Wi-Fi.
+        # Ra Internet bắt buộc HTTPS để mật khẩu không đi dạng rõ; chỉ mạng nội bộ (thử nghiệm) mới được dùng http.
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        ChotLiveServerURL: $(CHOTLIVE_SERVER_URL)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chotlive.native
-        MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        # Workflow build IPA truyền địa chỉ thật vào đây; để trống thì app cho nhập tay.
+        CHOTLIVE_SERVER_URL: ""
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "2"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
+    scheme:
+      testTargets:
+        - ChotLiveTests
+  ChotLiveTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ChotLiveTests
+    dependencies:
+      - target: ChotLive
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chotlive.native.tests
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: "YES"

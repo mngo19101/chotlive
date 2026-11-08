@@ -3,13 +3,15 @@
  * Hỗ trợ: Lưu CarID TikTok, Gom đơn theo khách hàng, Lưu danh sách từng sản phẩm đã mua,
  * và đồng bộ 2 chiều thời gian thực qua Server.
  */
+import { TRACKED, countPending, emptyPending, overlayPending, recordChanges, snapshotOf } from './pending.js';
+
 const KEY = 'susu_chotdon.v5';
+const PENDING_KEY = `${KEY}.pending`;
 
 export const DEFAULT_SETTINGS = {
   shopName: 'Shop Hoa Hồng',
   shopHandle: '@shophoahong.live',
   shopSub: 'Đơn hàng Livestream TikTok',
-  footer: 'Cảm ơn bạn đã ủng hộ Shop Hoa Hồng ♥',
   paper: '80', // 80mm hoặc 58mm
   fontScale: '1',
   showNickname: true,
@@ -412,9 +414,63 @@ export const state = load();
 let syncPushHandler = null;
 let remoteChangeListeners = [];
 let isApplyingRemote = false;
+let ownerOf = () => '';
 
-export function registerSyncPushHandler(fn) {
+/* ------- Thay đổi trên máy mà server chưa xác nhận đã nhận ------- */
+function loadPending() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null');
+      if (raw && raw.changes && typeof raw.changes === 'object') return raw;
+    }
+  } catch {}
+  return emptyPending();
+}
+
+let pending = loadPending();
+let pendingVersion = 0;
+let baseSnapshot = snapshotOf(state);
+
+function persistPending() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    if (countPending(pending)) localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+    else localStorage.removeItem(PENDING_KEY);
+  } catch {}
+}
+
+function recordLocalChanges() {
+  const owner = ownerOf();
+  const next = snapshotOf(state);
+  if (owner) {
+    if (pending.owner !== owner) pending = emptyPending(owner);
+    if (recordChanges(pending, baseSnapshot, next)) {
+      pendingVersion += 1;
+      persistPending();
+    }
+  }
+  baseSnapshot = next;
+}
+
+export const pendingChangeCount = () => countPending(pending);
+export const getPendingVersion = () => pendingVersion;
+export const getPendingOwner = () => pending.owner;
+
+export function clearPendingChanges() {
+  pending = emptyPending(pending.owner);
+  pendingVersion += 1;
+  persistPending();
+}
+
+/** Server đã nhận. Có `version` thì chỉ xoá nếu từ lúc gửi tới giờ không phát sinh thêm thay đổi. */
+export function markPendingSynced(version = pendingVersion) {
+  if (version === pendingVersion) clearPendingChanges();
+}
+
+/** `owner` cho biết thay đổi đang thuộc tài khoản nào; chưa đăng nhập thì không ghi nhận. */
+export function registerSyncPushHandler(fn, owner) {
   syncPushHandler = fn;
+  if (owner) ownerOf = owner;
 }
 
 export function onRemoteStateApplied(fn) {
@@ -423,33 +479,45 @@ export function onRemoteStateApplied(fn) {
 
 export function applyRemoteState(remote, action = 'remote') {
   if (!remote || typeof remote !== 'object') return;
+  // Thay đổi vừa bấm mà chưa tới lượt ghi cũng phải được giữ lại trước khi nhận dữ liệu mới.
+  if (saveTimer) recordLocalChanges();
+  if (action === 'reset') clearPendingChanges();
+  const hadPending = countPending(pending) > 0;
   isApplyingRemote = true;
   try {
     if (typeof remote.isCleanAccount === 'boolean') state.isCleanAccount = remote.isCleanAccount;
-    if (Array.isArray(remote.orders)) state.orders = remote.orders;
-    if (Array.isArray(remote.customers)) state.customers = remote.customers;
-    if (Array.isArray(remote.comments)) state.comments = remote.comments;
+    for (const coll of TRACKED) {
+      if (Array.isArray(remote[coll])) state[coll] = overlayPending(coll, remote[coll], state[coll], pending);
+    }
+    if (Array.isArray(remote.comments)) {
+      const printedHere = hadPending
+        ? new Set((state.comments || []).filter((c) => c.printed).map((c) => String(c.id)))
+        : null;
+      state.comments = printedHere
+        ? remote.comments.map((c) => (printedHere.has(String(c.id)) && !c.printed ? { ...c, printed: true } : c))
+        : remote.comments;
+    }
     if (Array.isArray(remote.sessions)) state.sessions = remote.sessions;
-    if (Array.isArray(remote.accounts)) state.accounts = remote.accounts;
     if (Array.isArray(remote.prints)) state.prints = remote.prints;
     if (remote.settings && typeof remote.settings === 'object') {
+      // Địa chỉ server là của riêng thiết bị này.
       const keepServerUrl = state.settings?.serverUrl || '';
-      state.settings = { ...state.settings, ...remote.settings };
-      if (keepServerUrl) state.settings.serverUrl = keepServerUrl;
+      state.settings = { ...state.settings, ...remote.settings, serverUrl: keepServerUrl };
     }
     if (Array.isArray(remote.accounts) && state.settings) {
-      state.settings.accounts = remote.accounts;
+      state.settings.accounts = state.accounts;
     }
     if (remote.salesMetrics && typeof remote.salesMetrics === 'object') {
       state.salesMetrics = { ...state.salesMetrics, ...remote.salesMetrics };
     }
-    if (typeof remote.seq === 'number') state.seq = remote.seq;
+    if (typeof remote.seq === 'number') state.seq = hadPending ? Math.max(state.seq || 0, remote.seq) : remote.seq;
     if (typeof remote.selectedCustomerUniqueId === 'string') {
       state.selectedCustomerUniqueId = remote.selectedCustomerUniqueId;
     }
     if (typeof remote.activeSessionId === 'string') {
       state.activeSessionId = remote.activeSessionId;
     }
+    baseSnapshot = snapshotOf(state);
 
     if (typeof localStorage !== 'undefined') {
       try {
@@ -473,6 +541,7 @@ let saveTimer = null;
 export function save(action = 'update') {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
+    saveTimer = null;
     if (typeof localStorage !== 'undefined') {
       try {
         localStorage.setItem(KEY, JSON.stringify(state));
@@ -484,6 +553,7 @@ export function save(action = 'update') {
       }
     }
     if (!isApplyingRemote && typeof syncPushHandler === 'function') {
+      recordLocalChanges();
       try {
         syncPushHandler(state, action);
       } catch (e) {
@@ -647,8 +717,9 @@ export function mergeDuplicateCustomers() {
   return count;
 }
 
+// Không tự gộp đơn ở đây: các đơn riêng của cùng một khách (app iOS tách theo nhóm) phải được giữ
+// nguyên, cùng phí ship và giảm giá của từng đơn. Bình luận mới vẫn được gom vào đơn đang mở.
 try {
-  mergeDuplicateOrders();
   mergeDuplicateCustomers();
 } catch {}
 
@@ -663,10 +734,9 @@ export function addOrMergeOrder(data) {
     price = 0,
     qty = 1,
     comment = '',
-    commentId = ''
+    commentId = '',
+    sessionId = ''
   } = data;
-
-  mergeDuplicateOrders();
 
   const d = new Date();
   const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -683,6 +753,7 @@ export function addOrMergeOrder(data) {
     const newItem = {
       id: 'it_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       commentId: commentId || '',
+      sessionId: sessionId || null,
       name: productName,
       price: Number(price) || 0,
       qty: Number(qty) || 1,
@@ -733,6 +804,7 @@ export function addOrMergeOrder(data) {
     const newItem = {
       id: 'it_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       commentId: commentId || '',
+      sessionId: sessionId || null,
       name: productName,
       price: Number(price) || 0,
       qty: Number(qty) || 1,
@@ -773,6 +845,7 @@ export function upsertCustomer(uniqueId, userId, nickname, phone, spent = 0) {
   let cust = state.customers.find((c) => areSameCustomer(c, person));
   const d = new Date();
   const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
   if (cust) {
     if (spent) {
       cust.totalSpent = (cust.totalSpent || 0) + spent;
@@ -783,6 +856,7 @@ export function upsertCustomer(uniqueId, userId, nickname, phone, spent = 0) {
     if (userId && !cust.userId) cust.userId = userId;
     if (uniqueId && uniqueId !== 'unknown' && (!cust.uniqueId || cust.uniqueId === 'unknown')) cust.uniqueId = uniqueId;
     cust.timeDesc = `${timeStr} nay`;
+    if (spent) cust.lastBuy = dateStr;
   } else {
     cust = {
       id: 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -793,7 +867,7 @@ export function upsertCustomer(uniqueId, userId, nickname, phone, spent = 0) {
       totalSpent: spent || 0,
       orderCount: spent ? 1 : 0,
       tag: 'Mới',
-      lastBuy: '25/10',
+      lastBuy: dateStr,
       timeDesc: `${timeStr} nay`,
       avatarWarm: false
     };
@@ -892,7 +966,8 @@ export function updateCustomerInfo(uniqueIdOrObj, fields = {}) {
   }
   state.orders.forEach((o) => {
     if ((o.uniqueId || '').toLowerCase() === uid) {
-      if (data.phone) o.phone = data.phone;
+      // Có gửi trường nào thì ghi trường đó, kể cả khi người dùng xoá trống để sửa thông tin sai.
+      if ('phone' in data) o.phone = data.phone;
       if (data.name) {
         o.receiver = data.name;
         o.nickname = data.name;
@@ -901,11 +976,9 @@ export function updateCustomerInfo(uniqueIdOrObj, fields = {}) {
         o.receiver = data.receiver;
         o.nickname = data.receiver;
       }
-      if (data.address) o.address = data.address;
-      if (data.street) o.street = data.street;
-      if (data.ward) o.ward = data.ward;
-      if (data.district) o.district = data.district;
-      if (data.province) o.province = data.province;
+      for (const field of ['address', 'street', 'ward', 'district', 'province', 'deliveryNote']) {
+        if (field in data) o[field] = data[field];
+      }
     }
   });
   save('customer_updated');

@@ -6,7 +6,16 @@
  * - Khi thao tác trên App IPA -> Web cập nhật tức thì
  * - Khi Admin khoá tài khoản hoặc đổi pass -> Thiết bị của tài khoản đó bị đẩy ra màn hình đăng nhập ngay lập tức
  */
-import { state, registerSyncPushHandler, applyRemoteState } from './store.js';
+import {
+  state,
+  registerSyncPushHandler,
+  applyRemoteState,
+  clearPendingChanges,
+  getPendingOwner,
+  getPendingVersion,
+  markPendingSynced,
+  pendingChangeCount
+} from './store.js';
 
 const SERVER_URL_KEY = 'susu_sync_server_url';
 const CLIENT_ID_KEY = 'susu_sync_client_id';
@@ -17,11 +26,7 @@ function getOrCreateClientId() {
   try {
     let cid = localStorage.getItem(CLIENT_ID_KEY);
     if (!cid) {
-      const isNative =
-        window.location.protocol === 'capacitor:' ||
-        window.location.protocol === 'file:' ||
-        Boolean(window.Capacitor);
-      cid = (isNative ? 'ipa_' : 'web_') + Math.random().toString(36).slice(2, 10);
+      cid = 'web_' + Math.random().toString(36).slice(2, 10);
       localStorage.setItem(CLIENT_ID_KEY, cid);
     }
     return cid;
@@ -57,6 +62,8 @@ export function setAuthSession(token, user) {
       localStorage.removeItem(AUTH_TOKEN_KEY);
     }
     if (user) {
+      // Thay đổi chưa gửi của tài khoản khác không được lọt sang tài khoản vừa đăng nhập.
+      if (getPendingOwner() && getPendingOwner() !== user.id) clearPendingChanges();
       localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
     } else {
       localStorage.removeItem(AUTH_USER_KEY);
@@ -69,12 +76,15 @@ export function clearAuthSession() {
 }
 
 export function getServerBaseUrl() {
+  const onWeb = window.location.protocol === 'http:' || window.location.protocol === 'https:';
   try {
-    const saved = (localStorage.getItem(SERVER_URL_KEY) || state.settings?.serverUrl || '').trim();
+    // Trên web chỉ tin địa chỉ người dùng tự nhập trên chính máy này. settings.serverUrl từng bị
+    // đồng bộ qua lại giữa các thiết bị nên có thể là địa chỉ của máy khác.
+    const saved = (localStorage.getItem(SERVER_URL_KEY) || (onWeb ? '' : state.settings?.serverUrl) || '').trim();
     if (saved) return saved.replace(/\/+$/, '');
   } catch {}
 
-  if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+  if (onWeb) {
     return window.location.origin;
   }
 
@@ -173,6 +183,42 @@ let uiEventListeners = [];
 let liveEventListeners = [];
 let forceLogoutListeners = [];
 let adminUsersListeners = [];
+let accessListeners = [];
+let offlineListeners = [];
+/** Số gói đã gửi qua WebSocket mà server chưa xác nhận. */
+let unackedPushes = 0;
+let httpPushBusy = false;
+let httpPushAgain = false;
+/** Đã báo người dùng rằng có thay đổi đang nằm chờ trên máy. */
+let offlineNoticeShown = false;
+
+/** `fn('saved' | 'synced', soThayDoi)`: thay đổi đang chờ mạng, hoặc đã gửi được lên server. */
+export function onOfflineChanges(fn) {
+  offlineListeners.push(fn);
+}
+
+function notifyOffline(kind, count) {
+  offlineListeners.forEach((fn) => {
+    try {
+      fn(kind, count);
+    } catch {}
+  });
+}
+
+function noticeWaitingForNetwork() {
+  if (offlineNoticeShown || !pendingChangeCount()) return;
+  offlineNoticeShown = true;
+  notifyOffline('saved', pendingChangeCount());
+}
+
+function finishSynced(version) {
+  const count = pendingChangeCount();
+  markPendingSynced(version);
+  if (offlineNoticeShown && count && !pendingChangeCount()) {
+    offlineNoticeShown = false;
+    notifyOffline('synced', count);
+  }
+}
 
 export function onSyncStatusChange(fn) {
   statusListeners.push(fn);
@@ -190,8 +236,40 @@ export function onForceLogout(fn) {
   forceLogoutListeners.push(fn);
 }
 
+const supportListeners = [];
+
+/** `fn(msg)`: tin chat hỗ trợ mới (khách nhận tin Admin, Admin nhận tin khách). */
+export function onSupportMessage(fn) {
+  supportListeners.push(fn);
+}
+
 export function onAdminUsersSync(fn) {
   adminUsersListeners.push(fn);
+}
+
+/** `fn(access)`: quyền dùng của tài khoản vừa đổi (hết dùng thử, được cấp gói...). */
+export function onAccountAccess(fn) {
+  accessListeners.push(fn);
+}
+
+function updateAccess(access) {
+  const user = getCurrentUser();
+  if (!user) return;
+  setAuthSession(getAuthToken(), { ...user, access });
+  accessListeners.forEach((fn) => {
+    try {
+      fn(access);
+    } catch {}
+  });
+}
+
+function notifyLives(lives) {
+  if (!Array.isArray(lives)) return;
+  liveEventListeners.forEach((fn) => {
+    try {
+      fn({ type: 'lives', lives });
+    } catch {}
+  });
 }
 
 function notifyStatus() {
@@ -217,23 +295,63 @@ function buildWsUrl(baseUrl) {
   }
 }
 
-export async function pushStateToServer(currentState, action = 'update') {
-  if (!getAuthToken()) return;
-
-  const payload = {
+function buildPayload(currentState) {
+  // Bình luận và phiên live do server ghi. Thiết bị chỉ báo bình luận nào vừa được in;
+  // gửi cả danh sách như trước sẽ ghi đè và làm mất bình luận của thiết bị khác.
+  const { serverUrl: _deviceOnly, ...settings } = currentState.settings || {};
+  return {
     isCleanAccount: currentState.isCleanAccount,
     orders: currentState.orders,
     customers: currentState.customers,
-    comments: currentState.comments,
+    comments: (currentState.comments || []).filter((c) => c.printed),
     sessions: currentState.sessions,
     accounts: currentState.accounts,
     prints: currentState.prints,
-    settings: currentState.settings,
+    settings,
     salesMetrics: currentState.salesMetrics,
     seq: currentState.seq,
     selectedCustomerUniqueId: currentState.selectedCustomerUniqueId,
     activeSessionId: currentState.activeSessionId
   };
+}
+
+/**
+ * Không có WebSocket nên có thể đã lỡ thay đổi từ thiết bị khác: phải lấy dữ liệu mới nhất
+ * ghép với phần chưa gửi của máy này rồi mới đẩy lên, nếu không sẽ ghi đè mất đơn của họ.
+ * Không gửi được thì thay đổi vẫn nằm chờ trên máy, có mạng lại sẽ tự gửi.
+ */
+async function pushViaHttp(action) {
+  if (httpPushBusy) {
+    httpPushAgain = true;
+    return;
+  }
+  httpPushBusy = true;
+  try {
+    do {
+      httpPushAgain = false;
+      const latest = await apiFetch('/api/state', { method: 'GET', cache: 'no-store' });
+      if (!latest?.state) throw new Error('Không lấy được dữ liệu server');
+      applyRemoteState(latest.state, 'initial_fetch');
+      const version = getPendingVersion();
+      const data = await apiFetch('/api/sync', {
+        method: 'POST',
+        body: JSON.stringify({ clientId, action, state: buildPayload(state) })
+      });
+      if (!data?.ok) throw new Error(data?.error || 'Server không nhận dữ liệu');
+      syncStatus.rev = data.rev || syncStatus.rev;
+      syncStatus.lastSyncTime = Date.now();
+      finishSynced(version);
+    } while (httpPushAgain);
+  } catch {
+    noticeWaitingForNetwork();
+  } finally {
+    httpPushBusy = false;
+    notifyStatus();
+  }
+}
+
+export async function pushStateToServer(currentState, action = 'update') {
+  if (!getAuthToken()) return;
 
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
@@ -242,29 +360,21 @@ export async function pushStateToServer(currentState, action = 'update') {
           type: 'sync_update',
           clientId,
           action,
-          state: payload
+          state: buildPayload(currentState)
         })
       );
+      unackedPushes += 1;
       syncStatus.lastSyncTime = Date.now();
       return;
     } catch {}
   }
 
-  try {
-    const data = await apiFetch('/api/sync', {
-      method: 'POST',
-      body: JSON.stringify({
-        clientId,
-        action,
-        state: payload
-      })
-    });
-    if (data && data.ok) {
-      syncStatus.rev = data.rev || syncStatus.rev;
-      syncStatus.lastSyncTime = Date.now();
-      notifyStatus();
-    }
-  } catch {}
+  await pushViaHttp(action);
+}
+
+/** Vừa nối lại server: gửi nốt những gì đã thay đổi lúc mất mạng. */
+function pushWaitingChanges() {
+  if (pendingChangeCount() && unackedPushes === 0) pushStateToServer(state, 'offline_merge');
 }
 
 export function sendUiEvent(eventData = {}) {
@@ -282,6 +392,7 @@ export function sendUiEvent(eventData = {}) {
   }
 }
 
+/** Có tên live thì chỉ tác động lên live đó, không có tên thì tác động tất cả. */
 export function sendLiveCommand(type, username = '') {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
@@ -301,6 +412,7 @@ export async function fetchInitialStateFromServer() {
       syncStatus.clientsCount = data.clientsCount || 1;
       syncStatus.lastSyncTime = Date.now();
       applyRemoteState(data.state, 'initial_fetch');
+      notifyLives(data.lives);
       notifyStatus();
       return true;
     }
@@ -310,6 +422,7 @@ export async function fetchInitialStateFromServer() {
 
 export function connectSync() {
   clearTimeout(reconnectTimer);
+  unackedPushes = 0;
   if (ws) {
     try {
       ws.onclose = null;
@@ -360,6 +473,15 @@ export function connectSync() {
       return;
     }
 
+    if (msg.type === 'support_message' && msg.message) {
+      supportListeners.forEach((fn) => {
+        try {
+          fn(msg);
+        } catch {}
+      });
+      return;
+    }
+
     if (msg.type === 'admin_users_sync' && Array.isArray(msg.users)) {
       adminUsersListeners.forEach((fn) => {
         try {
@@ -369,13 +491,21 @@ export function connectSync() {
       return;
     }
 
+    if (msg.type === 'access' && msg.access) {
+      updateAccess(msg.access);
+      return;
+    }
+    if (msg.type === 'hello' && msg.user?.access) updateAccess(msg.user.access);
+
     if (msg.type === 'hello' && msg.state) {
       syncStatus.connected = true;
       syncStatus.rev = msg.rev || 1;
       syncStatus.clientsCount = msg.clientsCount || 1;
       syncStatus.lastSyncTime = Date.now();
       applyRemoteState(msg.state, 'hello');
+      notifyLives(msg.lives);
       notifyStatus();
+      pushWaitingChanges();
     } else if (msg.type === 'state_sync' && msg.state) {
       if (msg.clientId && msg.clientId === clientId) return;
       syncStatus.rev = msg.rev || syncStatus.rev + 1;
@@ -399,6 +529,11 @@ export function connectSync() {
         const cur = Array.isArray(state[coll]) ? state[coll] : [];
         const byId = new Map(cur.map((x) => [String(x.id), x]));
         for (const o of c.upsert || []) byId.set(String(o.id), o);
+        if (coll === 'comments') {
+          // Bình luận chỉ thêm và cập nhật, thiết bị đang giữ cái nào thì không mất cái đó.
+          patch[coll] = [...byId.values()].sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0));
+          continue;
+        }
         patch[coll] = c.ids
           ? c.ids.map((id) => byId.get(String(id))).filter(Boolean)
           : cur.map((x) => byId.get(String(x.id)));
@@ -406,10 +541,19 @@ export function connectSync() {
       const { rev: _r, updatedAt: _u, ...scalars } = msg.scalars || {};
       applyRemoteState({ ...scalars, ...patch }, msg.action || 'remote_sync');
       notifyStatus();
+    } else if (msg.type === 'sync_error') {
+      // Server không nhận gói này (dữ liệu quá lớn hoặc gửi quá nhanh): dữ liệu trên máy vẫn giữ nguyên.
+      unackedPushes = Math.max(0, unackedPushes - 1);
+      notifyStatus();
+      try {
+        window.dispatchEvent(new CustomEvent('chotlive-sync-error', { detail: msg.message || 'Server không nhận dữ liệu.' }));
+      } catch {}
     } else if (msg.type === 'sync_ack') {
       syncStatus.rev = msg.rev || syncStatus.rev;
       if (typeof msg.clientsCount === 'number') syncStatus.clientsCount = msg.clientsCount;
       syncStatus.lastSyncTime = Date.now();
+      unackedPushes = Math.max(0, unackedPushes - 1);
+      if (unackedPushes === 0) finishSynced();
       notifyStatus();
     } else if (msg.type === 'clients_count') {
       syncStatus.clientsCount = msg.clientsCount || 1;
@@ -421,7 +565,7 @@ export function connectSync() {
           fn(msg);
         } catch {}
       });
-    } else if (msg.type === 'chat' || msg.type === 'status' || msg.type === 'viewers') {
+    } else if (msg.type === 'chat' || msg.type === 'status' || msg.type === 'viewers' || msg.type === 'lives') {
       liveEventListeners.forEach((fn) => {
         try {
           fn(msg);
@@ -432,6 +576,8 @@ export function connectSync() {
 
   ws.onclose = () => {
     syncStatus.connected = false;
+    unackedPushes = 0;
+    noticeWaitingForNetwork();
     notifyStatus();
     reconnectTimer = setTimeout(connectSync, 3000);
   };
@@ -443,6 +589,9 @@ export function reconnectSync() {
   connectSync();
 }
 
-registerSyncPushHandler((currentState, action) => {
-  pushStateToServer(currentState, action);
-});
+registerSyncPushHandler(
+  (currentState, action) => {
+    pushStateToServer(currentState, action);
+  },
+  () => (getAuthToken() ? getCurrentUser()?.id || '' : '')
+);
