@@ -299,6 +299,8 @@ const olderComments = new Map();
 const COMMENT_PAGE = 200;
 let commentRenderLimit = COMMENT_PAGE;
 let olderExhausted = false;
+/** Đang tải bình luận từ server cho phiên đang xem. */
+let olderLoading = false;
 let sessionDayFilter = 'Hôm nay';
 /** Những bình luận đã vẽ, để chỉ dòng mới có hiệu ứng xuất hiện. */
 const renderedCommentIds = new Set();
@@ -605,6 +607,10 @@ function setCommentScope(sessionId) {
   renderActiveLives();
   renderCommentScopeHeader();
   renderCommentStream();
+  // Phiên cũ không còn trong phần bình luận mới nhất đã có sẵn: tự tải về, khỏi phải bấm "Xem thêm".
+  if (sessionId && !isDemoAccount() && !olderExhausted && commentsInScope().length < COMMENT_PAGE) {
+    loadOlderComments({ grow: false });
+  }
 }
 
 $('#active-lives-strip')?.addEventListener('click', (e) => {
@@ -727,16 +733,25 @@ function renderCommentStream() {
   const moreBtn = $('#btn-load-older-comments');
   if (moreBtn) {
     const canLoadMore = !isDemo && !olderExhausted && countAll > liveComments.length;
-    moreBtn.style.display = filtered.length > shownRows.length || canLoadMore ? 'block' : 'none';
-    moreBtn.disabled = false;
-    moreBtn.textContent = 'Xem thêm bình luận cũ hơn';
+    moreBtn.style.display = filtered.length > shownRows.length || canLoadMore || olderLoading ? 'block' : 'none';
+    moreBtn.disabled = olderLoading;
+    moreBtn.textContent = olderLoading ? 'Đang tải...' : 'Xem thêm bình luận cũ hơn';
   }
 
   if (filtered.length === 0) {
+    const scopeLive = commentScopeSessionId && activeLives.some((l) => l.sessionId === commentScopeSessionId);
     container.innerHTML = `
       <div style="padding:32px 16px;text-align:center;color:var(--text-sub);font-size:13.5px">
         ${
-          activeLives.length
+          olderLoading
+            ? 'Đang tải bình luận của phiên này...'
+            : commentScopeSessionId && liveComments.length && liveFilter !== 'all'
+            ? 'Không có bình luận nào hợp bộ lọc này.'
+            : commentScopeSessionId && !scopeLive
+            ? olderExhausted
+              ? 'Phiên này không có bình luận nào.'
+              : 'Chưa tải được bình luận. Bấm <b>Xem thêm</b> bên dưới để thử lại.'
+            : activeLives.length
             ? 'Đang chờ bình luận từ live đang theo dõi...'
             : 'Chưa có bình luận nào. Bấm <b>+ Live mới</b> để theo dõi phiên live TikTok.'
         }
@@ -807,8 +822,7 @@ function commentsInScope() {
   return list.sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0));
 }
 
-$('#btn-load-older-comments')?.addEventListener('click', async (e) => {
-  const btn = e.currentTarget;
+$('#btn-load-older-comments')?.addEventListener('click', () => {
   const isNewCustomer = newCustomerChecker();
   const filteredCount = commentsInScope().filter((c) => matchesLiveFilter(c, isNewCustomer)).length;
   if (commentRenderLimit < filteredCount) {
@@ -816,6 +830,13 @@ $('#btn-load-older-comments')?.addEventListener('click', async (e) => {
     renderCommentStream();
     return;
   }
+  loadOlderComments({ grow: true });
+});
+
+/** Tải trang bình luận cũ tiếp theo của phạm vi đang xem. grow: mở thêm một trang dòng hiển thị. */
+async function loadOlderComments({ grow }) {
+  if (olderLoading) return;
+  const scope = commentScopeSessionId;
   const loaded = commentsInScope();
   // Nhiều bình luận có thể trùng thời gian: lấy đúng bình luận cuối theo thứ tự của server (thời gian rồi id).
   const oldest = loaded.reduce((min, c) => {
@@ -823,25 +844,30 @@ $('#btn-load-older-comments')?.addEventListener('click', async (e) => {
     const diff = Number(c.ts) - Number(min.ts);
     return diff < 0 || (diff === 0 && String(c.id) < String(min.id)) ? c : min;
   }, null);
-  btn.disabled = true;
-  btn.textContent = 'Đang tải...';
+  olderLoading = true;
+  renderCommentStream();
   const params = new URLSearchParams({ limit: String(COMMENT_PAGE) });
   if (oldest?.ts) {
     params.set('before', String(oldest.ts));
     params.set('beforeId', String(oldest.id));
   }
-  if (commentScopeSessionId) params.set('sessionId', commentScopeSessionId);
+  if (scope) params.set('sessionId', scope);
   try {
     const data = await apiFetch(`/api/comments?${params}`, { method: 'GET', cache: 'no-store' });
     if (!data.ok) throw new Error(data.error || 'Không tải được');
+    // Đã chuyển sang phiên khác trong lúc tải: bỏ kết quả, phiên mới tự tải phần của nó.
+    if (scope !== commentScopeSessionId) return;
     for (const c of data.comments || []) olderComments.set(String(c.id), c);
     if (!data.hasMore) olderExhausted = true;
-    commentRenderLimit += COMMENT_PAGE;
+    if (grow) commentRenderLimit += COMMENT_PAGE;
   } catch {
-    toast('Không tải được bình luận cũ, thử lại sau', '⚠️');
+    if (scope === commentScopeSessionId) toast('Không tải được bình luận cũ, thử lại sau', '⚠️');
+  } finally {
+    olderLoading = false;
+    renderCommentStream();
+    if (scope !== commentScopeSessionId) setCommentScope(commentScopeSessionId);
   }
-  renderCommentStream();
-});
+}
 
 $('#comment-stream-container')?.addEventListener('click', (e) => {
   const btnPrint = e.target.closest('[data-cmt-print-user]');
