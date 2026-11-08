@@ -444,3 +444,91 @@ test('chat hỗ trợ: khách nhắn, Admin nhận ngay và trả lời, khách 
   adminWs.ws.close();
   userWs.ws.close();
 });
+
+test('mọi trang có header bảo mật; trang web không còn script viết thẳng trong HTML', async () => {
+  for (const p of ['/', '/api/auth/me', '/healthz']) {
+    const res = await fetch(BASE + p);
+    const csp = res.headers.get('content-security-policy') || '';
+    assert.match(csp, /script-src 'self'(;|$)/, p);
+    assert.match(csp, /frame-ancestors 'none'/, p);
+    assert.equal(res.headers.get('x-frame-options'), 'DENY', p);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff', p);
+  }
+  // CSP chặn script nội tuyến, nên trang không được tự dựa vào chúng.
+  const html = await fetch(`${BASE}/`).then((r) => r.text());
+  assert.ok(!/<script(?![^>]*\bsrc=)[^>]*>/i.test(html), 'còn <script> không có src');
+  for (const file of ['/js/app.js', '/js/bluetooth-printer.js', '/js/history.js']) {
+    const js = await fetch(BASE + file).then((r) => r.text());
+    assert.ok(!/\son(load|click|error|input|change)=["']/i.test(js), `${file} còn onXxx= trong HTML`);
+  }
+  assert.equal((await fetch(`${BASE}/js/early-auth.js`)).status, 200);
+});
+
+test('người lạ không gửi được gói lớn vào API đăng nhập hay WebSocket chưa đăng nhập', async () => {
+  const big = await post('/api/auth/login', { username: 'x', password: 'y'.repeat(200 * 1024) }, { ip: newIp() });
+  assert.equal(big.status, 413);
+
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+  ws.on('error', () => {});
+  const closed = new Promise((r) => ws.once('close', (code) => r(code)));
+  await new Promise((r) => ws.once('open', r));
+  ws.send(JSON.stringify({ type: 'ping', pad: 'x'.repeat(100 * 1024) }));
+  assert.equal(await closed, 1009);
+  assert.ok((await fetch(`${BASE}/healthz`)).ok);
+});
+
+test('API đồng bộ vẫn nhận gói vài MB của tài khoản đã đăng nhập', async () => {
+  const { body } = await register('khach.goi.vua', 'mat-khau-tot', newIp());
+  const orders = Array.from({ length: 2000 }, (_, i) => ({ id: `o${i}`, code: `D${i}`, note: 'x'.repeat(1000), items: [] }));
+  const res = await post('/api/sync', { state: { orders } }, { token: body.token });
+  assert.equal(res.status, 200);
+  const st = await get('/api/state', body.token);
+  assert.equal(st.body.state.orders.length, 2000);
+});
+
+test('dữ liệu một tài khoản không được vượt 30MB; thay đổi bị từ chối, dữ liệu cũ còn nguyên', async () => {
+  const { body } = await register('khach.lam.day', 'mat-khau-tot', newIp());
+  const token = body.token;
+  assert.equal((await post('/api/sync', { state: { orders: [{ id: 'giu', code: 'D1', items: [] }] } }, { token })).status, 200);
+
+  const sock = openSocket(token);
+  await sock.opened;
+  const chunk = 'x'.repeat(1024 * 1024);
+  const orders = Array.from({ length: 31 }, (_, i) => ({ id: `big${i}`, note: chunk, items: [] }));
+  const comments = [{ id: 'cmt-trong-goi-lon', uniqueId: 'khach1', nickname: 'Khách', comment: 'chốt 50', ts: Date.now() }];
+  sock.ws.send(JSON.stringify({ type: 'sync_update', state: { orders, comments } }));
+  const err = await until(() => sock.messages.find((m) => m.type === 'sync_error'), 'báo lỗi quá lớn');
+  assert.equal(err.code, 'STATE_TOO_LARGE');
+
+  const st = await get('/api/state', token);
+  assert.deepEqual(st.body.state.orders.map((o) => o.id), ['giu']);
+  // Bình luận trong gói bị từ chối vẫn được lưu.
+  const cmts = await get('/api/comments', token);
+  assert.ok(cmts.body.comments.some((c) => c.id === 'cmt-trong-goi-lon'));
+  // Gói nhỏ sau đó vẫn được nhận.
+  assert.equal((await post('/api/sync', { state: { orders: [] } }, { token })).status, 200);
+  sock.ws.close();
+});
+
+test('gửi đồng bộ dồn dập bị chặn theo phút, server vẫn trả lời', async () => {
+  const { body } = await register('khach.gui.don', 'mat-khau-tot', newIp());
+  const sock = openSocket(body.token);
+  await sock.opened;
+  for (let i = 0; i < 620; i++) sock.ws.send(JSON.stringify({ type: 'native_update', id: i }));
+  const err = await until(() => sock.messages.find((m) => m.type === 'sync_error'), 'bị chặn');
+  assert.equal(err.code, 'SYNC_TOO_FAST');
+  assert.ok(sock.messages.filter((m) => m.type === 'native_ack').length <= 600);
+  // Đang bị chặn mà vẫn gửi bình luận: bình luận không được mất.
+  sock.ws.send(JSON.stringify({ type: 'native_update', id: 9999, comments: [{ id: 'cmt-luc-bi-chan', uniqueId: 'khach2', nickname: 'Khách 2', text: 'lấy 2 cái', ts: Date.now() }] }));
+  await until(() => sock.messages.filter((m) => m.type === 'sync_error').some((m) => m.id === 9999), 'gói có bình luận bị chặn');
+  const saved = await get('/api/comments', body.token);
+  assert.ok(saved.body.comments.some((c) => c.id === 'cmt-luc-bi-chan' && c.comment === 'lấy 2 cái'));
+  assert.equal((await post('/api/sync', { state: { orders: [] } }, { token: body.token })).status, 429);
+  assert.ok((await fetch(`${BASE}/healthz`)).ok);
+  sock.ws.close();
+});
+
+async function get(url, token) {
+  const res = await fetch(BASE + url, { headers: { Authorization: `Bearer ${token}` } });
+  return { status: res.status, body: await res.json().catch(() => ({})) };
+}

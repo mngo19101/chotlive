@@ -36,6 +36,19 @@ import { createLimiter, waitMessage } from './rate-limit.js';
 import { createTelegramBridge } from './telegram.js';
 import { cleanNativeUpdate, cleanState, isObject } from './validate.js';
 import {
+  MAX_STATE_BYTES,
+  MAX_UNAUTHENTICATED_WS_BYTES,
+  restoreState,
+  SMALL_JSON_LIMIT,
+  stateBytes,
+  STATE_TOO_LARGE_MESSAGE,
+  SYNC_BYTES_PER_MINUTE,
+  SYNC_JSON_LIMIT,
+  SYNC_MESSAGES_PER_MINUTE,
+  SYNC_TOO_FAST_MESSAGE
+} from './limits.js';
+import { securityHeaders } from './security-headers.js';
+import {
   accessOf,
   extendedPlanEnd,
   IP_LIMIT_MESSAGE,
@@ -518,7 +531,14 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '10mb' }));
+app.use(securityHeaders);
+
+// Gói lớn chỉ nhận ở API đồng bộ và in LAN, và chỉ sau khi đã kiểm tra token (xem từng route).
+// Các API khác, nhất là đăng nhập/đăng ký ai cũng gọi được, không phải đọc gói 10MB của người lạ.
+const syncJson = express.json({ limit: SYNC_JSON_LIMIT });
+const smallJson = express.json({ limit: SMALL_JSON_LIMIT });
+const BIG_BODY_PATHS = new Set(['/api/sync', '/api/print-lan']);
+app.use((req, res, next) => (BIG_BODY_PATHS.has(req.path) ? next() : smallJson(req, res, next)));
 app.use(
   express.static(path.join(__dirname, 'public'), {
     extensions: ['html'],
@@ -573,9 +593,23 @@ app.get('/healthz', (_req, res) =>
 // Nhiều shop có thể chung một IP (mạng di động), nên giới hạn theo IP phải rộng hơn theo từng tài khoản.
 const loginFailuresByAccount = createLimiter({ max: 10, windowMs: 15 * 60 * 1000 });
 const loginFailuresByIp = createLimiter({ max: 100, windowMs: 15 * 60 * 1000 });
+// Dữ liệu đồng bộ do thiết bị gửi lên, tính theo từng tài khoản (xem limits.js).
+const syncMessagesByUser = createLimiter({ max: SYNC_MESSAGES_PER_MINUTE, windowMs: 60 * 1000 });
+const syncBytesByUser = createLimiter({ max: SYNC_BYTES_PER_MINUTE, windowMs: 60 * 1000 });
+
+/** Ghi nhận một gói đồng bộ; false nghĩa là tài khoản đã gửi quá nhiều trong phút này. */
+function syncAllowed(userId, bytes) {
+  if (syncMessagesByUser.retryAfter(userId) > 0 || syncBytesByUser.retryAfter(userId) > 0) return false;
+  syncMessagesByUser.hit(userId);
+  syncBytesByUser.hit(userId, bytes);
+  return true;
+}
+
 setInterval(() => {
   loginFailuresByAccount.sweep();
   loginFailuresByIp.sweep();
+  syncMessagesByUser.sweep();
+  syncBytesByUser.sweep();
 }, 10 * 60 * 1000).unref();
 
 // 1. Đăng nhập
@@ -1092,13 +1126,19 @@ app.get('/api/server-info', requireAuth, (req, res) => {
   res.json({ ok: true, lanUrls: lanAddresses(), account: req.user.displayName || req.user.username });
 });
 
-app.post('/api/sync', requireAuth, (req, res) => {
+app.post('/api/sync', requireAuth, syncJson, (req, res) => {
   const userId = req.user.id;
   const { state: incoming, action = 'update', clientId = '' } = req.body || {};
   if (!incoming || typeof incoming !== 'object') {
     return res.status(400).json({ error: 'Dữ liệu đồng bộ không hợp lệ' });
   }
+  const bytes = Number(req.headers['content-length']) || JSON.stringify(req.body).length;
+  if (!syncAllowed(userId, bytes)) {
+    saveDeviceCommentsOnly(userId, { type: 'sync_update', state: incoming });
+    return res.status(429).json({ error: SYNC_TOO_FAST_MESSAGE, code: 'SYNC_TOO_FAST' });
+  }
   const updated = applyIncomingStateForUser(userId, incoming, action, clientId);
+  if (!updated) return res.status(413).json({ error: STATE_TOO_LARGE_MESSAGE, code: 'STATE_TOO_LARGE' });
   res.json({
     ok: true,
     rev: updated.rev,
@@ -1134,7 +1174,7 @@ const isPrivateIPv4 = (ip) => {
   return a === 10 || a === 127 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
 };
 
-app.post('/api/print-lan', requireAuth, (req, res) => {
+app.post('/api/print-lan', requireAuth, syncJson, (req, res) => {
   if (!LAN_MODE) {
     return res.status(403).json({
       error: 'Máy chủ trên Internet không nối được máy in trong mạng của shop. Vui lòng in qua Bluetooth hoặc USB.',
@@ -1302,8 +1342,13 @@ function broadcastClientCountForUser(userId) {
   broadcastAdminUsersUpdate();
 }
 
-/** Thay đổi dữ liệu của một tài khoản rồi báo cho mọi thiết bị của tài khoản đó. */
-function mutateState(userId, action, clientId, excludeWs, fn) {
+/**
+ * Thay đổi dữ liệu của một tài khoản rồi báo cho mọi thiết bị của tài khoản đó.
+ * `fromDevice`: dữ liệu do thiết bị gửi lên. Nếu làm dữ liệu vượt MAX_STATE_BYTES thì trả lại như cũ
+ * và trả về null. Thay đổi làm dữ liệu nhỏ đi vẫn được nhận, để tài khoản đã quá lớn còn dọn bớt được.
+ * Bình luận trong gói đã được ghi vào bảng bình luận ngay trong `fn`, nên không bị mất khi trả lại.
+ */
+function mutateState(userId, action, clientId, excludeWs, fn, { fromDevice = false } = {}) {
   const targetState = getStateForUser(userId);
   const beforeCols = snapCollections(targetState);
   const beforeScalars = snapScalars(targetState);
@@ -1311,11 +1356,21 @@ function mutateState(userId, action, clientId, excludeWs, fn) {
 
   fn(targetState);
 
+  const afterCols = snapCollections(targetState);
+  if (fromDevice) {
+    const after = stateBytes(afterCols, snapScalars(targetState));
+    if (after > MAX_STATE_BYTES && after > stateBytes(beforeCols, beforeScalars)) {
+      restoreState(targetState, beforeCols, beforeScalars);
+      console.warn(`[sync] ${userId}: từ chối thay đổi làm dữ liệu lên ${Math.round(after / 1024 / 1024)}MB`);
+      return null;
+    }
+  }
+
   targetState.rev = (targetState.rev || 1) + 1;
   targetState.updatedAt = Date.now();
   persistAllStates(userId);
 
-  const delta = diffCollections(beforeCols, snapCollections(targetState));
+  const delta = diffCollections(beforeCols, afterCols);
   broadcastStateUpdate(
     userId,
     {
@@ -1370,6 +1425,30 @@ function mergeIncomingComments(userId, st, incoming) {
     }
   });
   if (added) trimCommentWindow(st);
+}
+
+/** Bình luận trong gói đồng bộ, đã chuyển về dạng server lưu. */
+function deviceCommentsOf(userId, msg) {
+  const st = getStateForUser(userId);
+  if (msg.type === 'native_update') {
+    return (cleanNativeUpdate({ comments: msg.comments }).comments || [])
+      .filter((c) => c.id != null)
+      .map((c) => toServerComment(st, { ...c, comment: c.text ?? c.comment ?? '' }));
+  }
+  const demoIds = isDefaultAdminUser(userId) ? new Set() : new Set(initialComments.map((c) => c.id));
+  return (cleanState({ comments: msg.state?.comments }).comments || []).filter((c) => c.id != null && !demoIds.has(c.id));
+}
+
+/**
+ * Gói bị từ chối (gửi quá nhanh) vẫn phải giữ bình luận: chỉ ghi vào bảng bình luận, không đổi dữ liệu khác.
+ * Bình luận đã có thì bỏ qua nhờ khoá chính, nên thiết bị gửi lại sau cũng không bị trùng.
+ */
+function saveDeviceCommentsOnly(userId, msg) {
+  const list = deviceCommentsOf(userId, msg);
+  if (!list.length) return;
+  sqlite.tx(db, () => {
+    for (const c of list) sqlite.insertComment(db, userId, c);
+  });
 }
 
 function markCommentsPrinted(userId, st, ids) {
@@ -1431,7 +1510,7 @@ function applyIncomingStateForUser(userId, rawIncoming, action = 'update', clien
       targetState.activeSessionId = incoming.activeSessionId;
     }
     targetState.isCleanAccount = isClean;
-  });
+  }, { fromDevice: true });
 }
 
 /** Thay đổi từ app iOS: chỉ gồm những khách vừa đổi và các món đã xoá. */
@@ -1455,7 +1534,7 @@ function applyNativeUpdateForUser(userId, rawUpdate, excludeWs) {
     }
     if (Array.isArray(update.printedCommentIds)) printed.push(...update.printedCommentIds);
     markCommentsPrinted(userId, st, printed);
-  });
+  }, { fromDevice: true });
 }
 
 /** Chuẩn hoá username: bỏ @, bỏ link */
@@ -1792,6 +1871,10 @@ wss.on('connection', safely('ws connection', (ws, req) => {
   }
 
   ws.on('message', safely('ws message', (raw) => {
+    if (!ws.userId && raw.length > MAX_UNAUTHENTICATED_WS_BYTES) {
+      ws.close(1009, 'login first');
+      return;
+    }
     let msg;
     try {
       msg = JSON.parse(raw.toString());
@@ -1855,8 +1938,18 @@ wss.on('connection', safely('ws connection', (ws, req) => {
       return;
     }
 
+    const isSync = msg.type === 'native_update' || (msg.type === 'sync_update' && msg.state);
+    if (isSync && !syncAllowed(ws.userId, raw.length)) {
+      saveDeviceCommentsOnly(ws.userId, msg);
+      send({ type: 'sync_error', code: 'SYNC_TOO_FAST', id: msg.id ?? null, message: SYNC_TOO_FAST_MESSAGE });
+      return;
+    }
+
     if (msg.type === 'native_update') {
-      applyNativeUpdateForUser(ws.userId, msg, ws);
+      if (!applyNativeUpdateForUser(ws.userId, msg, ws)) {
+        send({ type: 'sync_error', code: 'STATE_TOO_LARGE', id: msg.id ?? null, message: STATE_TOO_LARGE_MESSAGE });
+        return;
+      }
       send({ type: 'native_ack', id: msg.id ?? null, clientsCount: countOnlineClientsForUser(ws.userId) });
     } else if (msg.type === 'sync_update' && msg.state) {
       const updated = applyIncomingStateForUser(
@@ -1866,6 +1959,10 @@ wss.on('connection', safely('ws connection', (ws, req) => {
         msg.clientId || '',
         ws
       );
+      if (!updated) {
+        send({ type: 'sync_error', code: 'STATE_TOO_LARGE', message: STATE_TOO_LARGE_MESSAGE });
+        return;
+      }
       send({
         type: 'sync_ack',
         rev: updated.rev,
@@ -1873,11 +1970,11 @@ wss.on('connection', safely('ws connection', (ws, req) => {
       });
     } else if (msg.type === 'ui_event') {
       const st = getStateForUser(ws.userId);
-      if (msg.selectedCustomerUniqueId) {
-        st.selectedCustomerUniqueId = msg.selectedCustomerUniqueId;
+      if (msg.selectedCustomerUniqueId && typeof msg.selectedCustomerUniqueId === 'string') {
+        st.selectedCustomerUniqueId = msg.selectedCustomerUniqueId.slice(0, 200);
       }
-      if (msg.activeSessionId) {
-        st.activeSessionId = msg.activeSessionId;
+      if (msg.activeSessionId && typeof msg.activeSessionId === 'string') {
+        st.activeSessionId = msg.activeSessionId.slice(0, 200);
       }
       broadcastToUser(
         ws.userId,

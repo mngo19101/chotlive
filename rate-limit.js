@@ -22,10 +22,11 @@ export function createLimiter({ max, windowMs, now = Date.now }) {
       if (!entry || entry.count < max) return 0;
       return Math.ceil((entry.startedAt + windowMs - now()) / 1000);
     },
-    hit(key) {
+    /** `amount` để đếm theo dung lượng (số byte) thay vì số lần. */
+    hit(key, amount = 1) {
       const entry = current(key);
-      if (entry) entry.count++;
-      else hits.set(key, { count: 1, startedAt: now() });
+      if (entry) entry.count += amount;
+      else hits.set(key, { count: amount, startedAt: now() });
     },
     reset(key) {
       hits.delete(key);

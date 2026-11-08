@@ -541,6 +541,13 @@ export function connectSync() {
       const { rev: _r, updatedAt: _u, ...scalars } = msg.scalars || {};
       applyRemoteState({ ...scalars, ...patch }, msg.action || 'remote_sync');
       notifyStatus();
+    } else if (msg.type === 'sync_error') {
+      // Server không nhận gói này (dữ liệu quá lớn hoặc gửi quá nhanh): dữ liệu trên máy vẫn giữ nguyên.
+      unackedPushes = Math.max(0, unackedPushes - 1);
+      notifyStatus();
+      try {
+        window.dispatchEvent(new CustomEvent('chotlive-sync-error', { detail: msg.message || 'Server không nhận dữ liệu.' }));
+      } catch {}
     } else if (msg.type === 'sync_ack') {
       syncStatus.rev = msg.rev || syncStatus.rev;
       if (typeof msg.clientsCount === 'number') syncStatus.clientsCount = msg.clientsCount;

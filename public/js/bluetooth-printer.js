@@ -180,7 +180,7 @@ export function printViaSystemDriver(canvas, title = 'Tem in đơn hàng') {
     <!DOCTYPE html>
     <html>
       <head>
-        <title>${title}</title>
+        <title>${String(title).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)}</title>
         <style>
           @page { size: 80mm auto; margin: 0; }
           body { margin: 0; padding: 0; display: flex; justify-content: center; }
@@ -188,9 +188,17 @@ export function printViaSystemDriver(canvas, title = 'Tem in đơn hàng') {
         </style>
       </head>
       <body>
-        <img src="${dataUrl}" onload="window.print(); setTimeout(() => { window.frameElement.remove(); }, 1000);" />
+        <img src="${dataUrl}" />
       </body>
     </html>
   `);
   doc.close();
+  // Gắn sự kiện từ đây thay vì thuộc tính onload trong HTML: CSP của trang chặn script viết thẳng trong HTML.
+  const img = doc.querySelector('img');
+  const printNow = () => {
+    iframe.contentWindow.print();
+    setTimeout(() => iframe.remove(), 1000);
+  };
+  if (img.complete) printNow();
+  else img.addEventListener('load', printNow, { once: true });
 }

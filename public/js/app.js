@@ -3583,6 +3583,7 @@ function updateSyncUI(st) {
 }
 
 onSyncStatusChange(updateSyncUI);
+window.addEventListener('chotlive-sync-error', (e) => toast(String(e.detail || ''), '⚠️', 6000));
 
 /* ============================================================
    Khởi động ban đầu & Kiểm tra phiên đăng nhập
