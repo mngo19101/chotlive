@@ -273,30 +273,20 @@ extension View {
 
 struct AppearanceView: View {
     @EnvironmentObject var appearance: Appearance
-    @EnvironmentObject var ui: AppUI
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
     var body: some View {
-        VStack(spacing: 0) {
-            SubPage(title: "Giao diện", subtitle: appearance.summary) {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 22) {
-                        modeSection
-                        accentSection
-                    }
-                    .padding(.horizontal, Metrics.gutter)
-                    .padding(.bottom, 20)
+        SubPage(title: "Giao diện", subtitle: appearance.summary) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 22) {
+                    modeSection
+                    accentSection
                 }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.bottom, 20)
             }
-            // Thanh tab ngay dưới màn này để thấy màu tab đổi theo; bấm vào tab nào thì về tab đó.
-            TabBar(selection: Binding(get: { AppTab.me }, set: { tab in
-                ui.tab = tab
-                ui.path = NavigationPath()
-            }))
         }
-        .background(Theme.bg.ignoresSafeArea())
-        .ignoresSafeArea(.container, edges: .bottom)
         .onAppear { if !appearance.seen { appearance.seen = true } }
     }
 
