@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -647,7 +648,8 @@ fun SessionDetailScreen(sessionId: String) {
         }
         list
     }
-    val atBottom by remember { derivedStateOf { !listState.canScrollForward } }
+    // Mới nhất nằm trên cùng: còn thấy phần đầu danh sách nghĩa là đang xem bình luận mới.
+    val atTop by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
 
     suspend fun loadOlder() {
         if (loadingOlder) return
@@ -666,23 +668,15 @@ fun SessionDetailScreen(sessionId: String) {
     LaunchedEffect(client.serverSupportsSync) {
         if (client.serverSupportsSync && all.isEmpty() && (session?.commentCount ?: 0) > 0) loadOlder()
     }
-    LaunchedEffect(Unit) {
-        if (session?.isLive == true && shown.isNotEmpty()) listState.scrollToItem(listState.layoutInfo.totalItemsCount.coerceAtLeast(1) - 1)
-    }
     var lastCount by remember { mutableIntStateOf(session?.commentCount ?: 0) }
     LaunchedEffect(session?.commentCount) {
         val value = session?.commentCount ?: 0
         val delta = value - lastCount
         lastCount = value
-        if (delta <= 0) return@LaunchedEffect
-        if (atBottom || pending == 0 && listState.layoutInfo.totalItemsCount <= 6) {
-            val n = listState.layoutInfo.totalItemsCount
-            if (n > 0) listState.animateScrollToItem(n - 1)
-        } else {
-            pending += delta
-        }
+        // Đang cuộn xuống đọc thì danh sách giữ nguyên chỗ, chỉ báo số bình luận mới phía trên.
+        if (delta > 0 && !atTop) pending += delta
     }
-    LaunchedEffect(atBottom) { if (atBottom) pending = 0 }
+    LaunchedEffect(atTop) { if (atTop) pending = 0 }
 
     val subtitle = session?.let { s ->
         val end = s.end
@@ -722,26 +716,6 @@ fun SessionDetailScreen(sessionId: String) {
                             TabChip("Chốt đơn", closingCount, tab == 1) { tab = 1 }
                             TabChip("Khách mới", newCustomers, tab == 2) { tab = 2 }
                         }
-                        val total = session?.commentCount
-                        if (total != null && total > all.size) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                val note = when {
-                                    olderExhausted -> "Đã hiện hết ${all.size} bình luận server còn lưu, trên tổng $total bình luận của phiên."
-                                    !client.serverSupportsSync -> "Đang hiện ${all.size}/$total bình luận. Cần kết nối server để xem phần cũ hơn."
-                                    search.isNotEmpty() || tab != 0 -> "Đã tải ${all.size}/$total bình luận. Chỉ lọc và tìm trong phần đã tải."
-                                    else -> "Đang hiện ${all.size}/$total bình luận."
-                                }
-                                T(note, 12.5f, BV.MEDIUM, C.muted, align = TextAlign.Center)
-                                if (client.serverSupportsSync && !olderExhausted) {
-                                    Row(Modifier.fillMaxWidth().height(44.dp).capsule(C.card, C.line).tap(!loadingOlder) { scope.launch { loadOlder() } },
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                                        verticalAlignment = Alignment.CenterVertically) {
-                                        if (loadingOlder) CircularProgressIndicator(Modifier.size(16.dp), C.muted, 2.dp)
-                                        T(if (loadingOlder) "Đang tải..." else "Xem bình luận cũ hơn", 13.5f, BV.BOLD)
-                                    }
-                                }
-                            }
-                        }
                         if (shown.isEmpty()) {
                             val empty = if (loadingOlder) "Đang tải bình luận..." else if (session?.isLive == true) "Đang chờ bình luận..." else "Không có bình luận phù hợp."
                             EmptyNote(empty, 24f)
@@ -754,18 +728,41 @@ fun SessionDetailScreen(sessionId: String) {
                         scope.launch { ui.notify(app.printComment(c)) }
                     }
                 }
+                // Bình luận cũ nằm dưới cùng nên nút tải phần cũ cũng ở dưới.
+                item(key = "older") {
+                    val total = session?.commentCount
+                    if (total != null && total > all.size) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            val note = when {
+                                olderExhausted -> "Đã hiện hết ${all.size} bình luận server còn lưu, trên tổng $total bình luận của phiên."
+                                !client.serverSupportsSync -> "Đang hiện ${all.size}/$total bình luận. Cần kết nối server để xem phần cũ hơn."
+                                search.isNotEmpty() || tab != 0 -> "Đã tải ${all.size}/$total bình luận. Chỉ lọc và tìm trong phần đã tải."
+                                else -> "Đang hiện ${all.size}/$total bình luận."
+                            }
+                            T(note, 12.5f, BV.MEDIUM, C.muted, align = TextAlign.Center)
+                            if (client.serverSupportsSync && !olderExhausted) {
+                                Row(Modifier.fillMaxWidth().height(44.dp).capsule(C.card, C.line).tap(!loadingOlder) { scope.launch { loadOlder() } },
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    if (loadingOlder) CircularProgressIndicator(Modifier.size(16.dp), C.muted, 2.dp)
+                                    T(if (loadingOlder) "Đang tải..." else "Xem bình luận cũ hơn", 13.5f, BV.BOLD)
+                                }
+                            }
+                        }
+                    }
+                }
             }
             if (pending > 0) {
                 Row(
                     Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp).shadow(10.dp, Capsule).height(40.dp)
                         .capsule(C.ink).tap {
                             pending = 0
-                            scope.launch { listState.animateScrollToItem(maxOf(listState.layoutInfo.totalItemsCount - 1, 0)) }
+                            scope.launch { listState.animateScrollToItem(0) }
                         }.padding(horizontal = 18.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Icon(IconName.ARROW_DOWN, 15f, 2.4f, C.bg)
+                    Icon(IconName.ARROW_DOWN, 15f, 2.4f, C.bg, Modifier.rotate(180f))
                     T("$pending bình luận mới", 13.5f, BV.BOLD, C.bg)
                 }
             }

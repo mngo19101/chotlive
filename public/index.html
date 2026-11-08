@@ -497,73 +497,8 @@
             <button type="button" class="btn-load-older-comments" id="btn-load-older-comments" style="display:none">Xem thêm bình luận cũ hơn</button>
           </div>
 
-          <!-- Cột 2: Thẻ Panel "Bình luận chốt đơn" -->
-          <aside class="order-closed-panel" id="order-closed-panel">
-            <h2 class="panel-header-title">Bình luận chốt đơn</h2>
-            <div class="panel-header-sub" id="closed-panel-sub">
-              Đơn của Linh Nguyễn · 20:42
-            </div>
-
-            <!-- Tóm tắt khách hàng -->
-            <div class="closed-customer-info">
-              <div class="closed-cust-left">
-                <div class="user-circle-avatar warm" id="closed-cust-avatar">LN</div>
-                <div>
-                  <div class="closed-cust-name" id="closed-cust-name">Linh Nguyễn</div>
-                  <div class="closed-cust-handle" id="closed-cust-handle">@linh.nguyen98</div>
-                </div>
-              </div>
-              <span class="closed-cmt-count-badge" id="closed-cust-cmt-badge">2 bình luận</span>
-            </div>
-
-            <!-- 2 Khối chỉ số tóm tắt -->
-            <div class="closed-summary-metrics">
-              <div class="summary-metric-box">
-                <span class="metric-lbl">Phiên live</span>
-                <span class="metric-val" id="closed-metric-session">Phiên tối · 19:30</span>
-              </div>
-              <div class="summary-metric-box">
-                <span class="metric-lbl">Giá trị đơn</span>
-                <span class="metric-val" id="closed-metric-amount">3 sản phẩm · 450.000 ₫</span>
-              </div>
-            </div>
-
-            <!-- Danh sách bình luận đã chốt -->
-            <h3 class="closed-section-heading">Các bình luận đã chốt</h3>
-            <div class="closed-comments-groups" id="closed-comments-groups">
-              <!-- Render động theo khách đang chọn -->
-            </div>
-
-            <!-- Hàng nút thao tác: In đơn ngay & Xem chi tiết đơn -->
-            <div class="closed-panel-actions" style="display:flex;gap:10px;margin-top:16px">
-              <button class="btn-orange-pill" style="flex:1.4;height:44px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px" id="btn-closed-print-order">
-                <span>🖨 In đơn ngay</span>
-              </button>
-              <button class="btn-outline-pill" style="flex:1;height:44px;font-weight:600;display:flex;align-items:center;justify-content:center" id="btn-closed-view-order">
-                <span>Xem đơn</span>
-              </button>
-            </div>
-          </aside>
         </div>
 
-        <!-- THANH TÁC VỤ IN NHANH CHO MÀN HÌNH NHỎ HOẶC KHI CHỌN KHÁCH HÀNG -->
-        <div class="mobile-sticky-order-bar" id="mobile-sticky-order-bar" style="display:none">
-          <div class="mobile-sticky-left">
-            <div class="user-circle-avatar warm" id="sticky-bar-avatar" style="width:36px;height:36px;font-size:12px">LN</div>
-            <div class="mobile-sticky-info">
-              <div class="sticky-bar-title" id="sticky-bar-name">Linh Nguyễn</div>
-              <div class="sticky-bar-desc" id="sticky-bar-summary">3 sản phẩm · 450.000 ₫</div>
-            </div>
-          </div>
-          <div class="mobile-sticky-actions">
-            <button class="btn-orange-pill" id="btn-sticky-print-order" style="height:36px;padding:0 14px;font-size:13px;font-weight:700">
-              🖨 In ngay
-            </button>
-            <button class="btn-outline-pill" id="btn-sticky-view-order" style="height:36px;padding:0 12px;font-size:12.5px">
-              Chi tiết
-            </button>
-          </div>
-        </div>
       </section>
 
       <!-- ================== 3. TAB KHÁCH HÀNG (SCREEN 4 & SCREEN 9) ================== -->

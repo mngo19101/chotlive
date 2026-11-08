@@ -496,10 +496,6 @@
   transition: all 0.18s ease;
 }
 
-.comment-row-item:active {
-  transform: scale(0.98);
-  transition-duration: 0.06s;
-}
 
 .comment-row-item.selected {
   animation: commentHighlight 0.3s ease;

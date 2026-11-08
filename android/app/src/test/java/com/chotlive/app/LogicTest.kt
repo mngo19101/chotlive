@@ -212,6 +212,14 @@ class StoreTest {
     }
 
     @Test
+    fun sessionCommentsShowNewestFirst() {
+        val store = Store(newDir(), "srv|a")
+        store.addComment(comment("kept", "hi").copy(ts = 1_794_000_100_000L), "")
+        val old = comment("old", "hello").copy(ts = 1_794_000_000_000L)
+        assertEquals(listOf("kept", "old"), store.sessionComments("s1", listOf(old)).map { it.id })
+    }
+
+    @Test
     fun fractionalTimestampsFromServerStillLoad() {
         // Server có lúc lưu mốc thời gian dạng số lẻ; trước đây cả gói bị bỏ và app hiện trống.
         val raw = """{"customers":[{"id":"linh","uniqueId":"linh","items":[{"id":"i1","comment":"150","price":150000,"ts":1794026406933.265,"qty":1}]}],

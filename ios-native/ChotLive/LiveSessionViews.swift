@@ -338,8 +338,9 @@ struct SessionDetailView: View {
     @State private var tab = 0 // 0 tất cả, 1 chốt đơn, 2 khách mới
     @State private var searching = false
     @State private var search = ""
-    @State private var atBottom = true
-    @State private var pending = 0
+    @State private var atTop = true
+    /// Đang cuộn xuống đọc: chỉ hiện bình luận tới mốc này để danh sách không bị đẩy xuống khi có bình luận mới.
+    @State private var frozenAt: Date?
     /// Bình luận cũ vừa tải từ server, chỉ giữ khi đang mở màn này.
     @State private var older: [LiveComment] = []
     @State private var loadingOlder = false
@@ -347,7 +348,7 @@ struct SessionDetailView: View {
 
     private var session: LiveSession? { store.sessions.first { $0.id == sessionId } }
 
-    /// Cũ trước, mới dưới cùng.
+    /// Mới nhất trên cùng.
     private var all: [LiveComment] { store.sessionComments(sessionId, older: older) }
 
     private var isDemo: Bool {
@@ -383,18 +384,14 @@ struct SessionDetailView: View {
         return (closing, newCustomers)
     }
 
-    private var pendingShown: Int {
-        #if DEBUG
-        if Demo.isActive { return 12 }
-        #endif
-        return pending
-    }
-
     var body: some View {
         let comments = all
         let map = customerMap
         let count = counts(comments, map)
-        let shown = filter(comments, map)
+        let matching = filter(comments, map)
+        let shown = frozenAt.map { at in matching.filter { $0.ts <= at } } ?? matching
+        let pending = isDemo ? 12 : matching.count - shown.count
+        let newest = comments.first?.ts
 
         return SubPage(title: session?.title ?? "Phiên live", subtitle: subtitle, accessory: liveBadge, headerBottom: 16, trailing: {
             CircleButton(icon: .search) {
@@ -408,9 +405,13 @@ struct SessionDetailView: View {
                         if searching { SearchField(text: $search) }
                         if let s = session { summaryCard(s) }
                         tabs(total: session?.commentCount ?? comments.count, count)
-                        if !isDemo, let total = session?.commentCount, total > comments.count {
-                            olderControl(loaded: comments.count, total: total, proxy: proxy)
-                        }
+                        // Mốc đầu danh sách: biết đang ở trên cùng hay đã cuộn xuống đọc.
+                        Color.clear
+                            .frame(height: 1)
+                            .id("top")
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: CommentTopOffsetKey.self, value: g.frame(in: .named("commentScroll")).minY)
+                            })
                         if shown.isEmpty {
                             T(emptyText, 13, .medium, Theme.muted)
                                 .padding(.top, 24)
@@ -426,39 +427,32 @@ struct SessionDetailView: View {
                                 .id(c.id)
                             }
                         }
-                        Color.clear
-                            .frame(height: 1)
-                            .id("bottom")
-                            .onAppear {
-                                atBottom = true
-                                pending = 0
-                            }
-                            .onDisappear { atBottom = false }
+                        // Bình luận cũ nằm dưới cùng nên nút tải phần cũ cũng ở dưới.
+                        if !isDemo, let total = session?.commentCount, total > comments.count {
+                            olderControl(loaded: comments.count, total: total)
+                        }
                     }
                     .padding(.horizontal, Metrics.gutter)
                     .padding(.bottom, 56)
                 }
+                .coordinateSpace(name: "commentScroll")
                 .scrollDismissesKeyboard(.interactively)
-                .onAppear {
-                    if session?.isLive == true { proxy.scrollTo("bottom", anchor: .bottom) }
+                .onPreferenceChange(CommentTopOffsetKey.self) { y in
+                    let top = y > -80
+                    guard top != atTop else { return }
+                    atTop = top
+                    frozenAt = top ? nil : (newest ?? Date())
                 }
                 .task(id: client.serverSupportsSync) {
                     // Phiên cũ đã hết bình luận trên máy: tự tải luôn, khỏi thấy màn trống.
                     guard !isDemo, client.serverSupportsSync, all.isEmpty, (session?.commentCount ?? 0) > 0 else { return }
-                    await loadOlder(proxy: nil)
-                }
-                .onChange(of: session?.commentCount ?? 0) { [old = session?.commentCount ?? 0] value in
-                    if atBottom {
-                        withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
-                    } else {
-                        pending += max(value - old, 0)
-                    }
+                    await loadOlder()
                 }
                 .overlay(alignment: .bottom) {
-                    if pendingShown > 0 {
-                        newCommentsPill(pendingShown) {
-                            pending = 0
-                            withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                    if pending > 0 {
+                        newCommentsPill(pending) {
+                            frozenAt = nil
+                            withAnimation { proxy.scrollTo("top", anchor: .top) }
                         }
                     }
                 }
@@ -471,16 +465,16 @@ struct SessionDetailView: View {
         return session?.isLive == true ? "Đang chờ bình luận..." : "Không có bình luận phù hợp."
     }
 
-    /// Nút tải phần cũ từ server, đặt trên đầu danh sách vì bình luận cũ nằm ở trên.
+    /// Nút tải phần cũ từ server, đặt cuối danh sách vì bình luận cũ nằm ở dưới.
     @ViewBuilder
-    private func olderControl(loaded: Int, total: Int, proxy: ScrollViewProxy) -> some View {
+    private func olderControl(loaded: Int, total: Int) -> some View {
         VStack(spacing: 8) {
             T(olderNote(loaded: loaded, total: total), 12.5, .medium, Theme.muted)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             if client.serverSupportsSync && !olderExhausted {
                 Button {
-                    Task { @MainActor in await loadOlder(proxy: proxy) }
+                    Task { @MainActor in await loadOlder() }
                 } label: {
                     HStack(spacing: 8) {
                         if loadingOlder { ProgressView().controlSize(.small) }
@@ -507,20 +501,16 @@ struct SessionDetailView: View {
     }
 
     @MainActor
-    private func loadOlder(proxy: ScrollViewProxy?) async {
+    private func loadOlder() async {
         guard !loadingOlder else { return }
         loadingOlder = true
         defer { loadingOlder = false }
-        let current = all
-        guard let page = await client.fetchOlderComments(sessionId: sessionId, before: CommentCursor.oldest(in: current)) else {
+        guard let page = await client.fetchOlderComments(sessionId: sessionId, before: CommentCursor.oldest(in: all)) else {
             if !Task.isCancelled { ui.notify("Không tải được bình luận cũ. Kiểm tra kết nối rồi thử lại.") }
             return
         }
         older.append(contentsOf: page.comments)
         olderExhausted = !page.hasMore
-        // Danh sách dài thêm ở phía trên: giữ nguyên chỗ đang đọc thay vì để màn hình nhảy.
-        guard let proxy, let anchor = current.first?.id, !page.comments.isEmpty else { return }
-        DispatchQueue.main.async { proxy.scrollTo(anchor, anchor: .top) }
     }
 
     private var subtitle: String {
@@ -638,6 +628,7 @@ struct SessionDetailView: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Icon(name: .arrowDown, size: 15, weight: 2.4, color: .white)
+                    .rotationEffect(.degrees(180))
                 T("\(count) bình luận mới", 13.5, .bold, .white).fixedSize()
             }
             .padding(.horizontal, 18)
@@ -648,6 +639,12 @@ struct SessionDetailView: View {
         .buttonStyle(.plain)
         .padding(.bottom, Metrics.safeBottom > 0 ? -5.5 : 12)
     }
+}
+
+/// Vị trí mốc đầu danh sách bình luận trong vùng cuộn.
+private struct CommentTopOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 struct CommentRow: View {

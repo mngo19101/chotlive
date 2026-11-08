@@ -576,7 +576,7 @@ class Store(private val directory: File, account: String?) {
     /** Lần đầu trên máy mới thì chưa có mốc: lấy phần mới nhất. */
     val latestCommentDate: Long? get() = comments.maxOfOrNull { it.ts }
 
-    /** Bình luận của một phiên, cũ trước: phần lưu trên máy cộng với phần cũ vừa tải từ server. */
+    /** Bình luận của một phiên, mới nhất trước: phần lưu trên máy cộng với phần cũ vừa tải từ server. */
     fun sessionComments(id: String, older: List<LiveComment>): List<LiveComment> {
         val local = comments(id)
         val localIds = local.map { it.id }.toSet()
@@ -586,7 +586,7 @@ class Store(private val directory: File, account: String?) {
             val ordered = customers.flatMap { it.items }.map { it.commentId ?: it.id }.toSet()
             extra = extra.map { if (ordered.contains(it.id)) it.copy(printed = true) else it }
         }
-        return (local + extra).sortedBy { it.ts }
+        return (local + extra).sortedByDescending { it.ts }
     }
 
     // MARK: - Lưu trữ

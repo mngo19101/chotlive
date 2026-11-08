@@ -418,7 +418,8 @@ function renderSessionsOverview() {
 
   const inDay = (ts) => isInSessionDayFilter(ts);
   const shownSessions = sessions
-    .filter((s) => s.isLive || inDay(s.startTs || 0))
+    // Phiên đang live chỉ hiện ở khoảng ngày có hôm nay, không lẫn sang "Hôm qua".
+    .filter((s) => inDay(s.startTs || 0) || (s.isLive && sessionDayFilter !== 'Hôm qua'))
     .sort((a, b) => (b.startTs || 0) - (a.startTs || 0));
   const shownOrders = orders.filter((o) => inDay(Number(o.ts) || 0));
   const shownGuests = new Set(shownOrders.map((o) => (o.uniqueId || o.nickname || '').toLowerCase()));
@@ -623,7 +624,6 @@ $('#active-lives-strip')?.addEventListener('click', (e) => {
 function renderLiveView() {
   renderSessionsOverview();
   renderCommentStream();
-  renderClosedOrderPanel(getSelectedCustomerUid());
 }
 
 function formatCommentText(rawText) {
@@ -637,7 +637,6 @@ function renderCommentStream() {
   const container = $('#comment-stream-container');
   if (!container) return;
 
-  const selectedUid = getSelectedCustomerUid();
   const isDemo = isDemoAccount();
   const liveComments = commentsInScope();
 
@@ -692,7 +691,6 @@ function renderCommentStream() {
 
   container.innerHTML = shownRows
     .map((c) => {
-      const isSelected = c.uniqueId === selectedUid;
       const tagBadge =
         c.tag === 'Mới'
           ? '<span class="badge-pill-tag badge-tag-new">Mới</span>'
@@ -700,24 +698,21 @@ function renderCommentStream() {
           ? '<span class="badge-pill-tag badge-tag-loyal">Mua nhiều</span>'
           : '';
 
-      const hasOrder = c.price > 0;
       const isPrinted = Boolean(c.printed);
-
-      const printBtnHtml = hasOrder
-        ? `
+      // Bình luận nào cũng in được: không có giá thì vẫn lưu vào khách với giá 0.
+      const printBtnHtml = `
         <button class="btn-cmt-quick-print ${isPrinted ? 'printed' : ''}" data-cmt-print-id="${esc(c.id)}" data-cmt-print-user="${esc(c.uniqueId)}">
           <span>🖨</span>
-          <span>${isPrinted ? 'Đã in' : 'In đơn'}</span>
+          <span>${isPrinted ? 'Đã in' : 'In'}</span>
         </button>
-      `
-        : '';
+      `;
 
       const warmClass = isWarmAvatar(c) ? 'warm' : '';
       const isNewRow = !isFirstPaint && !renderedCommentIds.has(String(c.id));
       renderedCommentIds.add(String(c.id));
 
       return `
-        <div class="comment-row-item ${isSelected ? 'selected' : ''} ${isNewRow ? 'is-new' : ''}" data-comment-user="${esc(c.uniqueId)}">
+        <div class="comment-row-item ${isNewRow ? 'is-new' : ''}" data-comment-user="${esc(c.uniqueId)}">
           <div class="comment-left">
             <div class="user-circle-avatar ${warmClass}">${avatarInitial(c.nickname || c.uniqueId)}</div>
             <div class="comment-content-wrap">
@@ -797,158 +792,8 @@ $('#comment-stream-container')?.addEventListener('click', (e) => {
     const uid = btnPrint.dataset.cmtPrintUser;
     setSelectedCustomerUid(uid);
     printSingleComment(btnPrint.dataset.cmtPrintId);
-    return;
-  }
-
-  const item = e.target.closest('.comment-row-item');
-  if (item) {
-    setSelectedCustomerUid(item.dataset.commentUser);
-    renderLiveView();
   }
 });
-
-function renderClosedOrderPanel(uniqueId) {
-  const cust =
-    state.customers.find((c) => (c.uniqueId || '').toLowerCase() === (uniqueId || '').toLowerCase()) ||
-    state.customers[0];
-
-  if (!cust) {
-    if ($('#closed-panel-sub')) $('#closed-panel-sub').textContent = 'Chưa có đơn chốt';
-    if ($('#closed-cust-avatar')) {
-      $('#closed-cust-avatar').textContent = '--';
-      $('#closed-cust-avatar').className = 'user-circle-avatar';
-    }
-    if ($('#closed-cust-name')) $('#closed-cust-name').textContent = 'Chưa có khách chốt đơn';
-    if ($('#closed-cust-handle')) $('#closed-cust-handle').textContent = '@---';
-    if ($('#closed-cust-cmt-badge')) $('#closed-cust-cmt-badge').textContent = '0 bình luận';
-    if ($('#closed-metric-session')) $('#closed-metric-session').textContent = 'Chưa có phiên';
-    if ($('#closed-metric-amount')) $('#closed-metric-amount').textContent = '0 sản phẩm · 0 ₫';
-    if ($('#closed-comments-groups')) {
-      $('#closed-comments-groups').innerHTML = `
-        <div class="closed-cmt-group">
-          <div class="closed-item-pill">
-            <span>Chưa có món hàng chốt nào</span>
-          </div>
-        </div>
-      `;
-    }
-    if ($('#mobile-sticky-order-bar')) $('#mobile-sticky-order-bar').style.display = 'none';
-    return;
-  }
-
-  const orders = state.orders.filter((o) => areSameCustomer(o, cust));
-  const activeOrder = orders.find((o) => o.status === 'new') || orders[0];
-
-  if ($('#closed-panel-sub')) {
-    $('#closed-panel-sub').textContent = `Đơn của ${cust.name} · ${activeOrder?.timeStr || '20:42'}`;
-  }
-  if ($('#closed-cust-avatar')) {
-    $('#closed-cust-avatar').textContent = avatarInitial(cust.name);
-    $('#closed-cust-avatar').className = `user-circle-avatar ${isWarmAvatar(cust) ? 'warm' : ''}`;
-  }
-  if ($('#closed-cust-name')) $('#closed-cust-name').textContent = cust.name;
-  if ($('#closed-cust-handle')) $('#closed-cust-handle').textContent = '@' + cust.uniqueId;
-
-  const liveComments = getLiveComments();
-  const custComments = liveComments.filter((c) => areSameCustomer(c, cust) && c.price > 0);
-  const commentCount = custComments.length || (activeOrder?.items?.length ? activeOrder.items.length : 2);
-  if ($('#closed-cust-cmt-badge')) $('#closed-cust-cmt-badge').textContent = `${commentCount} bình luận`;
-
-  const totalItems = activeOrder?.items?.reduce((s, x) => s + (x.qty || 1), 0) || 3;
-  const totalAmount = activeOrder?.total || 450000;
-
-  if ($('#closed-metric-session')) $('#closed-metric-session').textContent = 'Phiên tối · 19:30';
-  if ($('#closed-metric-amount')) {
-    $('#closed-metric-amount').textContent = `${totalItems} sản phẩm · ${formatVND(totalAmount)}`;
-  }
-
-  const groupsContainer = $('#closed-comments-groups');
-  if (groupsContainer) {
-    if (activeOrder && activeOrder.items && activeOrder.items.length) {
-      groupsContainer.innerHTML = activeOrder.items
-        .map(
-          (it) => `
-          <div class="closed-cmt-group">
-            <div class="closed-cmt-title-row">
-              <span class="closed-cmt-msg">${formatCommentText(it.comment || `${it.name} chốt ạ`)}</span>
-              <span class="closed-cmt-time">${esc(it.timeStr || activeOrder.timeStr || '20:40')}</span>
-            </div>
-            <div class="closed-item-pill">
-              <span>${esc(it.name)} · ${it.qty || 1} × ${formatVND(it.price || 0)}</span>
-            </div>
-          </div>
-        `
-        )
-        .join('');
-    } else {
-      groupsContainer.innerHTML = `
-        <div class="closed-cmt-group">
-          <div class="closed-item-pill">
-            <span>Chưa có món hàng chốt nào</span>
-          </div>
-        </div>
-      `;
-    }
-  }
-
-  const btnPrint = $('#btn-closed-print-order');
-  if (btnPrint) {
-    const isPrinted = activeOrder ? activeOrder.status === 'printed' || activeOrder.printCount > 0 : false;
-    btnPrint.innerHTML = isPrinted ? '<span>🖨 In lại đơn</span>' : '<span>🖨 In đơn ngay</span>';
-    btnPrint.onclick = () => {
-      if (activeOrder) {
-        handlePrintOrder(activeOrder);
-        renderLiveView();
-      } else {
-        toast(`Chưa có đơn hàng nào của ${cust.name}`, '⚠️');
-      }
-    };
-  }
-
-  const btnView = $('#btn-closed-view-order');
-  if (btnView) {
-    btnView.onclick = () => {
-      if (activeOrder) {
-        switchTab('orders');
-        openOrderDetailView(activeOrder.id);
-      } else {
-        switchTab('orders');
-      }
-    };
-  }
-
-  const stickyBar = $('#mobile-sticky-order-bar');
-  const detailsLayout = $('#live-stream-details-layout');
-  const isShowingDetails = detailsLayout && detailsLayout.style.display !== 'none';
-  if (stickyBar) {
-    if (activeOrder && isShowingDetails) {
-      stickyBar.style.display = 'flex';
-      if ($('#sticky-bar-avatar')) $('#sticky-bar-avatar').textContent = avatarInitial(cust.name);
-      if ($('#sticky-bar-name')) $('#sticky-bar-name').textContent = cust.name;
-      if ($('#sticky-bar-summary')) {
-        $('#sticky-bar-summary').textContent = `${totalItems} sản phẩm · ${formatVND(totalAmount)}`;
-      }
-      const stickyPrint = $('#btn-sticky-print-order');
-      if (stickyPrint) {
-        const isPrinted = activeOrder.status === 'printed' || activeOrder.printCount > 0;
-        stickyPrint.textContent = isPrinted ? '🖨 In lại' : '🖨 In ngay';
-        stickyPrint.onclick = () => {
-          handlePrintOrder(activeOrder);
-          renderLiveView();
-        };
-      }
-      const stickyView = $('#btn-sticky-view-order');
-      if (stickyView) {
-        stickyView.onclick = () => {
-          switchTab('orders');
-          openOrderDetailView(activeOrder.id);
-        };
-      }
-    } else {
-      stickyBar.style.display = 'none';
-    }
-  }
-}
 
 $$('[data-livefilter]').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -965,14 +810,12 @@ function setLiveViewSegment(seg) {
   const details = $('#live-stream-details-layout');
   const btnLive = $('#btn-seg-live-stream');
   const btnTimeline = $('#btn-seg-timeline');
-  const stickyBar = $('#mobile-sticky-order-bar');
 
   if (seg === 'timeline') {
     if (overview) overview.style.display = 'block';
     if (details) details.style.display = 'none';
     if (btnTimeline) btnTimeline.classList.add('active');
     if (btnLive) btnLive.classList.remove('active');
-    if (stickyBar) stickyBar.style.display = 'none';
   } else {
     if (overview) overview.style.display = 'none';
     if (details) details.style.display = 'grid';
@@ -3335,14 +3178,16 @@ function printSingleComment(commentId) {
     c = olderComments.get(String(commentId));
     getLiveComments().push(c);
   }
-  if (!c || !(c.price > 0)) return toast('Bình luận này chưa có giá để in', '⚠️');
+  if (!c) return toast('Không tìm thấy bình luận này', '⚠️');
+  const hasPrice = c.price > 0;
 
   const { order, newItem, isDuplicate } = addOrMergeOrder({
     uniqueId: c.uniqueId,
     userId: c.userId || '',
     nickname: c.nickname,
-    productName: c.productName || 'Sản phẩm',
-    price: c.price,
+    // Bình luận không có giá vẫn lưu lại được: lấy chính nội dung làm tên món, giá 0.
+    productName: (hasPrice && c.productName) || String(c.comment || '').trim().slice(0, 60) || 'Sản phẩm',
+    price: hasPrice ? c.price : 0,
     qty: c.qty || 1,
     comment: c.comment,
     commentId: c.id,

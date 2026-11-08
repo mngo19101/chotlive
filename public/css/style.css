@@ -1044,7 +1044,8 @@ input, select, textarea {
 /* Chi tiết luồng bình luận trực tiếp */
 .live-layout-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(350px, 1fr);
+  /* Chỉ còn danh sách bình luận, chiếm hết bề ngang. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
   align-items: start;
 }
@@ -1101,7 +1102,6 @@ input, select, textarea {
   padding: 12px 10px;
   border-bottom: 1px solid #f5f2ec;
   border-radius: var(--radius-md);
-  cursor: pointer;
   transition: background 0.15s ease;
 }
 
@@ -1143,9 +1143,7 @@ input, select, textarea {
 .comment-body-text {
   font-size: 13.5px;
   color: #3b3734;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .comment-right-col {

@@ -263,7 +263,7 @@ final class SyncTests: XCTestCase {
         var old = comment("old")
         old.ts = Date(timeIntervalSince1970: 1_794_000_000)
 
-        XCTAssertEqual(store.sessionComments("s1", older: [old, kept]).map(\.id), ["old", "kept"])
+        XCTAssertEqual(store.sessionComments("s1", older: [old, kept]).map(\.id), ["kept", "old"], "mới nhất trên cùng")
     }
 
     func testOlderCommentsAreNotStoredOnThePhone() {

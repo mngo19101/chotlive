@@ -230,7 +230,7 @@ extension Store {
     /// Lần đầu trên máy mới thì chưa có mốc: lấy phần mới nhất.
     var latestCommentDate: Date? { comments.map(\.ts).max() }
 
-    /// Bình luận của một phiên, cũ trước: phần lưu trên máy cộng với phần cũ vừa tải từ server.
+    /// Bình luận của một phiên, mới nhất trước: phần lưu trên máy cộng với phần cũ vừa tải từ server.
     /// Phần tải về chỉ để xem, không ghi vào máy, nên không đẩy bình luận mới ra khỏi giới hạn lưu.
     func sessionComments(_ id: String, older: [LiveComment]) -> [LiveComment] {
         let local = comments(session: id)
@@ -241,6 +241,6 @@ extension Store {
             let ordered = Set(customers.flatMap(\.items).map { $0.commentId ?? $0.id })
             for i in extra.indices where ordered.contains(extra[i].id) { extra[i].printed = true }
         }
-        return (local + extra).sorted { $0.ts < $1.ts }
+        return (local + extra).sorted { $0.ts > $1.ts }
     }
 }
