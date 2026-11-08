@@ -38,17 +38,17 @@ struct OrdersView: View {
                         ui.present(dim: 0.9) { DateFilterSheet(filter: dateFilter) { dateFilter = $0 } }
                     }
                 }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        Chip(title: "Tất cả · \(every.count)", selected: filter == 0) { filter = 0 }
-                        statusChip("Đơn mới", 1, scoped)
-                        statusChip("Chờ gửi", 2, scoped)
-                        statusChip("Gom sau", 3, scoped)
-                        statusChip("Đang giao", 4, scoped)
-                    }
-                    .padding(.horizontal, Metrics.gutter)
+                // Cả 5 tab nằm gọn một hàng, không phải kéo ngang. Hàng chip cuộn ngang cũ (lề âm)
+                // làm trang rộng hơn màn hình nên kéo qua lại bị lộ khoảng trắng.
+                HStack(spacing: 4) {
+                    StatusTab(title: "Tất cả", count: every.count, selected: filter == 0) { filter = 0 }
+                    statusTab("Đơn mới", 1, scoped)
+                    statusTab("Chờ gửi", 2, scoped)
+                    statusTab("Gom sau", 3, scoped)
+                    statusTab("Đang giao", 4, scoped)
                 }
-                .padding(.horizontal, -Metrics.gutter)
+                .padding(4)
+                .cardStyle(18)
 
                 if !groups.isEmpty {
                     ReadyExportBanner(groups: groups) {
@@ -86,8 +86,8 @@ struct OrdersView: View {
         return l
     }
 
-    private func statusChip(_ title: String, _ tab: Int, _ scoped: [Order]) -> some View {
-        Chip(title: "\(title) · \(scoped.filter { matches($0, tab) }.count)", selected: filter == tab) { filter = tab }
+    private func statusTab(_ title: String, _ tab: Int, _ scoped: [Order]) -> some View {
+        StatusTab(title: title, count: scoped.filter { matches($0, tab) }.count, selected: filter == tab) { filter = tab }
     }
 
     private func openReview(_ o: Order) {
@@ -168,6 +168,33 @@ struct OrdersView: View {
             .padding(.horizontal, 10)
             .frame(height: 24)
             .background(Capsule().fill(fill))
+    }
+}
+
+/// Một ô trong hàng tab trạng thái đơn: số đơn to ở trên, tên tab nhỏ ở dưới, chia đều chiều ngang.
+private struct StatusTab: View {
+    let title: String
+    let count: Int
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 1) {
+                T("\(count)", 16, .heavy, selected ? Theme.ink : (count > 0 ? Theme.ink : Theme.muted))
+                    .lineLimit(1)
+                T(title, 11.5, selected ? .bold : .semibold, selected ? Theme.ink : Theme.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .padding(.horizontal, 2)
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(selected ? Theme.orange : Color.clear))
+            .onAccent(selected)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

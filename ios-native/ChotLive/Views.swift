@@ -611,15 +611,13 @@ struct CustomersView: View {
                 PageHeader(subtitle: "\(store.customers.count) khách · \(store.customers.filter(\.isNewToday).count) khách mới hôm nay",
                            title: "Khách hàng") { EmptyView() }
                 SearchField(text: $search)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        Chip(title: "Tất cả", selected: filter == 0) { filter = 0 }
-                        Chip(title: "Mới hôm nay", selected: filter == 1) { filter = 1 }
-                        Chip(title: "Mua nhiều", selected: filter == 2) { filter = 2 }
-                    }
-                    .padding(.horizontal, Metrics.gutter)
+                // 3 chip vừa một hàng: không cần cuộn ngang (lề âm làm trang kéo ngang được).
+                HStack(spacing: 8) {
+                    Chip(title: "Tất cả", selected: filter == 0) { filter = 0 }
+                    Chip(title: "Mới hôm nay", selected: filter == 1) { filter = 1 }
+                    Chip(title: "Mua nhiều", selected: filter == 2) { filter = 2 }
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, -Metrics.gutter)
 
                 if list.isEmpty {
                     T("Chưa có khách. Bấm nút in trên một bình luận để lưu khách.", 13, .medium, Theme.muted)

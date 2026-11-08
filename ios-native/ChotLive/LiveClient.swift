@@ -22,8 +22,14 @@ final class LiveClient: ObservableObject {
     @Published private(set) var savedAccounts: [AuthStorage.SavedAccount] = []
     /// Dùng thử, gói hoặc đã hết hạn của tài khoản đang dùng.
     @Published private(set) var access: AccountAccess? {
-        didSet { scheduleAccessCheck() }
+        didSet {
+            if let access { accessByAccount[currentAccountKey] = access }
+            scheduleAccessCheck()
+        }
     }
+    /// Hạn dùng đã biết của từng tài khoản trên máy: đổi tài khoản thì hiện ngay thẻ đúng của tài khoản đó,
+    /// không để thẻ của tài khoản cũ nhấp nháy rồi mới đổi khi server trả lời.
+    private var accessByAccount: [String: AccountAccess] = [:]
     /// Thông báo vừa bị chặn theo dõi live vì hết hạn, hiện thành hộp thoại ở mọi màn hình.
     @Published var accessNotice: String?
     /// Số tin Admin trả lời mà khách chưa đọc.
@@ -176,6 +182,7 @@ final class LiveClient: ObservableObject {
         baseURL = account.server
         username = account.user
         token = tk
+        access = accessByAccount[key]
         savedAccounts = AuthStorage.savedAccounts(defaults)
         onAccountChange?(key)
         loggedIn = true

@@ -101,7 +101,29 @@ struct SettingsView: View {
 
     private func appAccountRow(_ a: AuthStorage.SavedAccount) -> some View {
         let active = a.key == currentAccountKey
-        return Button {
+        // Không dùng Button + contextMenu: chạm vào là iOS chụp ảnh dòng để làm hiệu ứng nhấn giữ,
+        // đổi tài khoản xong ảnh cũ mờ dần chồng lên dòng mới nên trông như bị giật, chữ đè lên nhau.
+        return HStack(spacing: 12) {
+            Avatar(text: initialsOf(a.user), seed: a.key)
+            VStack(alignment: .leading, spacing: 3) {
+                T(a.user, 15, .bold).lineLimit(1)
+                T(serverHost(a.server), 12, .medium, Theme.muted).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if active {
+                T("Đang dùng", 12, .semibold, Theme.green).lineLimit(1).fixedSize().padding(.trailing, -5)
+                Icon(name: .check, size: 14, weight: 2.8)
+                    .frame(width: 24, height: 24)
+                    .background(Circle().fill(Theme.orange))
+                    .onAccent()
+            } else {
+                Circle().strokeBorder(Theme.bar, lineWidth: 1.5).frame(width: 24, height: 24)
+            }
+        }
+        .padding(.horizontal, 17)
+        .frame(height: 68.5)
+        .contentShape(Rectangle())
+        .onTapGesture {
             guard !active else { return }
             if ["connected", "connecting", "reconnecting"].contains(client.liveState) {
                 ui.confirm = ConfirmItem(title: "Đổi tài khoản?",
@@ -110,34 +132,14 @@ struct SettingsView: View {
             } else {
                 client.switchAccount(to: a.key)
             }
-        } label: {
-            HStack(spacing: 12) {
-                Avatar(text: initialsOf(a.user), seed: a.key)
-                VStack(alignment: .leading, spacing: 3) {
-                    T(a.user, 15, .bold).lineLimit(1)
-                    T(serverHost(a.server), 12, .medium, Theme.muted).lineLimit(1)
-                }
-                Spacer(minLength: 4)
-                if active {
-                    T("Đang dùng", 12, .semibold, Theme.green).lineLimit(1).fixedSize().padding(.trailing, -5)
-                    Icon(name: .check, size: 14, weight: 2.8)
-                        .frame(width: 24, height: 24)
-                        .background(Circle().fill(Theme.orange))
-                        .onAccent()
-                } else {
-                    Circle().strokeBorder(Theme.bar, lineWidth: 1.5).frame(width: 24, height: 24)
-                }
-            }
-            .padding(.horizontal, 17)
-            .frame(height: 68.5)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .contextMenu {
-            if !active {
-                Button("Xoá tài khoản", role: .destructive) { client.forgetSavedAccount(a.key) }
-            }
+        .onLongPressGesture(minimumDuration: 0.5) {
+            guard !active else { return }
+            ui.confirm = ConfirmItem(title: "Xoá tài khoản \(a.user)?",
+                                     message: "Tài khoản sẽ bị xoá khỏi máy này. Muốn dùng lại thì đăng nhập lại.",
+                                     action: "Xoá tài khoản") { client.forgetSavedAccount(a.key) }
         }
+        .accessibilityAddTraits(.isButton)
     }
 
     private func serverHost(_ s: String) -> String {
