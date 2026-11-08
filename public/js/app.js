@@ -44,7 +44,9 @@ import {
   parsePriceInput,
   formatVND,
   formatPhone,
-  extractProductInfo
+  extractProductInfo,
+  isOnlyCodes,
+  stripAccents
 } from './price.js';
 import { renderTicket, ensureFonts } from './ticket.js';
 import { canvasToEscPos } from './escpos.js';
@@ -633,18 +635,69 @@ function formatCommentText(rawText) {
   return text;
 }
 
+/** Từ khoá chốt đơn, giống mặc định của app iPhone và Android. */
+const CLOSING_KEYWORDS = ['chot', 'lay'];
+
+/**
+ * Bình luận chốt đơn: đã in, có từ khoá chốt, hoặc chỉ ghi mã.
+ * Có số thôi chưa đủ: "35 tuổi" hay "Cho em xem mã 25 với" không phải chốt đơn.
+ */
+function isClosingComment(c) {
+  if (c.printed) return true;
+  const text = stripAccents(String(c.comment || '').toLowerCase());
+  if (CLOSING_KEYWORDS.some((k) => text.includes(k))) return true;
+  return isOnlyCodes(c.comment, priceOpts());
+}
+
+const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
+const isRealUserId = (id) => /^\d{8,}$/.test(String(id || ''));
+
+/**
+ * Khách mới: lần đầu có đơn đúng vào ngày của phiên live, giống app điện thoại.
+ * Trả về hàm kiểm tra cho từng bình luận.
+ */
+function newCustomerChecker() {
+  const byUser = new Map();
+  const byUid = new Map();
+  const keep = (map, key, ts) => {
+    if (key && !(map.get(key) <= ts)) map.set(key, ts);
+  };
+  for (const o of state.orders || []) {
+    if (o.status === 'cancelled') continue;
+    for (const it of o.items || []) {
+      const ts = Number(it.ts) || Number(o.ts) || 0;
+      if (!ts) continue;
+      if (isRealUserId(o.userId)) keep(byUser, String(o.userId), ts);
+      keep(byUid, String(o.uniqueId || '').toLowerCase(), ts);
+    }
+  }
+  const sessionStart = new Map((state.sessions || []).map((x) => [x.id, Number(x.startTs) || 0]));
+  return (c) => {
+    const first = (isRealUserId(c.userId) && byUser.get(String(c.userId))) || byUid.get(String(c.uniqueId || '').toLowerCase());
+    if (!first) return false;
+    return sameDay(first, sessionStart.get(c.sessionId) || Number(c.ts) || Date.now());
+  };
+}
+
+function customerKeyOf(c) {
+  return isRealUserId(c.userId) ? String(c.userId) : String(c.uniqueId || '').toLowerCase();
+}
+
+function matchesLiveFilter(c, isNewCustomer) {
+  if (liveFilter === 'deals') return isClosingComment(c);
+  if (liveFilter === 'new') return isNewCustomer(c);
+  return true;
+}
+
 function renderCommentStream() {
   const container = $('#comment-stream-container');
   if (!container) return;
 
   const isDemo = isDemoAccount();
   const liveComments = commentsInScope();
+  const isNewCustomer = newCustomerChecker();
 
-  const filtered = liveComments.filter((c) => {
-    if (liveFilter === 'deals') return c.price > 0;
-    if (liveFilter === 'new') return c.tag === 'Mới';
-    return true;
-  });
+  const filtered = liveComments.filter((c) => matchesLiveFilter(c, isNewCustomer));
 
   const scopeSessions = (state.sessions || []).filter((s) => !commentScopeSessionId || s.id === commentScopeSessionId);
   const countAll = isDemo
@@ -652,11 +705,19 @@ function renderCommentStream() {
       ? 208 + liveComments.length
       : liveComments.length
     : Math.max(scopeSessions.reduce((n, s) => n + (Number(s.commentCount) || 0), 0), liveComments.length);
-  const loadedDeals = liveComments.filter((c) => c.price > 0).length;
-  const countDeals = isDemo
-    ? 28 + loadedDeals
-    : Math.max(scopeSessions.reduce((n, s) => n + (Number(s.priceCount) || 0), 0), loadedDeals);
-  const countNew = isDemo ? 9 : Math.max(countDeals, liveComments.filter((c) => c.tag === 'Mới').length);
+  // Bình luận đã chốt có thể chưa được tải về: đếm cả các món đã lưu thành đơn trong phiên.
+  const scopeIds = new Set(scopeSessions.map((s) => s.id));
+  const scopeItems = (state.orders || [])
+    .filter((o) => o.status !== 'cancelled')
+    .flatMap((o) => (o.items || []).filter((it) => scopeIds.has(it.sessionId)).map((it) => ({ o, it })));
+  const dealIds = new Set(liveComments.filter(isClosingComment).map((c) => String(c.id)));
+  for (const { it } of scopeItems) dealIds.add(String(it.commentId || it.id));
+  const countDeals = isDemo ? 28 + dealIds.size : dealIds.size;
+  const newKeys = new Set(liveComments.filter(isNewCustomer).map(customerKeyOf));
+  for (const { o, it } of scopeItems) {
+    if (isNewCustomer({ userId: o.userId, uniqueId: o.uniqueId, sessionId: it.sessionId, ts: it.ts })) newKeys.add(customerKeyOf(o));
+  }
+  const countNew = isDemo ? 9 : newKeys.size;
   if ($('#chip-live-all')) $('#chip-live-all').textContent = `Tất cả ${countAll}`;
   if ($('#chip-live-deals')) $('#chip-live-deals').textContent = `Chốt đơn ${countDeals}`;
   if ($('#chip-live-new')) $('#chip-live-new').textContent = `Khách mới ${countNew}`;
@@ -692,10 +753,10 @@ function renderCommentStream() {
   container.innerHTML = shownRows
     .map((c) => {
       const tagBadge =
-        c.tag === 'Mới'
-          ? '<span class="badge-pill-tag badge-tag-new">Mới</span>'
-          : c.tag === 'Mua nhiều'
+        c.tag === 'Mua nhiều'
           ? '<span class="badge-pill-tag badge-tag-loyal">Mua nhiều</span>'
+          : isNewCustomer(c)
+          ? '<span class="badge-pill-tag badge-tag-new">Mới</span>'
           : '';
 
       const isPrinted = Boolean(c.printed);
@@ -748,11 +809,8 @@ function commentsInScope() {
 
 $('#btn-load-older-comments')?.addEventListener('click', async (e) => {
   const btn = e.currentTarget;
-  const filteredCount = commentsInScope().filter((c) => {
-    if (liveFilter === 'deals') return c.price > 0;
-    if (liveFilter === 'new') return c.tag === 'Mới';
-    return true;
-  }).length;
+  const isNewCustomer = newCustomerChecker();
+  const filteredCount = commentsInScope().filter((c) => matchesLiveFilter(c, isNewCustomer)).length;
   if (commentRenderLimit < filteredCount) {
     commentRenderLimit += COMMENT_PAGE;
     renderCommentStream();
