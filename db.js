@@ -202,3 +202,47 @@ export function listComments(db, userId, { sessionId = '', before = 0, beforeId 
 export function clearComments(db, userId) {
   db.prepare('DELETE FROM live_comments WHERE user_id = ?').run(userId);
 }
+
+/** Mốc thời gian trước ngày này coi là lỗi (0, tính bằng giây thay vì mili giây...): không bao giờ xóa. */
+const MIN_VALID_TS = Date.UTC(2024, 0, 1);
+/** Một lần dọn mà xóa quá tỉ lệ này thì gần như chắc là đồng hồ hay dữ liệu bị lỗi: dừng lại. */
+const MAX_PURGE_FRACTION = 0.2;
+
+/**
+ * Xóa bình luận cũ hơn `olderThanMs`, trừ bình luận đã chốt:
+ * đã in, có giá (đọc ra được số tiền) hoặc được đơn/khách tham chiếu qua `keepIds`.
+ *
+ * Chống xóa nhầm vì lỗi thời gian:
+ * - Mốc thời gian vô lý (trước 2024, hay ở tương lai) thì bỏ qua, giữ nguyên bình luận.
+ * - Tuổi bình luận tính từ bình luận mới nhất chứ không chỉ từ đồng hồ máy:
+ *   đồng hồ laptop nhảy tới năm 2030 cũng không làm mọi thứ "quá 1 năm".
+ * - Một lần mà phải xóa hơn 20% bình luận của tài khoản thì không xóa gì, báo `blocked`.
+ *   Chạy đều mỗi ngày thì mỗi lần chỉ xóa khoảng một ngày bình luận cũ.
+ */
+export function purgeOldComments(db, userId, olderThanMs, keepIds = new Set(), now = Date.now()) {
+  const { newest, total } = db
+    .prepare('SELECT MAX(ts) AS newest, COUNT(*) AS total FROM live_comments WHERE user_id = ? AND ts >= ? AND ts <= ?')
+    .get(userId, MIN_VALID_TS, now + 24 * 60 * 60 * 1000);
+  if (!newest) return { deleted: 0 };
+  const cutoff = Math.min(now, Number(newest)) - olderThanMs;
+  if (cutoff <= MIN_VALID_TS) return { deleted: 0 };
+
+  const rows = db
+    .prepare(
+      `SELECT id FROM live_comments
+       WHERE user_id = ? AND ts >= ? AND ts < ?
+         AND COALESCE(json_extract(data, '$.printed'), 0) = 0
+         AND COALESCE(json_extract(data, '$.price'), 0) = 0`
+    )
+    .all(userId, MIN_VALID_TS, cutoff)
+    .map((r) => r.id)
+    .filter((id) => !keepIds.has(String(id)));
+  if (!rows.length) return { deleted: 0 };
+  if (rows.length > Number(total) * MAX_PURGE_FRACTION) return { deleted: 0, blocked: rows.length, total: Number(total) };
+
+  const del = db.prepare('DELETE FROM live_comments WHERE user_id = ? AND id = ?');
+  tx(db, () => {
+    for (const id of rows) del.run(userId, id);
+  });
+  return { deleted: rows.length };
+}

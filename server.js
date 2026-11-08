@@ -448,6 +448,36 @@ for (const [uid, st] of Object.entries(statesByUserId)) {
   if (Array.isArray(st.comments)) sqlite.insertComments(db, uid, st.comments);
 }
 
+/* Bình luận giữ tối đa 1 năm; bình luận đã chốt (đã in, có giá, hoặc nằm trong đơn) giữ vĩnh viễn. */
+const COMMENT_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
+
+function purgeOldComments() {
+  for (const [uid, st] of Object.entries(statesByUserId)) {
+    try {
+      const keep = new Set();
+      for (const list of [st.orders, st.customers]) {
+        for (const o of list || []) {
+          if (o?.commentId) keep.add(String(o.commentId));
+          for (const it of o?.items || []) {
+            if (it?.commentId) keep.add(String(it.commentId));
+            if (it?.id) keep.add(String(it.id));
+          }
+        }
+      }
+      const r = sqlite.purgeOldComments(db, uid, COMMENT_RETENTION_MS, keep);
+      if (r.deleted) console.log(`[comments] Đã xóa ${r.deleted} bình luận quá 1 năm của ${uid}`);
+      if (r.blocked)
+        console.warn(
+          `[comments] KHÔNG xóa: ${uid} sẽ mất ${r.blocked}/${r.total} bình luận một lúc, có thể đồng hồ máy hoặc dữ liệu thời gian bị lỗi`
+        );
+    } catch (err) {
+      console.warn('[comments] Lỗi dọn bình luận cũ:', err.message);
+    }
+  }
+}
+purgeOldComments();
+setInterval(purgeOldComments, 24 * 60 * 60 * 1000).unref();
+
 function getStateForUser(userId) {
   const key = userId || 'u_admin';
   const u = usersDb.users.find((x) => x.id === key);
