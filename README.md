@@ -15,6 +15,8 @@ npm.cmd start
 
 Mở http://localhost:3000 trên máy tính. `localhost` chỉ mở được trên chính máy đó. Điện thoại cùng Wi-Fi dùng địa chỉ IP LAN, xem trên web ở **Tôi › Đồng bộ Web & App (IPA)**.
 
+**Tự chạy server khi bật máy:** bấm đúp `scripts\cai-tu-chay-server.cmd` và chọn **Yes**. Server sẽ tự chạy (không hiện cửa sổ) mỗi khi đăng nhập Windows, tự bật lại nếu bị tắt, và cổng 3000 được mở cho điện thoại cùng Wi-Fi hoặc Tailscale. Nếu điện thoại dùng địa chỉ Tailscale Funnel (`https://<tên-máy>.<tailnet>.ts.net`) thì không cần chọn **Yes**, vì Funnel chuyển kết nối vào ngay trên máy. Nhật ký ở `data\server.log`. Khi đã cài thì đừng chạy thêm `npm start`, vì hai server sẽ tranh cổng 3000. Muốn gỡ: `powershell -ExecutionPolicy Bypass -File scripts\cai-tu-chay-server.ps1 -Uninstall`.
+
 Muốn in qua mạng LAN, đặt `LAN_MODE=1` trong file `.env`. Chỉ bật khi server chạy cùng mạng với máy in, không bật trên VPS. Các biến khác xem trong [.env.example](.env.example).
 
 Chạy test (dùng TikTok giả trong `test/fake-tiktok`, không gọi mạng thật):
