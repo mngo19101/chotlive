@@ -21,6 +21,7 @@ import com.chotlive.app.data.bool
 import com.chotlive.app.data.num
 import com.chotlive.app.data.obj
 import com.chotlive.app.data.str
+import com.chotlive.app.data.wholeNumbers
 import com.chotlive.app.model.LiveComment
 import com.chotlive.app.model.PriceParser
 import kotlinx.coroutines.Dispatchers
@@ -312,7 +313,7 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
             }
         } ?: return null
         val page = try {
-            AppJson.decodeFromString(CommentsPage.serializer(), text)
+            AppJson.decodeFromJsonElement(CommentsPage.serializer(), AppJson.parseToJsonElement(text).wholeNumbers())
         } catch (e: Exception) {
             return null
         }
@@ -494,7 +495,7 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
         // Lỗi đọc dữ liệu từ server: giữ nguyên dữ liệu trên máy, lần sau server gửi lại.
         val raw = m.obj("snapshot") ?: return null
         return try {
-            AppJson.decodeFromJsonElement(ServerSnapshot.serializer(), raw)
+            AppJson.decodeFromJsonElement(ServerSnapshot.serializer(), raw.wholeNumbers())
         } catch (e: Exception) {
             null
         }

@@ -8,6 +8,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -164,3 +165,22 @@ fun JsonObject.bool(k: String): Boolean? = (this[k] as? JsonPrimitive)?.booleanO
 fun JsonObject.obj(k: String): JsonObject? = this[k] as? JsonObject
 fun JsonObject.arr(k: String): JsonArray? = this[k] as? JsonArray
 fun JsonElement.asObj(): JsonObject? = this as? JsonObject
+
+/**
+ * Server (Node.js) có lúc lưu mốc thời gian dạng số lẻ, ví dụ `1794026406933.265`.
+ * App không có trường số thập phân nào, nên làm tròn hết về số nguyên trước khi đọc;
+ * nếu không, chỉ một số lẻ cũng làm hỏng cả gói dữ liệu và app hiện trống.
+ */
+fun JsonElement.wholeNumbers(): JsonElement = when (this) {
+    is JsonObject -> JsonObject(mapValues { it.value.wholeNumbers() })
+    is JsonArray -> JsonArray(map { it.wholeNumbers() })
+    is JsonNull -> this
+    is JsonPrimitive -> {
+        val d = if (isString || content.none { it == '.' || it == 'e' || it == 'E' }) null else doubleOrNull
+        when {
+            d == null -> this
+            d.isFinite() -> JsonPrimitive(Math.round(d))
+            else -> JsonNull
+        }
+    }
+}

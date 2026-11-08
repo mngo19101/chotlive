@@ -5,6 +5,7 @@ import com.chotlive.app.data.AppJson
 import com.chotlive.app.data.ServerSnapshot
 import com.chotlive.app.data.Store
 import com.chotlive.app.data.SyncUpdate
+import com.chotlive.app.data.wholeNumbers
 import com.chotlive.app.model.Customer
 import com.chotlive.app.model.DeliveryAddress
 import com.chotlive.app.model.LiveComment
@@ -208,5 +209,19 @@ class StoreTest {
         assertTrue(store.isClosingComment(comment("1", "Chốt áo này")))
         assertTrue(store.isClosingComment(comment("2", "280")))
         assertFalse(store.isClosingComment(comment("3", "Mã 130 giá sao")))
+    }
+
+    @Test
+    fun fractionalTimestampsFromServerStillLoad() {
+        // Server có lúc lưu mốc thời gian dạng số lẻ; trước đây cả gói bị bỏ và app hiện trống.
+        val raw = """{"customers":[{"id":"linh","uniqueId":"linh","items":[{"id":"i1","comment":"150","price":150000,"ts":1794026406933.265,"qty":1}]}],
+            "sessions":[{"id":"s1","tiktok":"shop","start":1794026406472.917,"end":1794029182848.665,"lastActivity":1794029146981.1768}],"accounts":[]}"""
+        val snap = AppJson.decodeFromJsonElement(ServerSnapshot.serializer(), AppJson.parseToJsonElement(raw).wholeNumbers())
+        assertEquals(1794026406933L, snap.customers[0].items[0].ts)
+        assertEquals(1794029182849L, snap.sessions[0].end)
+        val store = Store(newDir(), "srv|a")
+        store.applyServer(snap)
+        assertEquals(1, store.allOrders().size)
+        assertEquals(1, store.sessions.size)
     }
 }
