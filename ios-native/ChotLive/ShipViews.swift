@@ -422,8 +422,30 @@ struct ShipReviewSheet: View {
                     payer = v
                     resetCod()
                 }
+                if let t = trial, t.forcedSender, !t.allPaid {
+                    forcedSenderWarning(t)
+                }
             }
         }
+    }
+
+    /// Đơn dưới 17.000đ mà chọn người nhận trả: vẫn cho chọn, khi xuất tự đổi người gửi trả và cộng ship vào COD.
+    private func forcedSenderWarning(_ t: Vtp.Summary) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.circle")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(Theme.red)
+                .padding(.top, 1)
+            T("Tiền COD dưới 17.000đ tự động chuyển qua người gửi trả ship và cộng tiền ship vào COD.",
+              12.5, .medium, Theme.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.red.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.red.opacity(0.3), lineWidth: 1))
+        .padding(.top, 2)
     }
 
     private func sizeInput(_ text: Binding<String>, _ placeholder: String) -> some View {

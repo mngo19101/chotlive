@@ -73,6 +73,8 @@ enum Vtp {
     struct Summary {
         var allPaid = false
         var senderPays = false
+        /// Bảng chọn người nhận trả nhưng đơn phải xuất người gửi trả (đơn dưới 17.000đ / bank đủ).
+        var forcedSender = false
         /// Phí ship đã cộng vào thu hộ (đơn nhỏ / bank đủ mà người nhận trả ship).
         var shipFee = 0
         var deposit = 0
@@ -111,13 +113,15 @@ enum Vtp {
         let payer = payerRaw == "sender" || payerRaw == "receiver" ? payerRaw! : (s.allPaid ? "sender" : "receiver")
         let override = last(lines) { $0.codOverride }
 
-        // Đơn thu hộ dưới 17.000đ mà shop trả cước: khách trả lại phí ship qua tiền thu hộ.
+        // Đơn thu hộ dưới 17.000đ: Viettel Post báo lỗi nếu người nhận trả cước, nên luôn xuất
+        // người gửi trả và khách trả lại phí ship qua tiền thu hộ, kể cả khi bảng chọn người nhận.
         let small = !s.allPaid && unpaid < smallOrderLimit
         // Đã bank đủ mà người nhận trả ship: Viettel Post báo lỗi khi COD 0đ + người nhận trả,
         // nên xuất thành người gửi trả cước và thu hộ đúng phí ship.
         let bankShipByReceiver = s.allPaid && payer == "receiver"
-        s.senderPays = payer == "sender" || bankShipByReceiver
-        let addFee = bankShipByReceiver || (small && s.senderPays)
+        s.senderPays = payer == "sender" || bankShipByReceiver || small
+        s.forcedSender = payer == "receiver" && s.senderPays
+        let addFee = bankShipByReceiver || small
         s.autoCod = (s.allPaid ? 0 : unpaid) + (addFee ? fee : 0)
         s.cod = override ?? s.autoCod
         s.codOverridden = override != nil

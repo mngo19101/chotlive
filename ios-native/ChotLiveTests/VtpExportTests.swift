@@ -39,8 +39,12 @@ final class VtpExportTests: XCTestCase {
         XCTAssertEqual(small.cod, 27_000)
         XCTAssertEqual(small.shipFee, 17_000)
         XCTAssertTrue(small.senderPays)
-        // Đơn nhỏ, người nhận trả: không cộng.
-        XCTAssertEqual(cod([line(10_000, ShipInfo(pay: "cod"))]).cod, 10_000)
+        // Đơn nhỏ mà chọn người nhận trả: vẫn xuất người gửi trả và cộng 17.000đ.
+        let smallReceiver = cod([line(15_000, ShipInfo(pay: "cod", payer: "receiver"))])
+        XCTAssertEqual(smallReceiver.cod, 32_000)
+        XCTAssertTrue(smallReceiver.senderPays)
+        XCTAssertTrue(smallReceiver.forcedSender)
+        XCTAssertFalse(cod([line(17_000, ShipInfo(pay: "cod", payer: "receiver"))]).senderPays)
         // Bank đủ + người gửi trả: 0đ. Bank đủ + người nhận trả: thu 17.000đ, xuất người gửi trả.
         XCTAssertEqual(cod([line(150_000, ShipInfo(pay: "paid", payer: "sender"))]).cod, 0)
         let bankReceiver = cod([line(150_000, ShipInfo(pay: "paid", payer: "receiver"))])
