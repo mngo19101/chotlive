@@ -59,6 +59,8 @@ struct SettingsView: View {
             .padding(.horizontal, Metrics.gutter)
             .padding(.top, 2)
             .padding(.bottom, 16)
+            // Đổi tài khoản làm thẻ gói xuất hiện/biến mất và đẩy cả trang; không animate để khỏi giật.
+            .transaction { $0.animation = nil }
         }
         .background(Theme.bg)
     }

@@ -721,6 +721,8 @@ struct FlowLayout: Layout {
 /// Thanh nút dưới đáy trang con: nền trắng, kẻ mảnh phía trên.
 struct FooterBar<Content: View>: View {
     @ViewBuilder var content: () -> Content
+    /// Khi bàn phím đang mở thì nút không còn nằm sát đáy màn hình, cần chừa khoảng cách với phím.
+    @State private var keyboardUp = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -728,9 +730,11 @@ struct FooterBar<Content: View>: View {
             content()
                 .padding(.horizontal, Metrics.gutter)
                 .padding(.top, 14)
-                .padding(.bottom, Metrics.safeBottom > 0 ? -5.5 : 12)
+                .padding(.bottom, Metrics.safeBottom > 0 && !keyboardUp ? -5.5 : 14)
         }
         .background(Theme.card.ignoresSafeArea(edges: .bottom))
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
     }
 }
 
