@@ -52,6 +52,8 @@ final class LiveClient: ObservableObject {
     @Published private(set) var lastSupportMessage: SupportMessage?
     /// Màn chat đang mở: tin Admin tới lúc này không cần báo.
     var supportChatOpen = false
+    /// Kết nối Viettel Post của tài khoản (token lưu ở máy chủ ChốtLive). nil = chưa hỏi xong máy chủ.
+    @Published var vtp: VtpConnection?
 
     var onChat: ((LiveComment) -> Void)?
     /// Báo đổi tài khoản trước khi nhận bình luận, để dữ liệu không rơi vào vùng của người khác.
@@ -190,6 +192,7 @@ final class LiveClient: ObservableObject {
         accessNotice = nil
         supportUnread = 0
         lastSupportMessage = nil
+        vtp = nil
     }
 
     /// Chuyển sang một tài khoản đã lưu khác, không cần nhập lại mật khẩu.
@@ -318,6 +321,22 @@ final class LiveClient: ObservableObject {
     private func supportCall(_ path: String, method: String = "GET", body: [String: Any]? = nil) async -> (Int, [String: Any])? {
         guard loggedIn, !token.isEmpty, let url = URL(string: baseURL + path) else { return nil }
         var req = URLRequest(url: url, timeoutInterval: 20)
+        req.httpMethod = method
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let code = (resp as? HTTPURLResponse)?.statusCode else { return nil }
+        return (code, (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:])
+    }
+
+    /// Gọi API của máy chủ ChốtLive bằng phiên đăng nhập hiện tại. nil = không tới được máy chủ.
+    func apiCall(_ path: String, method: String = "GET", body: [String: Any]? = nil,
+                 timeout: TimeInterval = 20) async -> (Int, [String: Any])? {
+        guard loggedIn, !token.isEmpty, let url = URL(string: baseURL + path) else { return nil }
+        var req = URLRequest(url: url, timeoutInterval: timeout)
         req.httpMethod = method
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body {
@@ -558,6 +577,7 @@ final class LiveClient: ObservableObject {
                 if let onHello { onHello(snap) } else { pendingHello = snap }
             }
             refreshSupportUnread()
+            refreshVtp()
         case "lives":
             if let raw = m["lives"] as? [[String: Any]] { applyLives(raw) }
         case "native_state":

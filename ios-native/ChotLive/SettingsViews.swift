@@ -148,6 +148,9 @@ struct SettingsView: View {
 
     private var settingsCard: some View {
         VStack(spacing: 0) {
+            settingRow(.truck, "ViettelPost", trailing: client.vtpConnected ? "Đã kết nối" : "Chưa kết nối",
+                       trailingColor: client.vtpConnected ? Theme.green : Theme.muted, route: .vtp)
+            HairLine()
             settingRow(.printer, "Máy in", trailing: printerConnected ? "Đã kết nối" : "Chưa kết nối",
                        trailingColor: printerConnected ? Theme.green : Theme.muted, route: .printer)
             HairLine()

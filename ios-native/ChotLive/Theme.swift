@@ -187,6 +187,7 @@ enum Route: Hashable {
     case notifications
     case help
     case appearance
+    case vtp
 }
 
 struct SheetItem: Identifiable {

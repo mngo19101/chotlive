@@ -4,6 +4,7 @@ import SwiftUI
 
 struct OrdersView: View {
     @EnvironmentObject var store: Store
+    @EnvironmentObject var client: LiveClient
     @EnvironmentObject var printer: PrinterManager
     @EnvironmentObject var ui: AppUI
     @State private var search = ""
@@ -34,7 +35,7 @@ struct OrdersView: View {
                         HeaderAddButton(title: "Tạo đơn") { ui.push(.orderCreate) }
                     }
                     HStack(spacing: 8) {
-                        SearchField(text: $search)
+                        SearchField(text: $search, placeholder: client.vtpConnected ? "Tìm tên, @tiktok, mã vận đơn" : "Tìm tên hoặc @tiktok")
                         CircleButton(icon: .filter) {
                             ui.present(dim: 0.9) { DateFilterSheet(filter: dateFilter) { dateFilter = $0 } }
                         }
@@ -52,9 +53,14 @@ struct OrdersView: View {
                     .cardStyle(18)
 
                     if !groups.isEmpty {
-                        ReadyExportBanner(groups: groups) {
+                        ReadyExportBanner(groups: groups, connected: client.vtpConnected) {
                             ui.present(dim: 0.42) { VtpExportSheet() }
                         }
+                    }
+
+                    if filter == 4 {
+                        let attention = shown.filter(VtpTrack.needsAction)
+                        if !attention.isEmpty { VtpAttentionBanner(orders: attention) }
                     }
 
                     if shown.isEmpty {
@@ -86,6 +92,14 @@ struct OrdersView: View {
             l = l.filter {
                 $0.customer.nickname.lowercased().contains(q) || $0.customer.uniqueId.lowercased().contains(q)
                     || ($0.code ?? "").lowercased().contains(q) || ($0.customer.address?.phone ?? "").contains(q)
+                    || ($0.ship?.vtpCode ?? "").lowercased().contains(q.replacingOccurrences(of: " ", with: ""))
+            }
+        }
+        if filter == 4 {
+            // Đơn Viettel Post báo giao hỏng / hoàn lên đầu.
+            l.sort { a, b in
+                let x = VtpTrack.needsAction(a), y = VtpTrack.needsAction(b)
+                return x != y ? x : a.lastTs > b.lastTs
             }
         }
         return l
@@ -142,15 +156,33 @@ struct OrdersView: View {
             } else if st == .ready {
                 tag("Sẵn sàng gửi", Theme.accent, Theme.peachSoft)
             }
+            if let code = VtpTrack.code(o) {
+                vtpTag(o, code)
+            } else if let e = VtpTrack.lastError(o) {
+                HStack(spacing: 8) {
+                    tag("Lỗi tạo vận đơn: \(e)", Theme.red, Theme.redSoft)
+                    Button { ui.push(.addressEdit(o.customer.id)) } label: { T("Sửa", 12.5, .bold, Theme.accent) }
+                        .buttonStyle(.plain)
+                }
+            } else if let old = VtpTrack.cancelledCode(o) {
+                tag("Vận đơn \(VtpTrack.pretty(old)) đã huỷ · gửi lại", Theme.red, Theme.redSoft)
+            }
 
             HStack(spacing: 8) {
-                OutlineButton(title: o.isPrinted ? "In lại" : "In đơn", icon: .printer, filled: !o.isPrinted) {
-                    Task { @MainActor in
-                        ui.notify(await printOrder(o, store: store, printer: printer))
+                if let code = VtpTrack.code(o) {
+                    OutlineButton(title: "In tem", icon: .printer, filled: true) {
+                        VtpActions.printLabels([code], client: client, ui: ui)
                     }
-                }
-                OutlineButton(title: shipButtonLabel(o), icon: st == .ask ? .check : .truck, color: shipButtonColor(o)) {
-                    openReview(o)
+                    OutlineButton(title: "Theo dõi", icon: .truck) { ui.push(.order(o.id)) }
+                } else {
+                    OutlineButton(title: o.isPrinted ? "In lại" : "In đơn", icon: .printer, filled: !o.isPrinted) {
+                        Task { @MainActor in
+                            ui.notify(await printOrder(o, store: store, printer: printer))
+                        }
+                    }
+                    OutlineButton(title: shipButtonLabel(o), icon: st == .ask ? .check : .truck, color: shipButtonColor(o)) {
+                        openReview(o)
+                    }
                 }
                 Button {
                     ui.present { OrderActionSheet(orderId: o.id) }
@@ -176,6 +208,21 @@ struct OrdersView: View {
             .padding(.horizontal, 10)
             .frame(height: 24)
             .background(Capsule().fill(fill))
+    }
+
+    /// Mã vận đơn + trạng thái Viettel Post trên thẻ đơn; đỏ khi cần xử lý.
+    private func vtpTag(_ o: Order, _ code: String) -> some View {
+        let bad = VtpTrack.needsAction(o)
+        let done = o.status == .delivered
+        let ink = bad ? Theme.red : (done ? Theme.green : Theme.accent)
+        return HStack(spacing: 6) {
+            T(VtpTrack.pretty(code), 12, .heavy, Theme.ink).lineLimit(1).fixedSize()
+            T("·", 12, .bold, Theme.muted)
+            T(VtpTrack.statusName(o), 12, .semibold, ink).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 24)
+        .background(Capsule().fill(bad ? Theme.redSoft : (done ? Theme.greenSoft : Theme.peachSoft)))
     }
 }
 
@@ -306,6 +353,7 @@ struct OrderDetailView: View {
                     VStack(spacing: Metrics.gap) {
                         customerCard(o)
                         productsCard(o)
+                        VtpOrderBox(order: o)
                         let others = Vtp.state(o).isPending
                             ? Vtp.pendingOrders(of: o.customer.id, in: store.allOrders()).filter { $0.id != o.id } : []
                         if !others.isEmpty { gomCard(o, others) }

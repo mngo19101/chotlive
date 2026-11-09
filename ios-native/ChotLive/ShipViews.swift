@@ -137,6 +137,8 @@ func weightText(_ g: Int) -> String {
 
 struct ReadyExportBanner: View {
     let groups: [Vtp.Group]
+    /// Đã kết nối Viettel Post: gửi thẳng vận đơn ("Gửi VTP") thay cho xuất Excel ("Xuất VTP").
+    var connected = false
     let onExport: () -> Void
 
     private var subtitle: String {
@@ -144,22 +146,28 @@ struct ReadyExportBanner: View {
         let merged = groups.filter { $0.orders.count > 1 }.count
         let older = groups.filter { g in g.orders.contains { $0.lastTs < start } }.count
         let cod = groups.reduce(0) { $0 + $1.summary.cod }
-        return [merged > 0 ? "\(merged) khách gộp nhiều đơn" : nil,
-                older > 0 ? "\(older) khách có đơn duyệt từ ngày trước" : nil,
-                "Thu hộ \(money(cod))"].compactMap { $0 }.joined(separator: " · ")
+        let failed = connected ? groups.filter { g in g.orders.contains { VtpTrack.lastError($0) != nil } }.count : 0
+        let noPhone = connected ? groups.filter { $0.summary.problems.contains("Thiếu số điện thoại") }.count : 0
+        var parts: [String] = []
+        if failed > 0 { parts.append("\(failed) khách tạo vận đơn lỗi") }
+        if noPhone > 0 { parts.append("\(noPhone) khách thiếu SĐT") }
+        if merged > 0 { parts.append("\(merged) khách gộp nhiều đơn") }
+        if older > 0 { parts.append("\(older) khách có đơn duyệt từ ngày trước") }
+        parts.append("Thu hộ \(money(cod))")
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                T("\(groups.count) khách sẵn sàng xuất", 14, .bold)
+                T("\(groups.count) khách sẵn sàng \(connected ? "gửi" : "xuất")", 14, .bold)
                 T(subtitle, 12, .medium, Theme.muted).lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
             Button(action: onExport) {
                 HStack(spacing: 6) {
-                    Icon(name: .download, size: 15, weight: 2.4)
-                    T("Xuất VTP", 14, .bold).fixedSize()
+                    Icon(name: connected ? .truck : .download, size: 15, weight: 2.4)
+                    T(connected ? "Gửi VTP" : "Xuất VTP", 14, .bold).fixedSize()
                 }
                 .padding(.horizontal, 15)
                 .frame(height: 40)
@@ -353,12 +361,19 @@ struct ShipReviewSheet: View {
             .padding(.horizontal, 14)
             .frame(height: 60)
             .cardStyle(18)
-            let when = o.ship?.exportedAt.map { dayMonth(Date(timeIntervalSince1970: $0 / 1000)) }
-            T(Vtp.state(o) == .exported ? "Đã xuất Viettel Post\(when.map { " ngày \($0)" } ?? "")."
-                                         : "Đơn đã chuyển \(o.status == .delivered ? "Đã giao" : "Đang giao").",
-              13, .medium, Theme.muted)
+            T(sentText(o), 13, .medium, Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 4)
         }
+    }
+
+    private func sentText(_ o: Order) -> String {
+        let day: String = o.ship?.exportedAt.map { " ngày " + dayMonth(Date(timeIntervalSince1970: $0 / 1000)) } ?? ""
+        if let code = VtpTrack.code(o) {
+            return "Đã tạo vận đơn \(VtpTrack.pretty(code))\(day). In tem hoặc huỷ vận đơn ở chi tiết đơn."
+        }
+        if Vtp.state(o) == .exported { return "Đã xuất Viettel Post\(day)." }
+        return "Đơn đã chuyển \(o.status == .delivered ? "Đã giao" : "Đang giao")."
     }
 
     // MARK: Ô nhập
@@ -476,7 +491,8 @@ struct ShipReviewSheet: View {
     @ViewBuilder private func footer(_ focus: Order) -> some View {
         HStack(spacing: 10) {
             if isSent {
-                if Vtp.state(focus) == .exported && focus.status == .shipping {
+                // Vận đơn tạo qua API thì huỷ ở phần ViettelPost của chi tiết đơn, không hoàn tác ở đây.
+                if Vtp.state(focus) == .exported && focus.status == .shipping && VtpTrack.code(focus) == nil {
                     OutlineButton(title: "Hoàn tác xuất", height: 52) {
                         store.undoExport(focus)
                         ui.dismissSheet()
@@ -519,7 +535,11 @@ struct ShipReviewSheet: View {
 
 struct VtpExportSheet: View {
     @EnvironmentObject var store: Store
+    @EnvironmentObject var client: LiveClient
     @EnvironmentObject var ui: AppUI
+    @State private var sending = false
+    /// Kết quả lần tạo vận đơn vừa xong (cùng các khách đã gửi), hiện thay cho danh sách.
+    @State private var result: (groups: [Vtp.Group], results: [VtpCreateResult])?
     @State private var selected: Set<String> = []
     @State private var touched = false
     @State private var service = UserDefaults.standard.string(forKey: Vtp.serviceKey) ?? Vtp.defaultService
@@ -533,14 +553,27 @@ struct VtpExportSheet: View {
         return "\(s.code) · \(s.name)"
     }
 
+    private var api: Bool { client.vtpConnected }
+
     var body: some View {
+        Group {
+            if let result {
+                VtpResultView(groups: result.groups, results: result.results)
+            } else {
+                picker
+            }
+        }
+        .frame(height: Metrics.sheetHeight(top: UIScreen.main.bounds.height * 0.12))
+    }
+
+    private var picker: some View {
         let list = groups
         let pick = chosen
         let bad = list.filter(\.isBad).count
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
-                    T("Xuất Viettel Post", 20, .heavy, Theme.ink, track: -0.3)
+                    T(api ? "Gửi Viettel Post" : "Xuất Viettel Post", 20, .heavy, Theme.ink, track: -0.3)
                     T("\(list.count - bad) khách sẵn sàng gửi\(bad > 0 ? " · \(bad) khách cần sửa" : "")", 13, .medium, Theme.muted)
                         .lineLimit(1).minimumScaleFactor(0.85)
                 }
@@ -585,7 +618,6 @@ struct VtpExportSheet: View {
 
             footer(list, pick)
         }
-        .frame(height: Metrics.sheetHeight(top: UIScreen.main.bounds.height * 0.12))
     }
 
     private func row(_ g: Vtp.Group, on: Bool) -> some View {
@@ -622,6 +654,9 @@ struct VtpExportSheet: View {
                         }
                     } else {
                         T(detail(s), 12, .medium, Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if !g.isBad, let e = g.orders.compactMap(VtpTrack.lastError).first {
+                        T("Lần trước ViettelPost báo: \(e)", 12, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
                     }
                     if let r = g.recentExported.first, let at = r.ship?.exportedAt {
                         T("Khách đã có vận đơn xuất \(dayMonth(Date(timeIntervalSince1970: at / 1000)))", 12, .semibold, Theme.gomInk)
@@ -683,7 +718,7 @@ struct VtpExportSheet: View {
                 .zIndex(1)
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 2) {
-                    T("Tổng thu hộ", 12, .semibold, Theme.muted)
+                    T(api ? "Tổng thu hộ · \(pick.count) khách" : "Tổng thu hộ", 12, .semibold, Theme.muted)
                     T(money(total), 22, .heavy, Theme.ink, track: -0.4).lineLimit(1).minimumScaleFactor(0.7)
                 }
             }
@@ -691,9 +726,24 @@ struct VtpExportSheet: View {
             HStack(spacing: 10) {
                 OutlineButton(title: "Huỷ", height: 52) { ui.dismissSheet() }
                     .frame(width: (Metrics.screenWidth - 50) / 3)
-                PrimaryButton(title: "Xuất Excel · \(pick.count) vận đơn", icon: .download, fontSize: 15, enabled: !pick.isEmpty) {
-                    export(list.filter { pick.contains($0.id) })
+                if api {
+                    PrimaryButton(title: sending ? "Đang tạo \(pick.count) vận đơn…" : "Tạo \(pick.count) vận đơn", icon: .truck,
+                                  fontSize: 15, enabled: !pick.isEmpty && !sending) {
+                        create(list.filter { pick.contains($0.id) })
+                    }
+                } else {
+                    PrimaryButton(title: "Xuất Excel · \(pick.count) vận đơn", icon: .download, fontSize: 15, enabled: !pick.isEmpty) {
+                        export(list.filter { pick.contains($0.id) })
+                    }
                 }
+            }
+            if api {
+                Button { export(list.filter { pick.contains($0.id) }) } label: {
+                    T("Hoặc xuất file Excel như cũ", 13, .bold, Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(pick.isEmpty || sending)
+                .padding(.top, -4)
             }
         }
         .padding(.horizontal, Metrics.gutter)
@@ -728,6 +778,35 @@ struct VtpExportSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
         .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+    }
+
+    /// Tạo vận đơn thẳng trên Viettel Post (qua máy chủ ChốtLive), mỗi khách một vận đơn.
+    private func create(_ chosen: [Vtp.Group]) {
+        guard !chosen.isEmpty, !sending else { return }
+        guard client.vtp?.sender != nil else {
+            ui.dismissSheet()
+            ui.push(.vtp)
+            ui.notify("Chọn điểm lấy hàng trước khi gửi.")
+            return
+        }
+        sending = true
+        let svc = service
+        Task { @MainActor in
+            await client.vtpFlush(store)
+            let r = await client.vtpCreate(service: svc, groups: chosen.map { VtpTrack.payload($0) })
+            sending = false
+            if let e = r.error { return ui.notify(e) }
+            // Máy chủ đã ghi mã vận đơn vào đơn; ghi luôn trên máy để không phải chờ đồng bộ.
+            for res in r.results {
+                guard let g = chosen.first(where: { $0.id == res.key }) else { continue }
+                if res.ok && !res.code.isEmpty {
+                    store.applyVtpCreated(g.orders, code: res.code, fee: res.fee, service: svc)
+                } else if !res.ok {
+                    store.applyVtpError(g.orders, error: res.error)
+                }
+            }
+            result = (chosen, r.results)
+        }
     }
 
     private func export(_ chosen: [Vtp.Group]) {

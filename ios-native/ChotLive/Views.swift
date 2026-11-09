@@ -111,6 +111,7 @@ struct MainShell: View {
         case .notifications: NotificationsView()
         case .help: SupportChatView()
         case .appearance: AppearanceView()
+        case .vtp: VtpConnectView()
         }
     }
 }

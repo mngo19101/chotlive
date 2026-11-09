@@ -119,4 +119,58 @@ final class VtpExportTests: XCTestCase {
         let back = try JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as? [String: Any]
         XCTAssertTrue(back?["codOverride"] is NSNull)
     }
+
+    // MARK: - Gửi vận đơn qua API
+
+    func testVtpFieldsFromServerAndStatus() throws {
+        let json = #"{"state":"exported","pay":"cod","vtpCode":"156288120034","vtpFee":22000,"vtpStatus":"505","vtpStatusName":"Chờ phát lại","vtpKind":"attention","vtpNote":"Không liên lạc được người nhận"}"#
+        let s = try JSONDecoder().decode(ShipInfo.self, from: Data(json.utf8))
+        XCTAssertEqual(s.vtpCode, "156288120034")
+        XCTAssertEqual(s.vtpFee, 22_000)
+        XCTAssertEqual(s.vtpStatus, 505)
+        let o = order("a", ship: s, status: (true, false))
+        XCTAssertEqual(Vtp.state(o), .exported)
+        XCTAssertTrue(VtpTrack.needsAction(o))
+        XCTAssertFalse(VtpTrack.canCancel(o))
+        XCTAssertEqual(VtpTrack.pretty("156288120034"), "1562 8812 0034")
+
+        var fresh = s
+        fresh.vtpKind = "created"
+        fresh.vtpStatus = 0
+        let created = order("b", ship: fresh, status: (true, false))
+        XCTAssertFalse(VtpTrack.needsAction(created))
+        XCTAssertTrue(VtpTrack.canCancel(created))
+        // Đã giao thì không còn cần xử lý.
+        XCTAssertFalse(VtpTrack.needsAction(order("c", ship: s, status: (false, true))))
+
+        // Đơn chưa có vận đơn không gửi trường vận đơn lên máy chủ.
+        let plain = try JSONSerialization.jsonObject(with: JSONEncoder().encode(ShipInfo(state: "ready"))) as? [String: Any]
+        XCTAssertNil(plain?["vtpCode"])
+    }
+
+    func testVtpPayloadMatchesExcelMoney() {
+        let a = order("a", price: 120_000, ship: ShipInfo(state: "ready", pay: "cod", deposit: 20_000))
+        let b = order("b", price: 80_000, ts: Date(timeIntervalSince1970: 2000), ship: ShipInfo(state: "ready", pay: "cod"))
+        let g = Vtp.readyGroups([a, b])[0]
+        let p = VtpTrack.payload(g, now: Date(timeIntervalSince1970: 1_800_000_000))
+        XCTAssertEqual(p["key"] as? String, "lan.anh")
+        XCTAssertEqual(p["itemIds"] as? [String], ["a-1", "b-1"])
+        XCTAssertEqual(p["ref"] as? String, "HDa+HDb")
+        XCTAssertEqual(p["cod"] as? Int, 180_000)
+        XCTAssertEqual(p["goods"] as? Int, 200_000)
+        XCTAssertEqual(p["phone"] as? String, "0912345678")
+        XCTAssertEqual(p["receiver"] as? String, "Lan Anh")
+        XCTAssertEqual(p["senderPays"] as? Bool, false)
+        XCTAssertEqual(p["address"] as? String, g.summary.address.line)
+        XCTAssertNil(p["size"])
+
+        // Vận đơn cũ đã huỷ: thêm hậu tố để Viettel Post nhận lại mã đơn.
+        var again = ShipInfo(state: "ready", pay: "cod")
+        again.vtpOldCode = "156288120034"
+        again.vtpKind = "cancelled"
+        let c = order("c", ship: again)
+        let p2 = VtpTrack.payload(Vtp.readyGroups([c])[0])
+        XCTAssertTrue((p2["ref"] as? String ?? "").hasPrefix("HDc-"))
+        XCTAssertEqual(VtpTrack.cancelledCode(c), "156288120034")
+    }
 }

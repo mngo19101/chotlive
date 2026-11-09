@@ -362,6 +362,13 @@ final class Store: ObservableObject {
             var s = base
             s.state = state.rawValue
             if i > 0 { s.deposit = 0 }
+            // Giữ mã vận đơn đã huỷ và lỗi lần gửi trước: lần gửi sau cần biết để không trùng mã đơn.
+            if let old = order(id: id)?.ship {
+                s.vtpOldCode = old.vtpOldCode
+                s.vtpKind = old.vtpKind
+                s.vtpError = old.vtpError
+                s.vtpErrorAt = old.vtpErrorAt
+            }
             s.exportedAt = nil
             s.batchId = nil
             changes[id] = s

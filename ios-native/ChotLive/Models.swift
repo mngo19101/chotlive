@@ -136,6 +136,21 @@ struct ShipInfo: Codable, Equatable {
     var lengthCm: Int? = nil
     var widthCm: Int? = nil
     var heightCm: Int? = nil
+    // Vận đơn Viettel Post tạo qua API: máy chủ ghi, app chỉ đọc (gửi lên máy chủ cũng bỏ qua).
+    var vtpCode: String? = nil
+    /// Mã vận đơn đã huỷ, để tra lại; đơn về Chờ gửi.
+    var vtpOldCode: String? = nil
+    var vtpFee: Int? = nil
+    var vtpService: String? = nil
+    var vtpStatus: Int? = nil
+    var vtpStatusName: String? = nil
+    var vtpStatusAt: Double? = nil
+    /// created | moving | delivered | cancelled | returned | attention
+    var vtpKind: String? = nil
+    var vtpNote: String? = nil
+    /// Lý do Viettel Post từ chối lần tạo vận đơn gần nhất.
+    var vtpError: String? = nil
+    var vtpErrorAt: Double? = nil
 
     init(state: String? = nil, pay: String? = nil, payer: String? = nil, deposit: Int? = nil, shipFee: Int? = nil,
          codOverride: Int? = nil, weightG: Int? = nil, exportedAt: Double? = nil, batchId: String? = nil,
@@ -147,6 +162,13 @@ struct ShipInfo: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case state, pay, payer, deposit, shipFee, codOverride, weightG, exportedAt, batchId, lengthCm, widthCm, heightCm
+        case vtpCode, vtpOldCode, vtpFee, vtpService, vtpStatus, vtpStatusName, vtpStatusAt, vtpKind, vtpNote, vtpError, vtpErrorAt
+    }
+
+    private static func text(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> String? {
+        if let s = try? c.decodeIfPresent(String.self, forKey: key) { return s.isEmpty ? nil : s }
+        if let n = try? c.decodeIfPresent(Double.self, forKey: key), n.isFinite, abs(n) < 1e15 { return String(Int64(n)) }
+        return nil
     }
 
     /// Web có thể lưu số dạng chuỗi hoặc số lẻ: đọc được thì lấy, không thì bỏ qua thay vì làm hỏng cả gói.
@@ -172,6 +194,17 @@ struct ShipInfo: Codable, Equatable {
         lengthCm = Self.money(Self.number(c, .lengthCm))
         widthCm = Self.money(Self.number(c, .widthCm))
         heightCm = Self.money(Self.number(c, .heightCm))
+        vtpCode = Self.text(c, .vtpCode)
+        vtpOldCode = Self.text(c, .vtpOldCode)
+        vtpFee = Self.money(Self.number(c, .vtpFee))
+        vtpService = Self.text(c, .vtpService)
+        vtpStatus = Self.number(c, .vtpStatus).flatMap { $0.isFinite && abs($0) < 1e9 ? Int($0) : nil }
+        vtpStatusName = Self.text(c, .vtpStatusName)
+        vtpStatusAt = Self.number(c, .vtpStatusAt)
+        vtpKind = Self.text(c, .vtpKind)
+        vtpNote = Self.text(c, .vtpNote)
+        vtpError = Self.text(c, .vtpError)
+        vtpErrorAt = Self.number(c, .vtpErrorAt)
     }
 
     /// Ghi cả giá trị rỗng (null) để server xoá đúng trường đã bỏ, ví dụ COD nhập tay.
@@ -189,6 +222,18 @@ struct ShipInfo: Codable, Equatable {
         try c.encode(lengthCm, forKey: .lengthCm)
         try c.encode(widthCm, forKey: .widthCm)
         try c.encode(heightCm, forKey: .heightCm)
+        // Máy chủ không nhận các trường vận đơn từ app; chỉ lưu trên máy và để máy chủ biết app đang giữ mã nào.
+        try c.encodeIfPresent(vtpCode, forKey: .vtpCode)
+        try c.encodeIfPresent(vtpOldCode, forKey: .vtpOldCode)
+        try c.encodeIfPresent(vtpFee, forKey: .vtpFee)
+        try c.encodeIfPresent(vtpService, forKey: .vtpService)
+        try c.encodeIfPresent(vtpStatus, forKey: .vtpStatus)
+        try c.encodeIfPresent(vtpStatusName, forKey: .vtpStatusName)
+        try c.encodeIfPresent(vtpStatusAt, forKey: .vtpStatusAt)
+        try c.encodeIfPresent(vtpKind, forKey: .vtpKind)
+        try c.encodeIfPresent(vtpNote, forKey: .vtpNote)
+        try c.encodeIfPresent(vtpError, forKey: .vtpError)
+        try c.encodeIfPresent(vtpErrorAt, forKey: .vtpErrorAt)
     }
 }
 
