@@ -629,13 +629,18 @@ export function areSameCustomer(a, b) {
   return false;
 }
 
+/**
+ * Đơn còn nhận thêm món: chưa huỷ, chưa giao xong và chưa gửi đi. Đơn đang giao hoặc đã có vận đơn
+ * thì gói hàng đã chốt, món mới phải sang đơn khác để không bị bỏ sót khi gửi và thu tiền.
+ */
+export function isOpenOrder(o) {
+  if (!o || o.status === 'cancelled' || o.status === 'done' || o.status === 'shipping') return false;
+  return o.ship?.state !== 'exported' && !o.ship?.vtpCode;
+}
+
 export function findMatchingOrder(orders, person) {
   if (!orders || !person) return null;
-  return (
-    orders.find(
-      (o) => o.status !== 'cancelled' && o.status !== 'done' && areSameCustomer(o, person)
-    ) || null
-  );
+  return orders.find((o) => isOpenOrder(o) && areSameCustomer(o, person)) || null;
 }
 
 export function mergeDuplicateOrders() {
@@ -646,14 +651,12 @@ export function mergeDuplicateOrders() {
   for (const ord of list) {
     if (!ord.items) ord.items = [];
 
-    if (ord.status === 'cancelled' || ord.status === 'done') {
+    if (!isOpenOrder(ord)) {
       merged.push(ord);
       continue;
     }
 
-    const existing = merged.find(
-      (m) => m.status !== 'cancelled' && m.status !== 'done' && areSameCustomer(m, ord)
-    );
+    const existing = merged.find((m) => isOpenOrder(m) && areSameCustomer(m, ord));
 
     if (existing) {
       mergedCount += 1;
@@ -768,6 +771,14 @@ export function addOrMergeOrder(data) {
       (s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 1),
       0
     );
+    // Tiền thu hộ nhập tay là cho gói hàng cũ: thêm món thì bỏ số đó để tính lại theo hàng mới.
+    // Số nhập tay tính chung cho mọi đơn đang mở của khách (gửi cùng một gói) nên bỏ ở tất cả.
+    let codReset = false;
+    for (const o of state.orders) {
+      if (o.ship?.codOverride == null || !isOpenOrder(o) || !areSameCustomer(o, existingOrder)) continue;
+      o.ship = { ...o.ship, codOverride: null };
+      codReset = true;
+    }
 
     if (phone && !existingOrder.phone) existingOrder.phone = phone;
     if (address && !existingOrder.address) existingOrder.address = address;
@@ -799,7 +810,7 @@ export function addOrMergeOrder(data) {
       newItem.price * newItem.qty
     );
     save('order_merged');
-    return { order: existingOrder, isMerged: true, isDuplicate: false, newItem };
+    return { order: existingOrder, isMerged: true, isDuplicate: false, newItem, codReset };
   } else {
     const newItem = {
       id: 'it_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
@@ -886,6 +897,24 @@ export function updateOrderStatus(orderId, newStatus) {
   return ord;
 }
 
+/**
+ * Đổi thông tin giao (`ship`) của nhiều đơn rồi lưu một lần.
+ * `status` (không bắt buộc) đổi luôn trạng thái đơn, ví dụ 'shipping' khi đã xuất Viettel Post.
+ */
+export function setOrdersShip(ids, patch = {}, status = null) {
+  const wanted = new Set((ids || []).map(String));
+  let n = 0;
+  for (const o of state.orders || []) {
+    if (!wanted.has(String(o.id))) continue;
+    o.ship = { ...(o.ship || {}), ...patch };
+    if (typeof status === 'function') o.status = status(o);
+    else if (status) o.status = status;
+    n += 1;
+  }
+  if (n) save('order_ship');
+  return n;
+}
+
 export function removeOrder(id) {
   state.orders = state.orders.filter((o) => o.id !== id);
   save('order_deleted');
@@ -963,6 +992,8 @@ export function updateCustomerInfo(uniqueIdOrObj, fields = {}) {
   const c = state.customers.find((x) => (x.uniqueId || '').toLowerCase() === uid);
   if (c) {
     Object.assign(c, data);
+    // Trên web "Họ tên" chính là người nhận: đổi tên thì tên trên vận đơn đổi theo (app có ô người nhận riêng).
+    if (data.name && !('receiver' in data)) c.receiver = data.name;
   }
   state.orders.forEach((o) => {
     if ((o.uniqueId || '').toLowerCase() === uid) {

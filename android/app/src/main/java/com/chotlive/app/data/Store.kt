@@ -491,6 +491,17 @@ class Store(private val directory: File, account: String?) {
         accountsTouchedWhileSending = false
     }
 
+    /**
+     * Server từ chối gói (gửi quá nhanh, dữ liệu quá lớn): thôi chờ xác nhận, thay đổi còn nguyên để gửi lại sau.
+     * Trả về false nếu lời từ chối là của một gói cũ, không phải gói đang chờ.
+     */
+    fun syncRejected(id: Int?): Boolean {
+        val sent = sending ?: return false
+        if (id != null && sent.id != id) return false
+        syncInterrupted()
+        return true
+    }
+
     /** Nhận dữ liệu mới nhất từ server. Những khách còn thay đổi chưa gửi xong thì giữ bản trên máy. */
     fun applyServer(snap: ServerSnapshot) {
         var sync = syncState

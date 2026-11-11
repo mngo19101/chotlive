@@ -38,6 +38,7 @@ if ! command -v caddy >/dev/null 2>&1; then
   echo "==> Cài Caddy"
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
+  chmod 644 /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
   apt-get update -y
   apt-get install -y caddy
 fi
@@ -108,7 +109,8 @@ if [ -f /etc/iptables/rules.v4 ]; then
   fi
 else
   # Giữ đúng cổng SSH đang dùng để không tự khoá mình khỏi VPS.
-  SSH_PORT="${SSH_CONNECTION##* }"
+  SSH_PORT="${SSH_CONNECTION:-}"
+  SSH_PORT="${SSH_PORT##* }"
   ufw allow "${SSH_PORT:-22}/tcp"
   ufw allow 80/tcp
   ufw allow 443/tcp

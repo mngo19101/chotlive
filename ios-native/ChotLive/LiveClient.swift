@@ -69,6 +69,8 @@ final class LiveClient: ObservableObject {
     }
     var onSnapshot: ((ServerSnapshot) -> Void)?
     var onSyncAck: ((Int) -> Void)?
+    /// Server từ chối gói đồng bộ: mã gói (nếu có) và mã lỗi SYNC_TOO_FAST | STATE_TOO_LARGE.
+    var onSyncError: ((Int?, String) -> Void)?
     var onSocketClosed: (() -> Void)?
 
     private let defaults: UserDefaults
@@ -263,6 +265,16 @@ final class LiveClient: ObservableObject {
         syncWork?.cancel()
         syncWork = Task { @MainActor [weak self, weak store] in
             try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled, let self, let store else { return }
+            self.flushSync(store)
+        }
+    }
+
+    /// Gói vừa bị server từ chối: đợi rồi gửi lại. Có thay đổi mới trong lúc đợi thì scheduleSync gửi sớm hơn.
+    func retrySync(_ store: Store, after seconds: Double) {
+        syncWork?.cancel()
+        syncWork = Task { @MainActor [weak self, weak store] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             guard !Task.isCancelled, let self, let store else { return }
             self.flushSync(store)
         }
@@ -585,6 +597,8 @@ final class LiveClient: ObservableObject {
         case "native_ack":
             if let n = m["clientsCount"] as? Int { clientsCount = n }
             if let id = m["id"] as? Int { onSyncAck?(id) }
+        case "sync_error":
+            onSyncError?(m["id"] as? Int, (m["code"] as? String) ?? "")
         case "clients_count":
             if let n = m["clientsCount"] as? Int { clientsCount = n }
         case "access":

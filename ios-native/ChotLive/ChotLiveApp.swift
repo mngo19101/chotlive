@@ -29,6 +29,11 @@ struct ChotLiveApp: App {
                     client.onSyncAck = { [store, client] id in
                         if store.acknowledgeSync(id: id) { client.flushSync(store) }
                     }
+                    // Server từ chối gói: không chờ xác nhận nữa (không thì app ngừng đồng bộ tới khi nối lại),
+                    // đợi rồi gửi lại. Dữ liệu quá lớn thì thử thưa hơn vì gửi lại ngay cũng bị từ chối.
+                    client.onSyncError = { [store, client] id, code in
+                        if store.syncRejected(id: id) { client.retrySync(store, after: code == "STATE_TOO_LARGE" ? 60 : 5) }
+                    }
                     client.onSocketClosed = { [store] in store.syncInterrupted() }
                     store.onLocalChange = { [store, client] in
                         Task { @MainActor in client.scheduleSync(store) }

@@ -196,6 +196,11 @@ enum VtpTrack {
             "receiver": s.receiver,
             "phone": s.phone,
             "address": s.address.line,
+            // Phường/tỉnh theo danh mục mới của Viettel Post để máy chủ đối chiếu với địa chỉ Viettel Post hiểu.
+            "expect": [
+                "province": s.address.newProvince.isEmpty ? s.address.province : s.address.newProvince,
+                "ward": s.address.newWard.isEmpty ? s.address.ward : s.address.newWard
+            ],
             "goodsName": Vtp.goodsName,
             "qty": max(s.qty, 1),
             "weightG": s.weightG,

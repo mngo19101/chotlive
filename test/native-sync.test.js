@@ -263,3 +263,106 @@ test('tên phiên theo giờ Việt Nam, không theo múi giờ máy chủ', () 
   // 02:00 UTC = 09:00 giờ Việt Nam
   assert.equal(sessionName(Date.UTC(2026, 10, 7, 2, 0)), 'Phiên sáng');
 });
+
+test('app nhận ship và mã đơn của web, gửi ship lên thì web thấy đúng duyệt đơn', () => {
+  const state = baseState();
+  state.orders[0].ship = { state: 'hold', pay: 'cod', payer: 'receiver', deposit: '50000', weightG: 1500, extra: 'x' };
+  const snap = toNativeSnapshot(state);
+  const item = snap.customers.find((c) => c.id === 'linh.nguyen').items[0];
+  assert.equal(item.orderCode, 'HD26110701');
+  assert.deepEqual(item.ship, {
+    state: 'hold', pay: 'cod', payer: 'receiver', deposit: 50000, shipFee: null, codOverride: null,
+    weightG: 1500, exportedAt: null, batchId: null, lengthCm: null, widthCm: null, heightCm: null
+  });
+
+  // Đơn chưa có ship: gửi null để app biết là chưa duyệt.
+  const fresh = toNativeSnapshot(baseState()).customers.find((c) => c.id === 'linh.nguyen').items[0];
+  assert.equal(fresh.ship, null);
+
+  // App duyệt "Xác nhận gửi" với COD nhập tay rồi gửi lên.
+  applyNativeUpdate(state, {
+    customers: [{ ...snap.customers.find((c) => c.id === 'linh.nguyen'),
+      items: [{ ...item, ship: { ...item.ship, state: 'ready', codOverride: 300000, payer: 'bogus' } }] }]
+  });
+  assert.deepEqual(state.orders[0].ship, { state: 'ready', pay: 'cod', deposit: 50000, codOverride: 300000, weightG: 1500 });
+
+  // App xuất Viettel Post: Đang giao + exported.
+  applyNativeUpdate(state, {
+    customers: [{ ...snap.customers.find((c) => c.id === 'linh.nguyen'),
+      items: [{ ...item, shipping: true, ship: { state: 'exported', exportedAt: 1794000000001, batchId: 'vtp_1' } }] }]
+  });
+  assert.equal(state.orders[0].status, 'shipping');
+  assert.equal(state.orders[0].ship.state, 'exported');
+  assert.equal(state.orders[0].ship.exportedAt, 1794000000001);
+
+  // App bản cũ không gửi ship: giữ nguyên ship trên server.
+  applyNativeUpdate(state, {
+    customers: [{ ...snap.customers.find((c) => c.id === 'linh.nguyen'), items: [{ ...item, ship: undefined, shipping: true }] }]
+  });
+  assert.equal(state.orders[0].ship.state, 'exported');
+});
+
+test('app nhận mã vận đơn Viettel Post, gửi bản cũ lên không kéo đơn về Chờ gửi', () => {
+  const state = baseState();
+  state.orders[0].status = 'shipping';
+  state.orders[0].ship = {
+    state: 'exported', pay: 'cod', exportedAt: 1794000000001, batchId: 'vtp_1',
+    vtpCode: '1562881200', vtpFee: 22000, vtpStatus: 0, vtpStatusName: 'Chờ lấy hàng', vtpKind: 'created', vtpNote: ''
+  };
+  const snap = toNativeSnapshot(state);
+  const cust = snap.customers.find((c) => c.id === 'linh.nguyen');
+  const item = cust.items[0];
+  assert.equal(item.ship.vtpCode, '1562881200');
+  assert.equal(item.ship.vtpFee, 22000);
+  assert.equal(item.ship.vtpStatusName, 'Chờ lấy hàng');
+  assert.equal(item.shipping, true);
+
+  // App chưa nhận bản mới vẫn còn "ready", chưa Đang giao: máy chủ giữ vận đơn.
+  applyNativeUpdate(state, {
+    customers: [{ ...cust, items: [{ ...item, shipping: false, ship: { state: 'ready', pay: 'cod', vtpCode: 'APP_SAI' } }] }]
+  });
+  assert.equal(state.orders[0].status, 'shipping');
+  assert.equal(state.orders[0].ship.state, 'exported');
+  assert.equal(state.orders[0].ship.vtpCode, '1562881200');
+  assert.equal(state.orders[0].ship.batchId, 'vtp_1');
+
+  // Bấm Đã giao trên app vẫn được.
+  applyNativeUpdate(state, { customers: [{ ...cust, items: [{ ...item, shipping: false, delivered: true }] }] });
+  assert.equal(state.orders[0].status, 'done');
+
+  // Vận đơn bị huỷ (máy chủ đưa về Chờ gửi) mà app còn giữ mã cũ: giữ Chờ gửi.
+  state.orders[0].status = 'printed';
+  state.orders[0].ship = { state: 'ready', pay: 'cod', vtpOldCode: '1562881200', vtpKind: 'cancelled' };
+  applyNativeUpdate(state, {
+    customers: [{ ...cust, items: [{ ...item, shipping: true, ship: { state: 'exported', vtpCode: '1562881200', batchId: 'vtp_1' } }] }]
+  });
+  assert.equal(state.orders[0].status, 'printed');
+  assert.equal(state.orders[0].ship.state, 'ready');
+  assert.equal(state.orders[0].ship.batchId, undefined);
+
+  // Duyệt lại trên app (không còn mã cũ) thì app quyết như thường.
+  applyNativeUpdate(state, { customers: [{ ...cust, items: [{ ...item, shipping: false, ship: { state: 'hold' } }] }] });
+  assert.equal(state.orders[0].ship.state, 'hold');
+});
+
+test('app đổi tên khách: tên người nhận còn là tên cũ thì đổi theo, đặt riêng thì giữ', () => {
+  const st = baseState();
+  st.customers[0].receiver = 'Linh';
+  st.orders[0].receiver = 'Linh';
+  const c = toNativeSnapshot(st).customers[0];
+  c.nickname = 'Minh Trí';
+  c.address = { ...c.address, receiver: 'Linh' };
+  applyNativeUpdate(st, { customers: [c] });
+  assert.equal(st.customers[0].name, 'Minh Trí');
+  assert.equal(st.customers[0].receiver, 'Minh Trí');
+  assert.equal(st.orders[0].receiver, 'Minh Trí');
+  assert.equal(toNativeSnapshot(st).customers[0].address.receiver, 'Minh Trí');
+
+  // Người nhận đặt khác tên khách ("Mẹ Lan") thì đổi tên khách không động tới.
+  const c2 = toNativeSnapshot(st).customers[0];
+  c2.nickname = 'Trí Minh';
+  c2.address = { ...c2.address, receiver: 'Mẹ Lan' };
+  applyNativeUpdate(st, { customers: [c2] });
+  assert.equal(st.customers[0].name, 'Trí Minh');
+  assert.equal(st.customers[0].receiver, 'Mẹ Lan');
+});

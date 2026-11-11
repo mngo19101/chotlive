@@ -74,6 +74,51 @@ function nativeAddress(rec) {
   return { receiver: rec.receiver || rec.name || rec.nickname || '', phone, street, region, note };
 }
 
+const SHIP_STATES = ['ask', 'hold', 'ready', 'exported'];
+const numOrNull = (v) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+const moneyOrNull = (v) => (numOrNull(v) === null ? null : Math.max(0, Math.round(Number(v))));
+
+/**
+ * Thông tin giao (`order.ship` của web) gọn và đúng kiểu để app đọc, hoặc null khi đơn chưa có.
+ * Cùng hàm dùng để nhận `ship` từ app, nên giá trị lạ không lọt vào dữ liệu.
+ */
+export function nativeShip(ship) {
+  if (!ship || typeof ship !== 'object') return null;
+  return {
+    state: SHIP_STATES.includes(ship.state) ? ship.state : null,
+    pay: ['cod', 'paid', 'shipOnly'].includes(ship.pay) ? ship.pay : null,
+    payer: ship.payer === 'sender' || ship.payer === 'receiver' ? ship.payer : null,
+    deposit: moneyOrNull(ship.deposit),
+    shipFee: moneyOrNull(ship.shipFee),
+    codOverride: moneyOrNull(ship.codOverride),
+    weightG: moneyOrNull(ship.weightG),
+    exportedAt: numOrNull(ship.exportedAt),
+    batchId: ship.batchId ? String(ship.batchId) : null,
+    // Kích thước kiện (cm), app bắt buộc nhập khi nặng từ 10kg.
+    lengthCm: moneyOrNull(ship.lengthCm),
+    widthCm: moneyOrNull(ship.widthCm),
+    heightCm: moneyOrNull(ship.heightCm)
+  };
+}
+
+const VTP_TEXT_KEYS = ['vtpCode', 'vtpOldCode', 'vtpService', 'vtpStatusName', 'vtpKind', 'vtpNote', 'vtpError'];
+const VTP_NUM_KEYS = ['vtpFee', 'vtpStatus', 'vtpStatusAt', 'vtpErrorAt', 'vtpEventAt'];
+
+/**
+ * `ship` gửi xuống app: thêm mã vận đơn và trạng thái Viettel Post do máy chủ ghi.
+ * Chỉ dùng chiều server -> app; chiều ngược lại vẫn qua `nativeShip`, nên app không ghi đè được các trường này.
+ */
+export function nativeShipOut(ship) {
+  const out = nativeShip(ship);
+  if (!out) return null;
+  for (const k of VTP_TEXT_KEYS) if (ship[k]) out[k] = String(ship[k]).slice(0, 300);
+  for (const k of VTP_NUM_KEYS) {
+    const n = numOrNull(ship[k]);
+    if (n !== null) out[k] = Math.round(n);
+  }
+  return out;
+}
+
 /* ------------------------------ Server -> app ------------------------------ */
 
 export function nativeSession(s) {
@@ -154,7 +199,10 @@ export function toNativeSnapshot(state) {
         sessionId: it.sessionId || null,
         groupId: it.groupId || String(o.id),
         code: it.code || codeFromName(it.name),
-        commentId: it.commentId || null
+        commentId: it.commentId || null,
+        // Duyệt đơn / Viettel Post: app giữ `ship` của đơn trên từng món, cùng JSON với web.
+        ship: nativeShipOut(o.ship),
+        orderCode: o.code || null
       });
     }
   }
@@ -223,9 +271,10 @@ function applyAddress(target, a) {
   const region = String(a.region || '');
   if (region !== [target.ward, target.district, target.province].filter(Boolean).join(', ')) {
     // App gom phường/quận/tỉnh vào một ô: giữ theo đúng thứ tự khi tách lại.
+    // Địa chỉ mới chỉ còn "Phường, Tỉnh": phần trước tỉnh là phường, không phải quận.
     const parts = region.split(',').map((s) => s.trim()).filter(Boolean);
     target.province = parts.pop() || '';
-    target.district = parts.pop() || '';
+    target.district = parts.length >= 2 ? parts.pop() : '';
     target.ward = parts.join(', ');
   }
   target.address = [target.street, region].filter(Boolean).join(', ');
@@ -276,10 +325,17 @@ function applyNativeCustomer(state, c) {
     };
     state.customers.unshift(rec);
   }
+  const oldName = rec.name;
   if (c.nickname) rec.name = c.nickname;
   if (c.userId && !rec.userId) rec.userId = String(c.userId);
   if (c.uniqueId && !rec.uniqueId) rec.uniqueId = c.uniqueId;
-  if (c.address) applyAddress(rec, c.address);
+  // App đổi tên khách mà ô "Họ tên" của địa chỉ vẫn mang tên cũ: coi như đổi luôn tên người nhận,
+  // để vận đơn không in tên cũ. Người nhận đặt khác tên khách (ví dụ "Mẹ Lan") thì giữ nguyên.
+  const renamed = c.nickname && oldName && c.nickname !== oldName;
+  const address =
+    renamed && c.address && c.address.receiver && c.address.receiver === oldName ? { ...c.address, receiver: c.nickname } : c.address;
+  if (address) applyAddress(rec, address);
+  else if (renamed && rec.receiver === oldName) rec.receiver = c.nickname;
 
   const touched = new Set();
   for (const it of Array.isArray(c.items) ? c.items : []) {
@@ -328,17 +384,60 @@ function applyNativeCustomer(state, c) {
   }
 
   for (const o of touched) {
+    // App gửi `ship` trên từng món của đơn (các món cùng đơn giống nhau): món nào có thì ghi vào đơn.
+    // App bản cũ không gửi thì giữ nguyên `ship` đang có trên server.
+    const fromApp = [...(Array.isArray(c.items) ? c.items : [])]
+      .reverse()
+      .find((it) => it && it.ship && typeof it.ship === 'object' && (o.items || []).some((x) => String(x.id) === String(it.id)));
+    const prev = o.ship || {};
+    const prevStatus = o.status;
+    // Trạng thái máy chủ giữ nguyên dù app gửi gì: null = theo app.
+    let keepStatus = null;
+    if (fromApp) {
+      const ship = nativeShip(fromApp.ship);
+      for (const k of Object.keys(ship)) if (ship[k] === null) delete ship[k];
+      // Mã vận đơn / trạng thái Viettel Post do máy chủ ghi, app không gửi lên: giữ lại.
+      const vtpKeep = Object.fromEntries(Object.entries(prev).filter(([k]) => k.startsWith('vtp')));
+      o.ship = { ...vtpKeep, ...ship };
+      const appCode = String(fromApp.ship.vtpCode || '');
+      if (prev.vtpCode) {
+        // Đơn đã có vận đơn: app (chưa kịp nhận bản mới) không được kéo đơn về Chờ gửi.
+        o.ship.state = 'exported';
+        if (prev.exportedAt) o.ship.exportedAt = prev.exportedAt;
+        if (prev.batchId) o.ship.batchId = prev.batchId;
+        keepStatus = ['shipping', 'done'].includes(prevStatus) ? prevStatus : 'shipping';
+      } else if (prev.vtpOldCode && appCode && appCode === prev.vtpOldCode) {
+        // Vận đơn vừa bị huỷ mà app còn giữ bản cũ: giữ đơn ở Chờ gửi như máy chủ.
+        o.ship.state = prev.state || 'ready';
+        delete o.ship.exportedAt;
+        delete o.ship.batchId;
+        keepStatus = prevStatus;
+      }
+    }
     recalcOrder(o);
-    const status = orderStatusFromItems(o.items, o.status);
+    let status = orderStatusFromItems(o.items, o.status);
+    if (keepStatus && prev.vtpCode) {
+      // Đang giao ↔ Đã giao bấm tay trên app vẫn được nhận; về Chờ gửi thì không.
+      if (!['shipping', 'done'].includes(status)) status = keepStatus;
+    } else if (keepStatus) {
+      status = keepStatus;
+    }
     o.status = status;
     if (status !== 'new') o.printCount = Math.max(Number(o.printCount) || 0, 1);
     o.ts = Math.max(Number(o.ts) || 0, ...o.items.map((x) => Number(x.ts) || 0));
     o.timeStr = timeOf(o.ts);
-    if (c.nickname) o.nickname = c.nickname;
-    if (c.address) applyAddress(o, c.address);
+    if (c.nickname) {
+      if (renamed && o.receiver === oldName) o.receiver = c.nickname;
+      o.nickname = c.nickname;
+    }
+    if (address) applyAddress(o, address);
   }
-  if (c.address) {
-    for (const o of state.orders) if (keyOfRecord(o) === key) applyAddress(o, c.address);
+  if (address || renamed) {
+    for (const o of state.orders) {
+      if (keyOfRecord(o) !== key) continue;
+      if (renamed && o.receiver === oldName) o.receiver = c.nickname;
+      if (address) applyAddress(o, address);
+    }
   }
   recalcCustomerTotals(state, rec);
   return rec;

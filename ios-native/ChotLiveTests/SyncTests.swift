@@ -187,6 +187,18 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(store.makeSyncUpdate()?.customers.map(\.id), ["a"])
     }
 
+    func testServerRejectionKeepsChangesAndAllowsResend() {
+        let store = makeStore()
+        markSynced(store)
+        store.applyServer(ServerSnapshot(customers: [serverCustomer("a", items: ["a1"])]))
+        store.markPrinted(itemId: "a1")
+        let first = store.makeSyncUpdate()
+        XCTAssertNil(store.makeSyncUpdate(), "đang chờ xác nhận")
+        XCTAssertFalse(store.syncRejected(id: (first?.id ?? 0) + 7), "lời từ chối của gói khác thì bỏ qua")
+        XCTAssertTrue(store.syncRejected(id: first?.id))
+        XCTAssertEqual(store.makeSyncUpdate()?.customers.map(\.id), ["a"], "gửi lại được, không mất thay đổi")
+    }
+
     func testUnsentChangesSurviveRestart() {
         let store = makeStore()
         markSynced(store)

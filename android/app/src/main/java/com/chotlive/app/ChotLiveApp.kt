@@ -54,6 +54,11 @@ class ChotLiveApp : Application() {
         client.onAccountChange = { store.switchAccount(it) }
         client.onSnapshot = { store.applyServer(it) }
         client.onSyncAck = { id -> if (store.acknowledgeSync(id)) client.flushSync(store) }
+        // Server từ chối gói: không chờ xác nhận nữa (không thì app ngừng đồng bộ tới khi nối lại),
+        // đợi rồi gửi lại. Dữ liệu quá lớn thì thử thưa hơn vì gửi lại ngay cũng bị từ chối.
+        client.onSyncError = { id, code ->
+            if (store.syncRejected(id)) client.retrySync(store, if (code == "STATE_TOO_LARGE") 60_000L else 5_000L)
+        }
         client.onSocketClosed = { store.syncInterrupted() }
         store.onLocalChange = { client.scheduleSync(store) }
         // Đặt sau cùng: có thể chạy ngay nếu server đã trả lời trước khi app sẵn sàng.

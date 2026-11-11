@@ -559,6 +559,15 @@ final class Store: ObservableObject {
         accountsTouchedWhileSending = false
     }
 
+    /// Server từ chối gói (gửi quá nhanh, dữ liệu quá lớn): thôi chờ xác nhận, thay đổi còn nguyên để gửi lại sau.
+    /// Trả về false nếu lời từ chối là của một gói cũ, không phải gói đang chờ.
+    @discardableResult
+    func syncRejected(id: Int?) -> Bool {
+        guard let sent = sending, id == nil || sent.id == id else { return false }
+        syncInterrupted()
+        return true
+    }
+
     func saveSoon() { scheduleSave() }
 
     // MARK: - Lưu trữ

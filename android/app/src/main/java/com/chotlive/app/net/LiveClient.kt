@@ -84,6 +84,8 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
     var onAccountChange: ((String?) -> Unit)? = null
     var onSnapshot: ((ServerSnapshot) -> Unit)? = null
     var onSyncAck: ((Int) -> Unit)? = null
+    /** Server từ chối gói đồng bộ: mã gói (nếu có) và mã lỗi SYNC_TOO_FAST | STATE_TOO_LARGE. */
+    var onSyncError: ((Int?, String) -> Unit)? = null
     var onSocketClosed: (() -> Unit)? = null
     /** Vừa nối server xong, kèm toàn bộ dữ liệu của tài khoản. */
     var onHello: ((ServerSnapshot) -> Unit)? = null
@@ -256,6 +258,15 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
         syncJob?.cancel()
         syncJob = scope.launch {
             delay(300)
+            flushSync(store)
+        }
+    }
+
+    /** Gói vừa bị server từ chối: đợi rồi gửi lại. Có thay đổi mới trong lúc đợi thì scheduleSync gửi sớm hơn. */
+    fun retrySync(store: Store, afterMs: Long) {
+        syncJob?.cancel()
+        syncJob = scope.launch {
+            delay(afterMs)
             flushSync(store)
         }
     }
@@ -536,6 +547,7 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
                 m.num("clientsCount")?.let { clientsCount = it.toInt() }
                 m.num("id")?.let { onSyncAck?.invoke(it.toInt()) }
             }
+            "sync_error" -> onSyncError?.invoke(m.num("id")?.toInt(), m.str("code") ?: "")
             "clients_count" -> m.num("clientsCount")?.let { clientsCount = it.toInt() }
             "access" -> m.obj("access")?.let { updateAccess(AccountAccess.from(it)) }
             "status" -> {

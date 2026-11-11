@@ -473,6 +473,7 @@
                 <div class="session-title-wrap">
                   <span class="session-title" id="session-title-text">Phiên tối</span>
                   <span class="badge-live-tag" id="session-live-tag"><span class="live-red-dot"></span>Live</span>
+                  <button type="button" class="btn-stop-live" id="btn-stop-live" hidden>■ Dừng live</button>
                 </div>
                 <div class="session-subtitle" id="session-subtitle-text">
                   Từ 19:30 · 1g 25p · @shophoahong.live
@@ -654,9 +655,28 @@
           <div class="filter-chips-row chips-scroll-mobile">
             <button class="chip-pill active" data-order-filter="all" id="chip-ord-all">Tất cả · 50</button>
             <button class="chip-pill" data-order-filter="new" id="chip-ord-new">Đơn mới · 12</button>
-            <button class="chip-pill" data-order-filter="printed" id="chip-ord-printed">Đã in · 31</button>
+            <button class="chip-pill" data-order-filter="pending" id="chip-ord-pending">Chờ gửi · 0</button>
+            <button class="chip-pill" data-order-filter="hold" id="chip-ord-hold">Gom sau · 0</button>
             <button class="chip-pill" data-order-filter="shipping" id="chip-ord-shipping">Đang giao · 7</button>
           </div>
+
+          <!-- Có khách sẵn sàng gửi thì hiện thẻ này để xuất file Viettel Post -->
+          <div class="vtp-ready-banner" id="vtp-ready-banner" hidden>
+            <div class="vtp-ready-text">
+              <b id="vtp-ready-title">0 khách sẵn sàng gửi</b>
+              <span id="vtp-ready-sub">Gộp đơn cũ · thu hộ 0đ</span>
+            </div>
+            <button type="button" class="btn-orange-pill vtp-ready-btn" id="btn-open-vtp-export">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line></svg>
+              <span>Xuất VTP</span>
+            </button>
+          </div>
+
+          <button type="button" class="vtp-attention-strip" id="vtp-attention" hidden>
+            <span class="vtp-attn-dot">!</span>
+            <span class="vtp-attn-text"><b id="vtp-attention-title">0 đơn cần xử lý</b><span id="vtp-attention-sub"></span></span>
+            <span class="row-chevron">›</span>
+          </button>
 
           <div class="orders-list-table" id="orders-list-container">
             <!-- Render động danh sách đơn hàng chuẩn Screen 5 -->
@@ -695,6 +715,7 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
               <span id="detail-created-text">Tạo lúc 20:42 · CN 25/10/2026</span>
             </div>
+            <div class="detail-vtp-box" id="detail-vtp-box" hidden></div>
           </div>
 
           <div class="order-detail-grid">
@@ -721,11 +742,11 @@
               <div class="detail-bottom-3btns">
                 <button class="btn-outline-pill" id="btn-detail-ship-order">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
-                  <span>Giao hàng</span>
+                  <span id="detail-ship-label">Duyệt đơn</span>
                 </button>
                 <button class="btn-outline-pill" id="btn-detail-print-order">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-                  <span>In đơn</span>
+                  <span id="detail-print-label">In đơn</span>
                 </button>
                 <button class="btn-outline-pill btn-detail-del" id="btn-detail-delete-order">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -840,6 +861,19 @@
                   </div>
                   <div class="setting-row-right">
                     <span class="badge-in-use" id="lbl-printer-conn-state">Đã kết nối</span>
+                    <span class="row-chevron">›</span>
+                  </div>
+                </div>
+
+                <div class="setting-menu-row" id="menu-row-vtp">
+                  <div class="setting-row-left">
+                    <span class="setting-peach-icon">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c25e1a" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+                    </span>
+                    <span class="setting-row-title">Kết nối Viettel Post</span>
+                  </div>
+                  <div class="setting-row-right">
+                    <span class="badge-off" id="lbl-vtp-conn-state">Chưa kết nối</span>
                     <span class="row-chevron">›</span>
                   </div>
                 </div>
@@ -1018,7 +1052,7 @@
 
       <div class="calendar-widget-box">
         <div class="cal-month-header">
-          <span>Tháng 10, 2026</span>
+          <span id="cal-month-label">Tháng 10, 2026</span>
           <div style="display:flex;align-items:center;gap:14px">
             <button class="cal-nav-arrow" id="btn-cal-prev">‹</button>
             <button class="cal-nav-arrow" id="btn-cal-next">›</button>
@@ -1077,19 +1111,15 @@
       </div>
 
       <div class="form-section-title">● Địa chỉ nhận hàng</div>
-      <div class="form-grid-2col">
-        <div class="form-field-group">
-          <label>Địa chỉ</label>
-          <input type="text" class="form-field-input" id="edit-addr-input-street" placeholder="Số nhà, tên đường" />
-        </div>
-        <div class="form-field-group">
-          <label>Phường / Quận / Tỉnh</label>
-          <div class="form-field-input form-select-trigger" id="edit-addr-trigger-area">
-            <span id="edit-addr-display-area" style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-              Chọn khu vực
-            </span>
-            <span style="font-size:10px;color:var(--text-sub)">⌵</span>
-          </div>
+      <div class="form-field-group">
+        <label>Địa chỉ</label>
+        <input type="text" class="form-field-input" id="edit-addr-input-street" placeholder="Số nhà, tên đường" />
+      </div>
+      <div class="form-field-group">
+        <label>Phường / Quận / Tỉnh <span class="req">*</span></label>
+        <div class="form-field-input form-select-trigger addr-trigger" id="edit-addr-trigger-area">
+          <span id="edit-addr-display-area">Chọn khu vực</span>
+          <span style="font-size:10px;color:var(--text-sub)">⌵</span>
         </div>
       </div>
 
@@ -1112,22 +1142,26 @@
       <button class="btn-modal-close" data-close-dialog>×</button>
       <h2 class="modal-title-main">Khu vực nhận hàng</h2>
 
-      <p style="font-size:12px;color:var(--text-sub);margin:8px 0 12px">
-        Nhập đúng theo địa chỉ của khách. Địa chỉ mới không còn cấp quận / huyện thì để trống ô đó.
-      </p>
+      <div class="area-mode-toggle" role="group" aria-label="Loại địa chỉ">
+        <button type="button" data-area-mode="new" class="active">Địa chỉ mới</button>
+        <button type="button" data-area-mode="old">Địa chỉ cũ</button>
+      </div>
 
       <div class="form-field-group">
         <label for="area-input-province">Tỉnh / Thành phố</label>
-        <input type="text" class="form-field-input" id="area-input-province" placeholder="Ví dụ: Hà Nội" />
+        <select class="form-field-input" id="area-input-province" data-combo="Gõ để tìm tỉnh / thành, ví dụ: Hà Nội"></select>
       </div>
-      <div class="form-field-group">
+      <div class="form-field-group" id="area-district-group" hidden>
         <label for="area-input-district">Quận / Huyện</label>
-        <input type="text" class="form-field-input" id="area-input-district" placeholder="Ví dụ: Quận Hoàn Kiếm" />
+        <select class="form-field-input" id="area-input-district" data-combo="Gõ để tìm quận / huyện, ví dụ: Cao Phong"></select>
       </div>
       <div class="form-field-group">
-        <label for="area-input-ward">Phường / Xã</label>
-        <input type="text" class="form-field-input" id="area-input-ward" placeholder="Ví dụ: Phường Hàng Bài" />
+        <label for="area-input-ward-search">Phường / Xã</label>
+        <input type="search" class="form-field-input" id="area-input-ward-search" placeholder="Gõ để tìm, ví dụ: Tân Định" autocomplete="off" />
+        <select class="form-field-input area-ward-select" id="area-input-ward" size="6"></select>
       </div>
+      <p class="area-old-hint" id="area-old-hint" hidden></p>
+      <p class="area-equiv-hint" id="area-equiv-hint" hidden></p>
 
       <div class="area-selected-summary">
         Địa chỉ đã nhập:
@@ -1137,6 +1171,184 @@
       <button type="button" class="btn-orange-pill" style="width:100%;height:44px" id="btn-confirm-area">
         Xác nhận
       </button>
+    </div>
+  </dialog>
+
+  <!-- ================== BÌNH LUẬN CHỐT ĐƠN của một đơn (giống app điện thoại) ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-order-comments">
+    <div class="modal-content-card oc-card">
+      <div class="sheet-drag-handle"></div>
+      <button class="btn-modal-close" data-close-dialog>×</button>
+      <h2 class="modal-title-main">Bình luận chốt đơn</h2>
+      <p class="modal-subtitle-text" id="oc-subtitle"></p>
+      <div class="oc-cust">
+        <div class="oc-cust-top">
+          <span class="oc-avatar" id="oc-avatar"></span>
+          <div class="oc-cust-info">
+            <b id="oc-name"></b>
+            <small id="oc-uid"></small>
+          </div>
+          <span class="oc-count" id="oc-count"></span>
+        </div>
+        <div class="oc-value"><small>Giá trị đơn</small><b id="oc-value"></b></div>
+      </div>
+      <div class="oc-head"><b>Các bình luận đã chốt</b><span>Theo thời gian</span></div>
+      <div class="oc-list" id="oc-list"></div>
+      <button type="button" class="btn-orange-pill oc-detail-btn" id="btn-oc-detail">Xem chi tiết đơn</button>
+    </div>
+  </dialog>
+
+  <!-- ================== GIAO HÀNG: gộp đơn chờ gửi của một khách ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-ship">
+    <div class="modal-content-card">
+      <div class="sheet-drag-handle"></div>
+      <button class="btn-modal-close" data-close-dialog>×</button>
+      <h2 class="modal-title-main">Duyệt đơn</h2>
+
+      <div class="ship-orders-box" id="ship-orders-list"></div>
+      <p class="ship-merge-note" id="ship-merge-note"></p>
+
+      <div class="form-section-title">Khách thanh toán</div>
+      <div class="ship-seg ship-seg-wrap" role="radiogroup" aria-label="Khách thanh toán">
+        <button type="button" class="ship-seg-btn active" data-ship-pay="cod" role="radio" aria-checked="true">Thu tiền hàng</button>
+        <button type="button" class="ship-seg-btn" data-ship-pay="paid" role="radio" aria-checked="false">Đã bank đủ</button>
+      </div>
+
+      <div class="form-grid-2col ship-money-row">
+        <div class="form-field-group">
+          <label for="ship-deposit">Khách đã cọc / đã chuyển (trừ vào COD)</label>
+          <input type="number" class="form-field-input" id="ship-deposit" min="0" step="1000" placeholder="0" inputmode="numeric" />
+        </div>
+      </div>
+
+      <div class="form-grid-2col ship-money-row">
+        <div class="form-field-group">
+          <label for="ship-cod">Tiền thu hộ (COD) <button type="button" class="link-btn" id="btn-ship-cod-auto" hidden>Tự tính</button></label>
+          <input type="number" class="form-field-input" id="ship-cod" min="0" step="1000" placeholder="0" inputmode="numeric" />
+        </div>
+        <div class="form-field-group">
+          <label for="ship-weight">Cân nặng (kg)</label>
+          <input type="number" class="form-field-input" id="ship-weight" min="0.1" step="0.1" value="1" inputmode="decimal" />
+        </div>
+      </div>
+
+      <!-- Từ 10kg Viettel Post cần kích thước kiện: hiện 3 ô và bắt buộc nhập -->
+      <div class="form-field-group ship-size-group" id="ship-size-group" hidden>
+        <label>Kích thước (cm) <span class="req">*</span></label>
+        <div class="ship-size-row">
+          <input type="number" class="form-field-input" id="ship-length" min="1" step="1" placeholder="Dài (cm)" inputmode="numeric" aria-label="Dài (cm)" />
+          <input type="number" class="form-field-input" id="ship-width" min="1" step="1" placeholder="Rộng (cm)" inputmode="numeric" aria-label="Rộng (cm)" />
+          <input type="number" class="form-field-input" id="ship-height" min="1" step="1" placeholder="Cao (cm)" inputmode="numeric" aria-label="Cao (cm)" />
+        </div>
+        <p class="ship-size-warn" id="ship-size-warn" hidden>Hàng từ 10kg phải nhập đủ dài, rộng, cao.</p>
+      </div>
+
+      <div class="form-section-title">Người trả cước Viettel Post</div>
+      <div class="ship-seg ship-seg-wrap" role="radiogroup" aria-label="Người trả cước">
+        <button type="button" class="ship-seg-btn active" data-ship-payer="receiver" role="radio" aria-checked="true">Người nhận trả</button>
+        <button type="button" class="ship-seg-btn" data-ship-payer="sender" role="radio" aria-checked="false">Người gửi trả</button>
+      </div>
+      <p class="ship-payer-warn" id="ship-payer-warn" hidden>Tiền COD dưới 17.000đ tự động chuyển qua người gửi trả ship và cộng tiền ship vào COD.</p>
+      
+      <p class="ship-addr-warn" id="ship-addr-warn" hidden></p>
+
+      <div class="ship-actions">
+        <button type="button" class="btn-ghost-pill" id="btn-ship-hold">Gom sau</button>
+        <button type="button" class="btn-orange-pill" id="btn-ship-ready">Xác nhận gửi</button>
+      </div>
+      <button type="button" class="ship-undo-link" id="btn-ship-undo" hidden>Hoàn tác xuất Viettel Post</button>
+    </div>
+  </dialog>
+
+  <!-- ================== XUẤT EXCEL VIETTEL POST ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-vtp-export">
+    <div class="modal-content-card">
+      <div class="sheet-drag-handle"></div>
+      <button class="btn-modal-close" data-close-dialog>×</button>
+      <h2 class="modal-title-main" id="vtp-export-title">Xuất Viettel Post</h2>
+      <p class="modal-subtitle-text" id="vtp-export-subtitle"></p>
+
+      <div class="vtp-result" id="vtp-result" hidden></div>
+
+      <div id="vtp-export-body">
+      <div class="vtp-sender-line" id="vtp-sender-line" hidden></div>
+      <div class="vtp-export-toolbar">
+        <span id="vtp-export-count">Đã chọn 0</span>
+        <button type="button" class="link-btn" id="btn-vtp-select-all">Chọn tất cả</button>
+      </div>
+      <div class="vtp-export-list" id="vtp-export-list"></div>
+
+      <div class="form-field-group" style="margin-top:12px">
+        <label for="vtp-service">Dịch vụ Viettel Post</label>
+        <select class="form-field-input" id="vtp-service"></select>
+      </div>
+
+      <div class="ship-actions">
+        <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
+        <button type="button" class="btn-orange-pill" id="btn-vtp-export-go">Xuất Excel · 0 vận đơn</button>
+      </div>
+      <button type="button" class="link-btn vtp-excel-alt" id="btn-vtp-excel-alt" hidden>Hoặc xuất Excel như cũ</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ================== KẾT NỐI VIETTEL POST ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-vtp-connect">
+    <div class="modal-content-card">
+      <div class="sheet-drag-handle"></div>
+      <button class="btn-modal-close" data-close-dialog>×</button>
+      <h2 class="modal-title-main">Kết nối Viettel Post</h2>
+
+      <div id="vtp-connect-off">
+        <p class="modal-subtitle-text">Kết nối một lần để tạo vận đơn, in tem và tự cập nhật trạng thái giao ngay trong app. Chưa kết nối thì vẫn xuất Excel như cũ.</p>
+        <ol class="vtp-steps">
+          <li>Mở <b>viettelpost.vn</b> › <b>Cấu hình tài khoản</b> › <b>Thêm mới token</b>.</li>
+          <li>Bấm sao chép token (Viettel Post gửi mã OTP).</li>
+          <li>Dán vào ô dưới rồi bấm <b>Kết nối</b>.</li>
+        </ol>
+        <div class="form-field-group">
+          <label for="vtp-token-input">Token Viettel Post</label>
+          <input type="password" class="form-field-input" id="vtp-token-input" autocomplete="off" spellcheck="false" placeholder="Dán token vào đây" />
+          <p class="ship-pay-hint">Token chỉ lưu ở máy chủ của shop, không hiện lại trên app.</p>
+        </div>
+        <p class="vtp-row-err" id="vtp-connect-error" hidden></p>
+        <div class="ship-actions">
+          <button type="button" class="btn-ghost-pill" data-close-dialog>Để sau</button>
+          <button type="button" class="btn-orange-pill" id="btn-vtp-connect">Kết nối</button>
+        </div>
+      </div>
+
+      <div id="vtp-connect-on" hidden>
+        <div class="vtp-connected-card">
+          <span class="vtp-ok-dot">✓</span>
+          <div><b>Đã kết nối</b><div class="vtp-row-sub" id="vtp-conn-phone"></div></div>
+        </div>
+
+        <div class="form-field-group">
+          <label for="vtp-sender-select">Điểm lấy hàng</label>
+          <select class="form-field-input" id="vtp-sender-select"><option value="">Đang tải…</option></select>
+          <p class="ship-pay-hint" id="vtp-sender-hint">Bưu tá đến địa chỉ này lấy hàng.</p>
+        </div>
+
+        <div class="form-field-group">
+          <label for="vtp-label-size">Khổ tem khi in</label>
+          <select class="form-field-input" id="vtp-label-size"></select>
+        </div>
+
+        <div class="form-field-group">
+          <label>Địa chỉ nhận trạng thái (webhook)</label>
+          <div class="vtp-hook-row">
+            <input type="text" class="form-field-input" id="vtp-hook-url" readonly />
+            <button type="button" class="btn-ghost-pill" id="btn-vtp-hook-copy">Sao chép</button>
+          </div>
+          <p class="ship-pay-hint" id="vtp-hook-hint">Dán địa chỉ này vào partner2.viettelpost.vn › Bảng điều khiển › Thông tin tài khoản › Production › Cấu hình webhook để đơn tự chuyển Đang giao / Đã giao.</p>
+        </div>
+
+        <div class="ship-actions">
+          <button type="button" class="btn-ghost-pill btn-detail-del" id="btn-vtp-disconnect">Ngắt kết nối</button>
+          <button type="button" class="btn-orange-pill" data-close-dialog>Xong</button>
+        </div>
+      </div>
     </div>
   </dialog>
 

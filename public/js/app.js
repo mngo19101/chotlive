@@ -14,8 +14,36 @@ import {
   initialSalesMetrics,
   applyRemoteState,
   onRemoteStateApplied,
-  pendingChangeCount
+  pendingChangeCount,
+  setOrdersShip
 } from './store.js';
+import { VTP_PROVINCES, vtpWardsOf, vtpProvinceByName, normalizeVN } from './vtp-address.js';
+import {
+  VTP_OLD_PROVINCES,
+  vtpOldDistrictsOf,
+  vtpOldWardsOf,
+  findVtpOldAddress,
+  findVtpNewAddress,
+  oldKey
+} from './vtp-address-old.js';
+import {
+  shipStateOf,
+  shipKeyOf,
+  isPending,
+  goodsTotal,
+  itemQty,
+  pendingOrdersOfCustomer,
+  olderPendingOf,
+  groupByCustomer,
+  summarizeGroup,
+  buildVtpXlsx,
+  vtpFileName,
+  vtpAddressLine,
+  VTP_SERVICES,
+  DEFAULT_VTP_SERVICE,
+  DEFAULT_WEIGHT_G
+} from './vtp-export.js';
+import { downloadBytes } from './xlsx-writer.js';
 import {
   connectSync,
   fetchInitialStateFromServer,
@@ -78,6 +106,8 @@ const esc = (s) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
   );
 const S = () => state.settings;
+/** Kết nối Viettel Post của tài khoản (máy chủ giữ token): { connected, phone, sender, hookUrl }. */
+let vtpConn = { connected: false };
 const priceOpts = () => ({
   multiplier: Number(S().multiplier) || 1000,
   minPrice: 1, // mọi mức giá đều tính (5k, 2k...)
@@ -543,6 +573,18 @@ function renderCommentScopeHeader() {
   if ($('#session-live-tag')) {
     $('#session-live-tag').style.display = (session ? session.isLive : sessions.some((s) => s.isLive)) ? 'inline-flex' : 'none';
   }
+  // Nút Dừng live: dừng live đang xem; chưa chọn live nào mà chỉ có một live thì dừng live đó.
+  const stopBtn = $('#btn-stop-live');
+  if (stopBtn) {
+    const target = session
+      ? activeLives.find((l) => l.sessionId === session.id)
+      : activeLives.length === 1
+      ? activeLives[0]
+      : null;
+    stopBtn.hidden = !target;
+    stopBtn.dataset.stopLive = target ? target.username : '';
+    stopBtn.textContent = target ? `■ Dừng live @${target.username}` : '■ Dừng live';
+  }
   if ($('#session-subtitle-text')) {
     $('#session-subtitle-text').textContent = session
       ? `Từ ${session.timeStr || ''}${session.tiktok ? ' · @' + session.tiktok : ''}`
@@ -568,6 +610,7 @@ function renderActiveLives() {
   if (activeLives.length === 0) {
     box.style.display = 'none';
     box.innerHTML = '';
+    renderCommentScopeHeader();
     return;
   }
   box.style.display = 'flex';
@@ -590,10 +633,11 @@ function renderActiveLives() {
           <span class="live-chip-dot ${esc(l.state)}"></span>
           <span>@${esc(l.username)}</span>
           <span class="live-chip-meta">${esc(meta)}</span>
-          <button type="button" class="live-chip-stop" data-stop-live="${esc(l.username)}" aria-label="Dừng theo dõi @${esc(l.username)}">×</button>
+          <button type="button" class="live-chip-stop" data-stop-live="${esc(l.username)}" aria-label="Dừng theo dõi @${esc(l.username)}">Dừng</button>
         </div>`;
       })
       .join('');
+  renderCommentScopeHeader();
 }
 
 function setCommentScope(sessionId) {
@@ -612,6 +656,13 @@ function setCommentScope(sessionId) {
     loadOlderComments({ grow: false });
   }
 }
+
+$('#btn-stop-live')?.addEventListener('click', (e) => {
+  const username = e.currentTarget.dataset.stopLive;
+  if (!username) return;
+  if (!window.confirm(`Dừng theo dõi live @${username}?`)) return;
+  if (!sendLiveCommand('disconnect', username)) toast('Chưa nối được server, thử lại sau', '⚠️');
+});
 
 $('#active-lives-strip')?.addEventListener('click', (e) => {
   const stop = e.target.closest('[data-stop-live]');
@@ -978,7 +1029,100 @@ $('#btn-next-day-nav')?.addEventListener('click', () => {
   }
 });
 
+
+/* ---------- Bảng "Xem lại thời điểm" dùng để lọc đơn theo ngày / khoảng ngày ---------- */
+let timeFilterCtx = null; // 'orders' khi mở từ tab Đơn hàng
+const calSel = { month: 0, from: null, to: null };
+const MONTHS = ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6', 'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'];
+const minText = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const parseMin = (v, fallback) => {
+  const m = /^(\d{1,2})[:h.](\d{2})$/.exec(String(v || '').trim());
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return fallback;
+  return Number(m[1]) * 60 + Number(m[2]);
+};
+
+function renderOrderCalendar() {
+  const first = new Date(calSel.month);
+  first.setDate(1);
+  $('#cal-month-label').textContent = `${MONTHS[first.getMonth()]}, ${first.getFullYear()}`;
+  const start = new Date(first);
+  start.setDate(1 - ((first.getDay() + 6) % 7)); // tuần bắt đầu thứ Hai
+  const today = dayStart();
+  const lo = calSel.from;
+  const hi = calSel.to ?? calSel.from;
+  let html = '';
+  for (let w = 0; w < 6; w++) {
+    html += '<tr>';
+    for (let k = 0; k < 7; k++) {
+      const t = dayStart(addDays(start.getTime(), w * 7 + k));
+      const d = new Date(t);
+      const cls = [
+        d.getMonth() !== first.getMonth() ? 'muted' : '',
+        t > today ? 'future' : '',
+        t === lo || t === hi ? 'active' : lo !== null && t > lo && t < hi ? 'in-range' : ''
+      ].filter(Boolean).join(' ');
+      html += `<td class="${cls}" data-cal-ts="${t}"><span>${d.getDate()}</span></td>`;
+    }
+    html += '</tr>';
+  }
+  $('#cal-grid-tbody').innerHTML = html;
+}
+
+function markTimeChip() {
+  const today = dayStart();
+  const m0 = new Date(today);
+  m0.setDate(1);
+  const lastM = new Date(m0);
+  lastM.setMonth(lastM.getMonth() - 1);
+  const ranges = {
+    today: [today, today],
+    yesterday: [addDays(today, -1), addDays(today, -1)],
+    '7days': [addDays(today, -6), today],
+    '30days': [addDays(today, -29), today],
+    thismonth: [m0.getTime(), today],
+    lastmonth: [lastM.getTime(), addDays(m0.getTime(), -1)]
+  };
+  const hi = calSel.to ?? calSel.from;
+  $$('[data-time-chip]').forEach((b) => {
+    const r = ranges[b.dataset.timeChip];
+    b.classList.toggle('active', !!r && r[0] === calSel.from && r[1] === hi);
+  });
+  return ranges;
+}
+
+function openOrderTimeFilter() {
+  timeFilterCtx = 'orders';
+  calSel.from = orderDayFrom;
+  calSel.to = orderDayTo;
+  calSel.month = orderDayTo;
+  $('#input-time-from').value = minText(orderMinFrom);
+  $('#input-time-to').value = minText(orderMinTo);
+  renderOrderCalendar();
+  markTimeChip();
+  $('#modal-filter-time')?.showModal();
+}
+
+$('#modal-filter-time')?.addEventListener('close', () => {
+  timeFilterCtx = null;
+});
+
 $('#cal-grid-tbody')?.addEventListener('click', (e) => {
+  if (timeFilterCtx === 'orders') {
+    const cell = e.target.closest('td[data-cal-ts]');
+    if (!cell || cell.classList.contains('future')) return;
+    const t = Number(cell.dataset.calTs);
+    // Bấm lần đầu chọn một ngày; bấm ngày thứ hai thành khoảng từ ngày đến ngày.
+    if (calSel.from === null || calSel.to !== null) {
+      calSel.from = t;
+      calSel.to = null;
+    } else {
+      calSel.to = Math.max(t, calSel.from);
+      calSel.from = Math.min(t, calSel.from);
+    }
+    renderOrderCalendar();
+    markTimeChip();
+    return;
+  }
   const td = e.target.closest('td[data-cal-day]');
   if (td && !td.classList.contains('muted')) {
     $$('#cal-grid-tbody td').forEach((cell) => cell.classList.remove('active'));
@@ -1087,10 +1231,44 @@ $$('[data-time-chip]').forEach((btn) => {
   btn.addEventListener('click', () => {
     $$('[data-time-chip]').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
+    if (timeFilterCtx !== 'orders') return;
+    const r = markTimeChip()[btn.dataset.timeChip];
+    if (!r) return;
+    [calSel.from, calSel.to] = r;
+    calSel.month = r[1];
+    renderOrderCalendar();
+    markTimeChip();
   });
 });
 
+$('#btn-cal-prev')?.addEventListener('click', () => {
+  if (timeFilterCtx !== 'orders') return;
+  const d = new Date(calSel.month);
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
+  calSel.month = d.getTime();
+  renderOrderCalendar();
+});
+$('#btn-cal-next')?.addEventListener('click', () => {
+  if (timeFilterCtx !== 'orders') return;
+  const d = new Date(calSel.month);
+  d.setDate(1);
+  d.setMonth(d.getMonth() + 1);
+  if (d.getTime() > dayStart()) return;
+  calSel.month = d.getTime();
+  renderOrderCalendar();
+});
+
 $('#btn-apply-time-filter')?.addEventListener('click', () => {
+  if (timeFilterCtx === 'orders') {
+    orderMinFrom = parseMin($('#input-time-from').value, 0);
+    orderMinTo = parseMin($('#input-time-to').value, 24 * 60 - 1);
+    const from = calSel.from ?? dayStart();
+    $('#modal-filter-time')?.close();
+    setOrderRange(from, calSel.to ?? from);
+    toast(`Đang xem đơn ${orderRangeLabel()}`, '🗓');
+    return;
+  }
   $('#modal-filter-time')?.close();
   toast('Đã áp dụng bộ lọc thời điểm', '✓');
 });
@@ -1330,7 +1508,7 @@ function openCustomerProfileView(uniqueId) {
 
   // Thiếu thông tin thì nói thiếu, không hiện dữ liệu mẫu trông như thật.
   const region = joinRegion(cust);
-  $('#prof-addr-receiver').textContent = cust.name;
+  $('#prof-addr-receiver').textContent = cust.receiver || cust.name;
   $('#prof-addr-phone').textContent = cust.phone ? formatPhone(cust.phone) : 'Chưa có số điện thoại';
   $('#prof-addr-street').textContent = cust.street || (region ? '' : cust.address) || 'Chưa có địa chỉ';
   $('#prof-addr-region').textContent = region;
@@ -1403,22 +1581,229 @@ function showEditingArea() {
   $('#edit-addr-display-area').textContent = joinRegion(editingArea) || 'Chọn khu vực';
 }
 
+/**
+ * Bảng chọn khu vực có hai chế độ như app điện thoại, cả hai lấy đúng danh mục Viettel Post:
+ * - mới: Tỉnh (34) → Phường/Xã, lưu district = ''
+ * - cũ: Tỉnh (63) → Quận/Huyện → Phường/Xã, tên kiểu "P.Bến Nghé, Q.1, TP.Hồ Chí Minh"
+ */
+let areaMode = 'new';
+
+const areaProvinces = () => (areaMode === 'old' ? VTP_OLD_PROVINCES : VTP_PROVINCES);
+
+/** Tỉnh, quận và phường đang chọn trong bảng chọn khu vực. */
 function readAreaInputs() {
+  const pid = $('#area-input-province').value;
+  const prov = areaProvinces().find(([id]) => String(id) === pid);
   return {
-    ward: $('#area-input-ward').value.trim(),
-    district: $('#area-input-district').value.trim(),
-    province: $('#area-input-province').value.trim()
+    ward: $('#area-input-ward').value || '',
+    district: areaMode === 'old' ? $('#area-input-district').value || '' : '',
+    province: prov ? prov[1] : ''
   };
 }
 
-$('#btn-open-edit-address')?.addEventListener('click', () => {
-  const cust = findCustomerByUid(currentProfileUniqueId);
-  if (!cust) return;
+function fillProvinceOptions(selectedId = '') {
+  $('#area-input-province').innerHTML =
+    '<option value="">Chọn tỉnh / thành</option>' +
+    areaProvinces()
+      .map(([id, name]) => `<option value="${id}" ${String(id) === String(selectedId) ? 'selected' : ''}>${esc(name)}</option>`)
+      .join('');
+}
+
+function fillDistrictOptions(selected = '') {
+  const pid = $('#area-input-province').value;
+  const list = pid ? vtpOldDistrictsOf(pid) : [];
+  $('#area-input-district').innerHTML = pid
+    ? '<option value="">Chọn quận / huyện</option>' +
+      list.map((d) => `<option value="${esc(d)}" ${d === selected ? 'selected' : ''}>${esc(d)}</option>`).join('')
+    : '<option value="">Chọn tỉnh / thành trước</option>';
+}
+
+function fillWardOptions(selected = '') {
+  const pid = $('#area-input-province').value;
+  const dist = areaMode === 'old' ? $('#area-input-district').value : '';
+  const q = normalizeVN($('#area-input-ward-search').value);
+  const wards = !pid ? [] : areaMode === 'old' ? (dist ? vtpOldWardsOf(pid, dist) : []) : vtpWardsOf(pid);
+  const list = q ? wards.filter((w) => normalizeVN(w.replace(/\./g, ' ')).includes(q)) : wards;
+  const sel = $('#area-input-ward');
+  const waiting = !pid ? 'Chọn tỉnh / thành trước' : areaMode === 'old' && !dist ? 'Chọn quận / huyện trước' : '';
+  sel.innerHTML = waiting
+    ? `<option value="" disabled>${waiting}</option>`
+    : list.map((w) => `<option value="${esc(w)}" ${w === selected ? 'selected' : ''}>${esc(w)}</option>`).join('') ||
+      '<option value="" disabled>Không thấy phường/xã nào</option>';
+  if (selected && !list.includes(selected)) sel.value = '';
+}
+
+
+/* ---------- Ô chọn có tìm kiếm cho <select> (tỉnh, quận/huyện): gõ không dấu cũng ra ---------- */
+const comboSyncers = [];
+function makeCombo(sel) {
+  const wrap = document.createElement('div');
+  wrap.className = 'combo';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'form-field-input combo-input';
+  input.autocomplete = 'off';
+  input.placeholder = sel.dataset.combo || 'Gõ để tìm';
+  const caret = document.createElement('span');
+  caret.className = 'combo-caret';
+  caret.textContent = '⌵';
+  const list = document.createElement('ul');
+  list.className = 'combo-list';
+  list.hidden = true;
+  sel.after(wrap);
+  wrap.append(input, caret, list);
+  sel.hidden = true;
+  let active = -1;
+
+  const options = () => [...sel.options].filter((o) => o.value !== '');
+  const syncText = () => {
+    const o = sel.selectedOptions[0];
+    input.value = o && o.value !== '' ? o.textContent : '';
+    input.disabled = sel.options.length <= 1 && !sel.value && /trước/.test(sel.options[0]?.textContent || '');
+    if (input.disabled) input.placeholder = sel.options[0]?.textContent || '';
+    else input.placeholder = sel.dataset.combo || 'Gõ để tìm';
+  };
+  const render = (q) => {
+    const key = normalizeVN(q || '');
+    const found = options().filter((o) => !key || normalizeVN(o.textContent.replace(/\./g, ' ')).includes(key));
+    active = found.length ? 0 : -1;
+    list.innerHTML = found.length
+      ? found
+          .map(
+            (o, i) =>
+              `<li class="combo-item${o.value === sel.value ? ' selected' : ''}${i === 0 ? ' active' : ''}" data-v="${esc(o.value)}">${esc(o.textContent)}</li>`
+          )
+          .join('')
+      : '<li class="combo-empty">Không thấy kết quả</li>';
+    list.hidden = false;
+  };
+  const pick = (v) => {
+    sel.value = v;
+    list.hidden = true;
+    syncText();
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  input.addEventListener('focus', () => {
+    input.select();
+    render('');
+    list.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
+  });
+  input.addEventListener('input', () => render(input.value));
+  input.addEventListener('keydown', (e) => {
+    const items = [...list.querySelectorAll('.combo-item')];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (list.hidden) render(input.value);
+      else if (items.length) {
+        active = (active + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items.forEach((li, i) => li.classList.toggle('active', i === active));
+        items[active].scrollIntoView({ block: 'nearest' });
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!list.hidden && items[active]) pick(items[active].dataset.v);
+    } else if (e.key === 'Escape' && !list.hidden) {
+      e.stopPropagation();
+      list.hidden = true;
+      syncText();
+    }
+  });
+  list.addEventListener('mousedown', (e) => {
+    const li = e.target.closest('.combo-item');
+    if (!li) return;
+    e.preventDefault();
+    pick(li.dataset.v);
+  });
+  input.addEventListener('blur', () => {
+    list.hidden = true;
+    syncText();
+  });
+  new MutationObserver(syncText).observe(sel, { childList: true });
+  syncText();
+  comboSyncers.push(syncText);
+}
+$$('select[data-combo]').forEach(makeCombo);
+
+function updateAreaSummary() {
+  comboSyncers.forEach((f) => f());
+  const a = readAreaInputs();
+  const done = a.province && a.ward && (areaMode === 'new' || a.district);
+  $('#area-summary-text').textContent = done ? joinRegion(a) : 'Chưa chọn đủ';
+  // Địa chỉ cũ: cho xem luôn phường mới mà Viettel Post gộp vào, để đối chiếu với khách.
+  const equiv = $('#area-equiv-hint');
+  const r = done && areaMode === 'old' ? findVtpOldAddress(a) : null;
+  equiv.hidden = !r?.newWard;
+  equiv.textContent = r?.newWard ? `Theo địa chỉ mới: ${r.newWard}, ${r.newProvince}` : '';
+}
+
+function setAreaMode(mode) {
+  areaMode = mode;
+  $$('[data-area-mode]').forEach((b) => b.classList.toggle('active', b.dataset.areaMode === mode));
+  $('#area-district-group').hidden = mode !== 'old';
+  $('#area-input-ward-search').placeholder = mode === 'old' ? 'Gõ để tìm, ví dụ: Bến Nghé' : 'Gõ để tìm, ví dụ: Tân Định';
+}
+
+/** Mở bảng chọn khu vực, chọn sẵn theo địa chỉ đang có nếu khớp danh mục Viettel Post (mới hoặc cũ). */
+function openAreaPicker() {
+  const isOld = !!editingArea.district;
+  setAreaMode(isOld ? 'old' : 'new');
+  $('#area-input-ward-search').value = '';
+  let matched = null;
+  if (isOld) {
+    matched = findVtpOldAddress(editingArea);
+    const prov = matched
+      ? VTP_OLD_PROVINCES.find(([, n]) => n === matched.province)
+      : VTP_OLD_PROVINCES.find(([, n]) => oldKey(n) === oldKey(editingArea.province));
+    fillProvinceOptions(prov ? prov[0] : '');
+    fillDistrictOptions(matched ? matched.district : '');
+    fillWardOptions(matched ? matched.ward : '');
+  } else {
+    matched = findVtpNewAddress(editingArea);
+    const prov = matched
+      ? VTP_PROVINCES.find(([, n]) => n === matched.province)
+      : vtpProvinceByName(editingArea.province);
+    fillProvinceOptions(prov ? prov[0] : '');
+    fillDistrictOptions();
+    fillWardOptions(matched ? matched.ward : '');
+  }
+
+  const saved = joinRegion(editingArea);
+  const exact = matched && joinRegion(matched) === saved;
+  const hint = $('#area-old-hint');
+  hint.hidden = !saved || exact;
+  hint.textContent = !saved || exact
+    ? ''
+    : matched
+      ? `Địa chỉ đang lưu: ${saved}. Đã chọn sẵn tên đúng theo Viettel Post, bấm Xác nhận để lưu.`
+      : `Địa chỉ đang lưu: ${saved}. Không có trong danh mục Viettel Post, chọn lại.`;
+  updateAreaSummary();
+  $('#modal-select-area')?.showModal();
+}
+
+$$('[data-area-mode]').forEach((btn) =>
+  btn.addEventListener('click', () => {
+    if (btn.dataset.areaMode === areaMode) return;
+    setAreaMode(btn.dataset.areaMode);
+    $('#area-input-ward-search').value = '';
+    fillProvinceOptions();
+    fillDistrictOptions();
+    fillWardOptions();
+    updateAreaSummary();
+  })
+);
+
+$('#btn-open-edit-address')?.addEventListener('click', () => openAddressEditor(currentProfileUniqueId));
+
+/** Mở form sửa địa chỉ của khách; gọi được cả từ bảng Giao hàng và màn Xuất Viettel Post. */
+function openAddressEditor(uniqueId) {
+  const cust = findCustomerByUid(uniqueId);
+  if (!cust) return toast('Không tìm thấy hồ sơ khách này', '⚠️');
+  currentProfileUniqueId = cust.uniqueId;
 
   editingArea = { ward: cust.ward || '', district: cust.district || '', province: cust.province || '' };
   $('#edit-addr-subtitle').textContent = `${cust.name} · @${cust.uniqueId}`;
   $('#edit-addr-input-phone').value = cust.phone || '';
-  $('#edit-addr-input-name').value = cust.name || '';
+  $('#edit-addr-input-name').value = cust.receiver || cust.name || '';
   // Địa chỉ cũ chỉ có một dòng, chưa tách khu vực: đưa cả dòng vào ô địa chỉ để không mất.
   $('#edit-addr-input-street').value = cust.street || (joinRegion(editingArea) ? '' : cust.address || '');
   if ($('#edit-addr-input-note')) {
@@ -1427,24 +1812,33 @@ $('#btn-open-edit-address')?.addEventListener('click', () => {
   showEditingArea();
 
   $('#modal-edit-address')?.showModal();
-});
+}
 
-$('#edit-addr-trigger-area')?.addEventListener('click', () => {
-  $('#area-input-province').value = editingArea.province;
-  $('#area-input-district').value = editingArea.district;
-  $('#area-input-ward').value = editingArea.ward;
-  $('#area-summary-text').textContent = joinRegion(editingArea) || 'Chưa nhập';
-  $('#modal-select-area')?.showModal();
-});
+$('#edit-addr-trigger-area')?.addEventListener('click', openAreaPicker);
 
-$$('#area-input-province, #area-input-district, #area-input-ward').forEach((input) => {
-  input.addEventListener('input', () => {
-    $('#area-summary-text').textContent = joinRegion(readAreaInputs()) || 'Chưa nhập';
-  });
+$('#area-input-province')?.addEventListener('change', () => {
+  $('#area-input-ward-search').value = '';
+  fillDistrictOptions();
+  fillWardOptions();
+  updateAreaSummary();
 });
+$('#area-input-district')?.addEventListener('change', () => {
+  $('#area-input-ward-search').value = '';
+  fillWardOptions();
+  updateAreaSummary();
+});
+$('#area-input-ward-search')?.addEventListener('input', () => {
+  fillWardOptions($('#area-input-ward').value);
+  updateAreaSummary();
+});
+$('#area-input-ward')?.addEventListener('change', updateAreaSummary);
 
 $('#btn-confirm-area')?.addEventListener('click', () => {
-  editingArea = readAreaInputs();
+  const a = readAreaInputs();
+  if (!a.province) return toast('Chọn tỉnh / thành phố', '⚠️');
+  if (areaMode === 'old' && !a.district) return toast('Chọn quận / huyện', '⚠️');
+  if (!a.ward) return toast('Chọn phường / xã trong danh sách', '⚠️');
+  editingArea = a;
   showEditingArea();
   $('#modal-select-area')?.close();
 });
@@ -1471,6 +1865,7 @@ $('#btn-save-address-changes')?.addEventListener('click', () => {
   }
   $('#modal-edit-address')?.close();
   toast(`Đã lưu${syncedWord()} địa chỉ khách hàng!`, '✓');
+  refreshShipDialogs();
 });
 
 /* ============================================================
@@ -1479,37 +1874,100 @@ $('#btn-save-address-changes')?.addEventListener('click', () => {
 let orderSearchQuery = '';
 let orderFilter = 'all';
 
+/* Ngày đang xem ở tab Đơn hàng: mặc định hôm nay. Mọi việc gom đơn (nhãn đơn cũ, bảng Duyệt đơn,
+   thanh sẵn sàng xuất, file Viettel Post) chỉ tính đơn trong khoảng ngày này. */
+const dayStart = (t = Date.now()) => {
+  const d = new Date(t);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+const addDays = (t, n) => {
+  const d = new Date(t);
+  d.setDate(d.getDate() + n);
+  return d.getTime();
+};
+let orderDayFrom = dayStart();
+let orderDayTo = orderDayFrom;
+let orderMinFrom = 0; // khung giờ trong ngày, tính bằng phút
+let orderMinTo = 24 * 60 - 1;
+const inOrderRange = (o) => {
+  const t = Number(o?.ts) || 0;
+  if (t < orderDayFrom || t >= addDays(orderDayTo, 1)) return false;
+  const d = new Date(t);
+  const min = d.getHours() * 60 + d.getMinutes();
+  return min >= orderMinFrom && min <= orderMinTo;
+};
+const scopedOrders = () => (state.orders || []).filter(inOrderRange);
+const WEEKDAYS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+const dayText = (t) => {
+  const d = new Date(t);
+  return `${WEEKDAYS[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+function orderRangeLabel() {
+  const today = dayStart();
+  const hours = orderMinFrom > 0 || orderMinTo < 24 * 60 - 1 ? ` · ${minText(orderMinFrom)}–${minText(orderMinTo)}` : '';
+  if (orderDayFrom !== orderDayTo) return `${dayText(orderDayFrom)} → ${dayText(orderDayTo)}${hours}`;
+  if (orderDayFrom === today) return `Hôm nay · ${dayText(today)}${hours}`;
+  if (orderDayFrom === addDays(today, -1)) return `Hôm qua · ${dayText(orderDayFrom)}${hours}`;
+  return dayText(orderDayFrom) + hours;
+}
+const toDateInput = (t) => {
+  const d = new Date(t);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const fromDateInput = (v) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || '');
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() : null;
+};
+function setOrderRange(from, to = from) {
+  orderDayFrom = Math.min(from, to);
+  orderDayTo = Math.max(from, to);
+  renderOrdersView();
+}
+
 function renderOrdersView() {
   const container = $('#orders-list-container');
   if (!container) return;
 
   // Chỉ hiển thị các đơn hàng hiện tại (không hiển thị các đơn lịch sử cũ từ tuần trước trong danh sách hôm nay)
-  const allOrders = (state.orders || []).filter((o) => !String(o.id).startsWith('o_linh_prev_'));
+  // Tab "Tất cả" hiện đơn của mọi ngày; các tab còn lại theo ngày / khoảng ngày đang chọn.
+  const everyOrders = (state.orders || [])
+    .filter((o) => !String(o.id).startsWith('o_linh_prev_'))
+    .sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0));
+  const allOrders = scopedOrders().filter((o) => !String(o.id).startsWith('o_linh_prev_'));
   const q = orderSearchQuery.toLowerCase();
 
-  const newCnt = allOrders.filter((o) => o.status === 'new').length;
-  const printedCnt = allOrders.filter((o) => o.status === 'printed').length;
+  // Đơn mới = chưa duyệt gửi; Chờ gửi = đã duyệt (sẵn sàng xuất); Gom sau = khách hẹn gom.
+  const newCnt = allOrders.filter((o) => shipStateOf(o) === 'ask').length;
   const shippingCnt = allOrders.filter((o) => o.status === 'shipping').length;
 
   const isDemo = isDemoAccount();
   // Hiển thị số đếm chuẩn Screen 5 (Admin cộng số nền demo; tài khoản mới hiển thị đúng số thực tế)
-  const displayTotal = isDemo ? 46 + allOrders.length : allOrders.length;
+  const displayTotal = isDemo ? 46 + everyOrders.length : everyOrders.length;
   const displayNew = isDemo ? 9 + newCnt : newCnt;
-  const displayPrinted = isDemo ? 30 + printedCnt : printedCnt;
   const displayShipping = isDemo ? 7 + shippingCnt : shippingCnt;
 
   if ($('#orders-sub-count')) {
-    $('#orders-sub-count').textContent = `${displayTotal} đơn hôm nay · CN 25/10`;
+    $('#orders-sub-count').textContent =
+      orderFilter === 'all' ? `${displayTotal} đơn · mọi ngày` : `${allOrders.length} đơn · ${orderRangeLabel()}`;
   }
   if ($('#chip-ord-all')) $('#chip-ord-all').textContent = `Tất cả · ${displayTotal}`;
   if ($('#chip-ord-new')) $('#chip-ord-new').textContent = `Đơn mới · ${displayNew}`;
-  if ($('#chip-ord-printed')) $('#chip-ord-printed').textContent = `Đã in · ${displayPrinted}`;
   if ($('#chip-ord-shipping')) $('#chip-ord-shipping').textContent = `Đang giao · ${displayShipping}`;
+  const pendingCnt = allOrders.filter((o) => shipStateOf(o) === 'ready').length;
+  const holdCnt = allOrders.filter((o) => shipStateOf(o) === 'hold').length;
+  if ($('#chip-ord-pending')) $('#chip-ord-pending').textContent = `Chờ gửi · ${pendingCnt}`;
+  if ($('#chip-ord-hold')) $('#chip-ord-hold').textContent = `Gom sau · ${holdCnt}`;
+  renderVtpReadyBanner();
+  renderVtpAttention();
 
-  const filtered = allOrders.filter((o) => {
-    if (orderFilter === 'new' && o.status !== 'new') return false;
+  const filtered = (orderFilter === 'all' || orderFilter === 'vtpattn' ? everyOrders : allOrders).filter((o) => {
+    if (orderFilter === 'new' && shipStateOf(o) !== 'ask') return false;
     if (orderFilter === 'printed' && o.status !== 'printed' && !o.printCount) return false;
     if (orderFilter === 'shipping' && o.status !== 'shipping') return false;
+    if (orderFilter === 'pending' && shipStateOf(o) !== 'ready') return false;
+    if (orderFilter === 'hold' && shipStateOf(o) !== 'hold') return false;
+    if (orderFilter === 'vtpattn' && !vtpNeedsAction(o)) return false;
     if (q) {
       const match = `${o.code} ${o.nickname} ${o.uniqueId} ${o.phone || ''}`.toLowerCase();
       if (!match.includes(q)) return false;
@@ -1531,7 +1989,9 @@ function renderOrdersView() {
       const isNew = o.status === 'new';
       const isPrinted = o.status === 'printed';
       const isShipping = o.status === 'shipping';
-      const badgeText = isNew ? 'Đơn mới' : isPrinted ? 'Đã in' : isShipping ? 'Đang giao' : 'Đã giao';
+      // Không hiện nhãn "Đã in": nút In đơn / In lại đã cho biết đơn in chưa.
+      const badgeText = isNew ? 'Đơn mới' : isPrinted ? '' : isShipping ? 'Đang giao' : 'Đã giao';
+      const hasPrinted = isPrinted || Number(o.printCount) > 0;
       const badgeClass = isNew
         ? 'status-new-badge'
         : isPrinted
@@ -1540,31 +2000,35 @@ function renderOrdersView() {
 
       const warmClass = isWarmAvatar(o) ? 'warm' : '';
       const itemCount = o.items?.reduce((s, it) => s + (Number(it.qty) || 1), 0) || o.items?.length || 1;
+      const shipTag = shipTagHtml(o, state.orders) + vtpTagHtml(o);
+      const hasOldGom = shipStateOf(o) === 'ask' && olderPendingOf(state.orders, o).length > 0;
+      const shipLabel = shipButtonLabel(o);
 
       return `
-        <div class="order-card-item" data-order-row="${o.id}">
+        <div class="order-card-item${hasOldGom ? ' has-old-gom' : ''}" data-order-row="${o.id}">
           <div class="order-card-top">
             <div class="order-card-user">
               <div class="user-circle-avatar ${warmClass}">${avatarInitial(o.nickname || o.uniqueId)}</div>
               <div class="order-card-user-info">
                 <div class="order-cust-name">${esc(o.nickname || o.uniqueId)}</div>
-                <div class="order-meta-sub">@${esc(o.uniqueId)} · ${itemCount} sản phẩm · ${esc(o.timeStr || '20:42')}</div>
+                <div class="order-meta-sub">@${esc(o.uniqueId)} · ${itemCount} sản phẩm · ${esc(o.timeStr || '20:42')}${(Number(o.ts) || 0) < dayStart() ? ' · ' + esc(dmText(o.ts)) : ''}</div>
+                ${shipTag}
               </div>
             </div>
             <div class="order-card-price-col">
               <span class="order-total-price">${formatVNDHtml(o.total || 0)}</span>
-              <span class="badge-order-status ${badgeClass}">${badgeText}</span>
+              ${badgeText ? `<span class="badge-order-status ${badgeClass}">${badgeText}</span>` : ''}
             </div>
           </div>
 
           <div class="order-card-actions-row">
-            <button class="btn-ord-card-print ${isNew ? 'is-new' : 'is-printed'}" data-act-print="${o.id}">
+            <button class="btn-ord-card-print ${hasPrinted ? 'is-printed' : 'is-new'}" data-act-print="${o.id}">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-              <span>In đơn</span>
+              <span>${hasPrinted ? 'In lại' : 'In đơn'}</span>
             </button>
             <button class="btn-ord-card-ship" data-act-ship="${o.id}">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
-              <span>${isShipping ? 'Đang giao' : 'Giao hàng'}</span>
+              <span>${shipLabel}</span>
             </button>
             <button class="btn-ord-card-more" data-act-more="${o.id}" title="Thao tác khác">•••</button>
           </div>
@@ -1587,10 +2051,9 @@ $('#orders-list-container')?.addEventListener('click', (e) => {
   const btnShip = e.target.closest('[data-act-ship]');
   if (btnShip) {
     e.stopPropagation();
-    const oid = btnShip.dataset.actShip;
-    updateOrderStatus(oid, 'shipping');
-    renderOrdersView();
-    toast('Đã chuyển trạng thái đơn sang Đang giao!', '🚚');
+    const so = state.orders.find((x) => x.id === btnShip.dataset.actShip);
+    if (so?.ship?.vtpCode) openOrderDetailView(so.id);
+    else openShipSheet(btnShip.dataset.actShip);
     return;
   }
 
@@ -1631,11 +2094,49 @@ $('#sheet-act-products')?.addEventListener('click', () => {
   if (currentSheetOrder) openOrderDetailView(currentSheetOrder.id);
 });
 
+let ocOrderId = null;
+
+function openOrderComments(ord) {
+  if (!ord) return;
+  ocOrderId = ord.id;
+  const cust = customerOfOrder(ord);
+  const name = cust?.name || ord.nickname || ord.uniqueId || '';
+  const items = [...(ord.items || [])].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
+  const qty = items.reduce((n, it) => n + (Number(it.qty) || 1), 0);
+  const initials = name.trim().split(/\s+/).slice(-2).map((w) => w[0] || '').join('').toUpperCase() || '?';
+  $('#oc-subtitle').textContent = `Đơn của ${name}${ord.timeStr ? ' · ' + ord.timeStr : ''}`;
+  $('#oc-avatar').textContent = initials;
+  $('#oc-name').textContent = name;
+  $('#oc-uid').textContent = ord.uniqueId ? '@' + String(ord.uniqueId).replace(/^@/, '') : '';
+  $('#oc-count').textContent = `${items.length} bình luận`;
+  $('#oc-value').textContent = `${qty} sản phẩm · ${vndText(goodsTotal(ord))}`;
+  $('#oc-list').innerHTML = items.length
+    ? items
+        .map((it) => {
+          const text = it.comment || `chốt ${it.code || ''}`;
+          const code = it.code ? String(it.code) : '';
+          const shown = code && text.includes(code) ? esc(text).replace(esc(code), `<span class="oc-code">${esc(code)}</span>`) : esc(text);
+          return `<div class="oc-row">
+            <span class="oc-time">${esc(it.timeStr || ord.timeStr || '')}</span>
+            <div class="oc-bubble">
+              <div class="oc-text">${shown}</div>
+              <div class="oc-item"><span class="oc-arrow">→</span><b>${esc(it.name || it.code || 'Sản phẩm')}</b><span>${Number(it.qty) || 1} × ${vndText(it.price)}</span></div>
+            </div>
+          </div>`;
+        })
+        .join('')
+    : '<p class="ship-pay-hint">Đơn này chưa có bình luận chốt.</p>';
+  $('#modal-order-comments')?.showModal();
+}
+
 $('#sheet-act-comments')?.addEventListener('click', () => {
   $('#modal-order-menu')?.close();
-  if (currentSheetOrder) setSelectedCustomerUid(currentSheetOrder.uniqueId);
-  switchTab('live');
-  setLiveViewSegment('live');
+  openOrderComments(currentSheetOrder);
+});
+
+$('#btn-oc-detail')?.addEventListener('click', () => {
+  $('#modal-order-comments')?.close();
+  if (ocOrderId) openOrderDetailView(ocOrderId);
 });
 
 $('#sheet-act-delete')?.addEventListener('click', () => {
@@ -1663,7 +2164,10 @@ function openOrderDetailView(orderId) {
     const isNew = ord.status === 'new';
     const isPrinted = ord.status === 'printed';
     const isShipping = ord.status === 'shipping';
-    badgeEl.textContent = isNew ? 'Đơn mới' : isPrinted ? 'Đã in' : isShipping ? 'Đang giao' : 'Đã giao';
+    badgeEl.textContent = isNew ? 'Đơn mới' : isPrinted ? '' : isShipping ? 'Đang giao' : 'Đã giao';
+    badgeEl.hidden = !badgeEl.textContent;
+    if ($('#detail-ship-label')) $('#detail-ship-label').textContent = shipButtonLabel(ord);
+    if ($('#detail-print-label')) $('#detail-print-label').textContent = isPrinted || Number(ord.printCount) > 0 ? 'In lại' : 'In đơn';
     badgeEl.className = `badge-order-status ${
       isNew ? 'status-new-badge' : isPrinted ? 'status-printed-badge' : 'status-done-badge'
     }`;
@@ -1720,6 +2224,7 @@ function openOrderDetailView(orderId) {
   }
 
   $('#detail-total-sum').innerHTML = formatVNDHtml(ord.total || 0);
+  renderDetailVtp(ord);
 }
 
 $('#btn-back-to-orders')?.addEventListener('click', () => {
@@ -1738,12 +2243,924 @@ $('#btn-detail-print-order')?.addEventListener('click', () => {
 });
 
 $('#btn-detail-ship-order')?.addEventListener('click', () => {
-  if (currentDetailOrderId) {
-    updateOrderStatus(currentDetailOrderId, 'shipping');
-    toast('Đã cập nhật trạng thái Giao hàng!', '🚚');
-    openOrderDetailView(currentDetailOrderId);
+  if (!currentDetailOrderId) return;
+  const o = state.orders.find((x) => x.id === currentDetailOrderId);
+  if (o?.ship?.vtpCode) return $('#detail-vtp-box')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  openShipSheet(currentDetailOrderId);
+});
+
+/* ============================================================
+   GIAO HÀNG & XUẤT EXCEL VIETTEL POST
+   ============================================================ */
+const vndText = (n) => `${Math.round(Number(n) || 0).toLocaleString('vi-VN')}đ`;
+const dmText = (ts) => {
+  const d = new Date(Number(ts) || Date.now());
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+const customerOfOrder = (o) => state.customers.find((c) => shipKeyOf(c) === shipKeyOf(o)) || null;
+
+function shipButtonLabel(o) {
+  const st = shipStateOf(o);
+  if (st === 'hold') return 'Gom sau';
+  if (st === 'ready') return 'Sẵn sàng gửi';
+  if (o.ship?.vtpCode && o.status !== 'done') return vtpNeedsAction(o) ? 'Cần xử lý' : 'Vận đơn';
+  if (st === 'exported' || st === 'gone') return o.status === 'done' ? 'Đã giao' : 'Đang giao';
+  return 'Duyệt đơn';
+}
+
+/** Nhãn dưới tên khách: còn đơn cũ chưa gửi, hoặc đơn này đang gom / sẵn sàng. */
+function shipTagHtml(o, orders) {
+  const st = shipStateOf(o);
+  if (!isPending(o)) return '';
+  const older = olderPendingOf(orders, o);
+  if (older.length && st === 'ask') {
+    // Đơn mới của khách còn đơn gom ngày trước: bấm là mở bảng duyệt, các đơn cũ đã tick sẵn để gộp.
+    return `<button type="button" class="ship-tag ship-tag-old ship-tag-merge" data-act-ship="${o.id}">Có ${older.length} đơn gom từ ${dmText(older[0].ts)} · bấm để gộp</button>`;
+  }
+  if (older.length) {
+    return `<span class="ship-tag ship-tag-old">Còn ${older.length} đơn cũ chưa gửi · từ ${dmText(older[0].ts)}</span>`;
+  }
+  if (st === 'hold') return '<span class="ship-tag ship-tag-old">Khách hẹn gom sau</span>';
+  if (st === 'ready') return '<span class="ship-tag ship-tag-ready">Sẵn sàng gửi</span>';
+  return '';
+}
+
+function renderVtpReadyBanner() {
+  const banner = $('#vtp-ready-banner');
+  if (!banner) return;
+  // Xuất VTP lấy mọi đơn đã duyệt chưa xuất ở mọi ngày (không theo ngày đang xem); cùng khách gộp 1 vận đơn.
+  const groups = groupByCustomer(state.orders, state.customers, 'ready', state.orders);
+  banner.hidden = groups.length === 0;
+  if (banner.hidden) return;
+  const merged = groups.filter((g) => g.orders.length > 1).length;
+  const cod = groups.reduce((s, g) => s + g.cod, 0);
+  const older = groups.filter((g) => g.orders.some((o) => (Number(o.ts) || 0) < dayStart())).length;
+  // Đã kết nối Viettel Post: đơn ở Chờ gửi là nháp sẵn, bấm Soát & tạo mở bảng nháp.
+  $('#vtp-ready-title').textContent = vtpConnected() ? `${groups.length} nháp chờ tạo vận đơn` : `${groups.length} khách sẵn sàng xuất`;
+  const btnLabel = $('#btn-open-vtp-export span');
+  if (btnLabel) btnLabel.textContent = vtpConnected() ? 'Soát & tạo' : 'Xuất VTP';
+  $('#vtp-ready-sub').textContent = [
+    merged ? `${merged} khách gộp nhiều đơn` : '',
+    older ? `${older} khách có đơn duyệt từ ngày trước` : '',
+    `Thu hộ ${vndText(cod)}`
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/* ---------- Bảng Giao hàng ---------- */
+let shipCtx = null; // { key, uniqueId, orderIds, checked:Set, pay, focusId }
+
+function openShipSheet(orderId) {
+  const ord = state.orders.find((o) => o.id === orderId);
+  if (!ord) return;
+  shipCtx = { focusId: orderId, key: shipKeyOf(ord), uniqueId: ord.uniqueId, checked: null, pay: null, payer: null, deposit: null, fee: null, cod: null };
+  renderShipSheet();
+  $('#modal-ship')?.showModal();
+}
+
+function renderShipSheet() {
+  if (!shipCtx) return;
+  const focus = state.orders.find((o) => o.id === shipCtx.focusId);
+  if (!focus) return $('#modal-ship')?.close();
+  const cust = customerOfOrder(focus);
+  // Quét đơn chưa gửi của khách ở mọi ngày (đơn gom ngày trước) để duyệt chung, không sót.
+  const pending = pendingOrdersOfCustomer(state.orders, focus);
+  const focusState = shipStateOf(focus);
+  const sent = focusState === 'exported' || focusState === 'gone';
+
+  if (!shipCtx.checked) shipCtx.checked = new Set(pending.map((o) => o.id));
+  if (!shipCtx.pay) {
+    const fromOrders = [...pending, focus].map((o) => o.ship?.pay).filter(Boolean);
+    shipCtx.pay = fromOrders.includes('paid') || fromOrders.includes('shipOnly') ? 'paid' : 'cod';
+    const pick = (k) => {
+      for (const o of [...pending].reverse()) if (o.ship?.[k] !== undefined && o.ship[k] !== null && o.ship[k] !== '') return o.ship[k];
+      return null;
+    };
+    shipCtx.payer = pick('payer');
+    if (shipCtx.payer !== 'sender' && shipCtx.payer !== 'receiver') shipCtx.payer = shipCtx.pay === 'cod' ? 'receiver' : 'sender';
+    shipCtx.deposit = pending.reduce((s, o) => s + (Number(o.ship?.deposit) || 0), 0) || null;
+    shipCtx.fee = pick('shipFee');
+    // Kích thước kiện (cm): lấy theo đơn đã nhập gần nhất, chỉ dùng khi nặng từ 10kg.
+    shipCtx.size = ['lengthCm', 'widthCm', 'heightCm'].map((k) => {
+      const v = Number(pick(k));
+      return v > 0 ? String(Math.round(v)) : '';
+    });
+    // COD luôn bắt đầu bằng tổng tiền các đơn đang tick (tính tự động); bạn sửa tay được, không khoá.
+    shipCtx.cod = null;
+  }
+
+
+  const stateText = { ask: 'Chưa hỏi', hold: 'Gom sau', ready: 'Sẵn sàng' };
+  const list = $('#ship-orders-list');
+  if (sent) {
+    list.innerHTML = `<div class="ship-order-row"><span>Đơn ${esc(focus.code || '')} · ${itemQty(focus)} món</span><b>${vndText(goodsTotal(focus))}</b></div>`;
+  } else {
+    list.innerHTML = pending
+      .map(
+        (o) => `
+        <label class="ship-order-row">
+          <input type="checkbox" data-ship-check="${o.id}" ${shipCtx.checked.has(o.id) ? 'checked' : ''} />
+          <span class="ship-order-main">${o.id === focus.id ? 'Đơn này' : 'Đơn cũ'} ${dmText(o.ts)} · ${itemQty(o)} món
+            <small>${esc(o.code || '')} · ${stateText[shipStateOf(o)] || ''}</small></span>
+          <b>${vndText(goodsTotal(o))}</b>
+        </label>`
+      )
+      .join('');
+  }
+
+  const chosen = pending.filter((o) => shipCtx.checked.has(o.id));
+  $('#ship-merge-note').textContent = sent
+    ? `Đã xuất Viettel Post${focus.ship?.exportedAt ? ' lúc ' + dmText(focus.ship.exportedAt) : ''}.`
+    : '';
+  $('#ship-merge-note').hidden = !sent;
+
+  $$('[data-ship-pay]').forEach((b) => {
+    const on = b.dataset.shipPay === shipCtx.pay;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  $$('[data-ship-payer]').forEach((b) => {
+    const on = b.dataset.shipPayer === shipCtx.payer;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  // Cân nặng lấy theo đơn lúc mở bảng; sau đó giữ đúng số bạn gõ, không bị đặt lại khi sửa ô khác.
+  if (shipCtx.weightKg === undefined) {
+    const w = Math.max(...chosen.map((o) => Number(o.ship?.weightG) || 0), 0) || DEFAULT_WEIGHT_G;
+    shipCtx.weightKg = String(w / 1000);
+  }
+  if (document.activeElement !== $('#ship-weight')) $('#ship-weight').value = shipCtx.weightKg;
+  // Từ 10kg: hiện 3 ô Dài / Rộng / Cao và bắt buộc nhập trước khi Xác nhận gửi.
+  const needSize = !sent && shipNeedsSize();
+  $('#ship-size-group').hidden = !needSize;
+  SHIP_SIZE_INPUTS.forEach((sel, i) => {
+    if (document.activeElement !== $(sel)) $(sel).value = shipCtx.size?.[i] || '';
+  });
+  $('#ship-size-warn').hidden = !(needSize && !shipSizeCm());
+
+  // Tính thử đúng như lúc xuất: tiền cọc đặt ở đơn đầu, các cài đặt khác đặt ở mọi đơn.
+  const trial = (chosen.length ? chosen : [focus]).map((o, i) => ({ ...o, ship: { ...o.ship, ...shipPatch(i === 0) } }));
+  const sum = summarizeGroup({ orders: trial, customer: cust });
+  const codEl = $('#ship-cod');
+  if (document.activeElement !== codEl) codEl.value = String(shipCtx.cod !== null ? shipCtx.cod : sum.autoCod);
+  codEl.placeholder = String(sum.autoCod);
+  if (document.activeElement !== $('#ship-deposit')) $('#ship-deposit').value = shipCtx.deposit ? String(shipCtx.deposit) : '';
+  $('#btn-ship-cod-auto').hidden = shipCtx.cod === null;
+  // Đơn dưới 17.000đ mà chọn người nhận trả: vẫn cho chọn, khi xuất tự đổi người gửi trả và cộng ship vào COD.
+  $('#ship-payer-warn').hidden = sent || !(sum.forcedSender && sum.pay === 'cod');
+  const warn = $('#ship-addr-warn');
+  // Thiếu kích thước đã báo ngay dưới 3 ô Dài / Rộng / Cao; ô này chỉ báo lỗi địa chỉ / số điện thoại.
+  const addrProblems = sum.problems.filter((p) => !p.includes('kích thước'));
+  warn.hidden = sent || addrProblems.length === 0;
+  warn.innerHTML = addrProblems.length
+    ? `${esc(addrProblems.join(' · '))}. <button type="button" class="link-btn" id="btn-ship-fix-addr">Sửa địa chỉ</button>`
+    : '';
+
+  $$('#modal-ship .ship-seg-btn, #ship-weight, #ship-cod, #ship-deposit, #btn-ship-cod-auto, #btn-ship-hold, #btn-ship-ready').forEach((el) => {
+    el.disabled = sent;
+  });
+  $('#btn-ship-undo').hidden = !(sent && focusState === 'exported');
+}
+
+/** Các cài đặt giao hàng đang chọn trong bảng, ghi vào đơn. `first`: đơn đầu nhận tiền cọc của cả vận đơn. */
+function shipPatch(first = true) {
+  const size = shipNeedsSize() ? shipSizeCm() : null;
+  return {
+    pay: shipCtx.pay,
+    payer: shipCtx.payer || 'receiver',
+    deposit: first ? shipCtx.deposit || 0 : 0,
+    shipFee: shipCtx.fee,
+    codOverride: shipCtx.cod,
+    weightG: shipWeightG(),
+    lengthCm: size ? size[0] : null,
+    widthCm: size ? size[1] : null,
+    heightCm: size ? size[2] : null
+  };
+}
+
+/** Từ cân nặng này Viettel Post cần kích thước kiện (giống app điện thoại). */
+const SHIP_SIZE_REQUIRED_G = 10000;
+const SHIP_SIZE_INPUTS = ['#ship-length', '#ship-width', '#ship-height'];
+const shipNeedsSize = () => shipWeightG() >= SHIP_SIZE_REQUIRED_G;
+
+/** [dài, rộng, cao] (cm) khi đã nhập đủ 3 ô, không thì null. */
+function shipSizeCm() {
+  const v = (shipCtx?.size || []).map((s) => Math.round(Number(s)));
+  return v.length === 3 && v.every((n) => Number.isFinite(n) && n > 0) ? v : null;
+}
+
+function shipChosenIds() {
+  const focus = state.orders.find((o) => o.id === shipCtx.focusId);
+  return pendingOrdersOfCustomer(state.orders, focus)
+    .filter((o) => shipCtx.checked.has(o.id))
+    .map((o) => o.id);
+}
+
+function shipWeightG() {
+  const kg = Number(String(shipCtx?.weightKg ?? $('#ship-weight').value).replace(',', '.'));
+  return Number.isFinite(kg) && kg > 0 ? Math.round(kg * 1000) : DEFAULT_WEIGHT_G;
+}
+
+$('#ship-orders-list')?.addEventListener('change', (e) => {
+  const cb = e.target.closest('[data-ship-check]');
+  if (!cb || !shipCtx) return;
+  if (cb.checked) shipCtx.checked.add(cb.dataset.shipCheck);
+  else shipCtx.checked.delete(cb.dataset.shipCheck);
+  shipCtx.cod = null; // đổi đơn tick thì tính lại tổng
+  renderShipSheet();
+});
+
+$$('[data-ship-pay]').forEach((b) =>
+  b.addEventListener('click', () => {
+    if (!shipCtx) return;
+    shipCtx.pay = b.dataset.shipPay;
+    shipCtx.cod = null;
+    // Đã bank đủ thì mặc định shop trả cước (đổi được); thu tiền hàng thì người nhận trả.
+    shipCtx.payer = shipCtx.pay === 'cod' ? 'receiver' : 'sender';
+    renderShipSheet();
+  })
+);
+
+$$('[data-ship-payer]').forEach((b) =>
+  b.addEventListener('click', () => {
+    if (!shipCtx) return;
+    shipCtx.payer = b.dataset.shipPayer;
+    shipCtx.cod = null;
+    renderShipSheet();
+  })
+);
+
+const moneyInput = (el) => {
+  const raw = String(el.value).trim();
+  const n = Number(raw);
+  return raw === '' || !Number.isFinite(n) || n < 0 ? null : Math.round(n);
+};
+$('#ship-cod')?.addEventListener('input', (e) => {
+  if (!shipCtx) return;
+  shipCtx.cod = moneyInput(e.target);
+  renderShipSheet();
+});
+$('#ship-deposit')?.addEventListener('input', (e) => {
+  if (!shipCtx) return;
+  shipCtx.deposit = moneyInput(e.target);
+  shipCtx.cod = null;
+  renderShipSheet();
+});
+$('#btn-ship-cod-auto')?.addEventListener('click', () => {
+  if (!shipCtx) return;
+  shipCtx.cod = null;
+  renderShipSheet();
+});
+$('#ship-weight')?.addEventListener('input', (e) => {
+  if (!shipCtx) return;
+  shipCtx.weightKg = e.target.value;
+  renderShipSheet();
+});
+SHIP_SIZE_INPUTS.forEach((sel, i) =>
+  $(sel)?.addEventListener('input', (e) => {
+    if (!shipCtx) return;
+    shipCtx.size = shipCtx.size || ['', '', ''];
+    shipCtx.size[i] = e.target.value;
+    renderShipSheet();
+  })
+);
+
+$('#ship-addr-warn')?.addEventListener('click', (e) => {
+  if (e.target.closest('#btn-ship-fix-addr') && shipCtx) openAddressEditor(shipCtx.uniqueId);
+});
+
+function applyShip(newState) {
+  if (!shipCtx) return;
+  const ids = shipChosenIds();
+  if (!ids.length) return toast('Tick ít nhất một đơn', '⚠️');
+  if (newState === 'ready' && shipNeedsSize() && !shipSizeCm()) {
+    $('#ship-length')?.focus();
+    return toast('Hàng từ 10kg phải nhập đủ kích thước dài, rộng, cao (cm)', '⚠️');
+  }
+  ids.forEach((id, i) => setOrdersShip([id], { state: newState, ...shipPatch(i === 0) }));
+  $('#modal-ship')?.close();
+  renderOrdersView();
+  if (currentDetailOrderId) openOrderDetailView(currentDetailOrderId);
+  toast(
+    newState === 'ready'
+      ? `Đã chuyển ${ids.length} đơn sang Sẵn sàng gửi${syncedWord()}`
+      : `Đã giữ ${ids.length} đơn chờ gom${syncedWord()}`,
+    newState === 'ready' ? '🚚' : '📦'
+  );
+}
+
+$('#btn-ship-ready')?.addEventListener('click', () => applyShip('ready'));
+$('#btn-ship-hold')?.addEventListener('click', () => applyShip('hold'));
+
+$('#btn-ship-undo')?.addEventListener('click', () => {
+  if (!shipCtx) return;
+  const focus = state.orders.find((o) => o.id === shipCtx.focusId);
+  if (!focus) return;
+  const batch = focus.ship?.batchId;
+  const ids = state.orders
+    .filter((o) => o.id === focus.id || (batch && o.ship?.batchId === batch && shipKeyOf(o) === shipKeyOf(focus)))
+    .map((o) => o.id);
+  setOrdersShip(ids, { state: 'ready', exportedAt: null, batchId: null }, (o) => (o.printCount ? 'printed' : 'new'));
+  shipCtx.checked = null;
+  renderShipSheet();
+  renderOrdersView();
+  toast('Đã đưa đơn về Sẵn sàng gửi', '↩');
+});
+
+/* ---------- Màn Xuất Viettel Post ---------- */
+let vtpSelected = new Set();
+let vtpTouched = false;
+
+/**
+ * Nháp vận đơn: đơn ở Chờ gửi là nháp sẵn. Khi đã kết nối Viettel Post, mỗi nháp được hỏi cước và
+ * địa chỉ Viettel Post hiểu (máy chủ gọi API tính cước, không tạo đơn). Lưu theo "chữ ký" của nháp
+ * để sửa địa chỉ, tiền hay cân nặng thì tự hỏi lại.
+ */
+const vtpQuotes = new Map();
+const vtpQuoteSig = (g, service) => [g.key, vtpAddressLine(g.address), g.cod, g.goods, g.weightG, (g.size || []).join('x'), service].join('|');
+const vtpCurService = () => $('#vtp-service')?.value || DEFAULT_VTP_SERVICE;
+
+function vtpGroups() {
+  const groups = groupByCustomer(state.orders, state.customers, 'ready', state.orders);
+  if (!vtpConnected()) return groups;
+  const service = vtpCurService();
+  for (const g of groups) {
+    const q = vtpQuotes.get(vtpQuoteSig(g, service));
+    g.quote = q;
+    // Viettel Post đọc ra phường/tỉnh khác app: chưa cho tạo, bấm Sửa địa chỉ.
+    if (q && q !== 'busy' && q.addrOk === false) g.problems.push(`Viettel Post hiểu "${q.parsed}", khác địa chỉ trong app`);
+  }
+  return groups;
+}
+
+function ensureVtpQuotes(groups) {
+  if (!vtpConnected() || !vtpConn.sender) return;
+  const service = vtpCurService();
+  const need = groups.filter((g) => g.address.ok && !g.problems.length && !vtpQuotes.has(vtpQuoteSig(g, service)));
+  if (!need.length) return;
+  const sigs = new Map(need.map((g) => [g.key, vtpQuoteSig(g, service)]));
+  for (const s of sigs.values()) vtpQuotes.set(s, 'busy');
+  apiFetch('/api/vtp/quote', jsonPost({ service, groups: need.map(vtpPayload) }))
+    .then((r) => {
+      for (const res of r?.results || []) if (sigs.has(res.key)) vtpQuotes.set(sigs.get(res.key), res);
+      // Phản hồi thiếu khách nào thì ghi lỗi để không treo "Đang tính cước…".
+      for (const s of sigs.values()) if (vtpQuotes.get(s) === 'busy') vtpQuotes.set(s, { ok: false, error: r?.error || 'Không tính được cước' });
+    })
+    .catch(() => {
+      for (const s of sigs.values()) vtpQuotes.set(s, { ok: false, error: 'Không tính được cước' });
+    })
+    .finally(() => {
+      if ($('#modal-vtp-export')?.open && $('#vtp-result')?.hidden) renderVtpExport();
+    });
+}
+
+function vtpQuoteLine(q) {
+  if (!q) return '';
+  if (q === 'busy') return '<div class="vtp-row-note">Đang tính cước và kiểm địa chỉ với Viettel Post…</div>';
+  const fee = q.ok ? `Cước dự tính <b>${vndText(q.fee)}</b>` : `<span class="vtp-row-err">${esc(q.error || 'Không tính được cước')}</span>`;
+  const addr = q.parsed && q.addrOk !== false ? ` · <span class="vtp-quote-ok">✓ VTP hiểu: ${esc(q.parsed)}</span>` : '';
+  return `<div class="vtp-row-quote">${fee}${addr}</div>`;
+}
+
+function openVtpExport() {
+  $('#vtp-result').hidden = true;
+  $('#vtp-export-body').hidden = false;
+  vtpTouched = false;
+  vtpSelected = new Set();
+  const sel = $('#vtp-service');
+  // Khoá mới: lựa chọn cũ (STK) không còn đè lên mặc định Flashsale thỏa thuận.
+  const cur = VTP_SERVICES.some(([c]) => c === S().vtpServiceCode) ? S().vtpServiceCode : DEFAULT_VTP_SERVICE;
+  sel.innerHTML = VTP_SERVICES.map(
+    ([code, name]) => `<option value="${code}" ${code === cur ? 'selected' : ''}>${code} · ${esc(name)}</option>`
+  ).join('');
+  renderVtpExport();
+  $('#modal-vtp-export')?.showModal();
+}
+
+function renderVtpExport() {
+  const groups = vtpGroups();
+  if (!vtpTouched) vtpSelected = new Set(groups.filter((g) => !g.problems.length).map((g) => g.key));
+  for (const k of [...vtpSelected]) if (!groups.some((g) => g.key === k && !g.problems.length)) vtpSelected.delete(k);
+  ensureVtpQuotes(groups);
+
+  $('#vtp-export-subtitle').textContent = vtpConnected()
+    ? `${groups.length} nháp · Viettel Post chưa nhận đơn nào. Soát xong rồi bấm Tạo.`
+    : `${groups.length} khách sẵn sàng gửi`;
+  const list = $('#vtp-export-list');
+  list.innerHTML = groups.length
+    ? groups
+        .map((g) => {
+          const bad = g.problems.length > 0;
+          const name = g.receiver || g.customer?.name || g.orders[0].nickname || g.key;
+          const merged = g.orders.length > 1 ? `<span class="ship-tag ship-tag-old">gộp ${g.orders.length} đơn</span>` : '';
+          // Địa chỉ cũ Viettel Post nhận ngay; địa chỉ mới có thể bị hỏi lại phường cũ.
+          const addrTag = g.address.ok && g.address.mode === 'old' ? '<span class="ship-tag ship-tag-addr">địa chỉ cũ</span>' : '';
+          const paid = g.pay === 'paid' ? '<span class="ship-tag ship-tag-paid">bank đủ</span>' : '';
+          // Chỉ thiếu kích thước: mở lại bảng Duyệt đơn để nhập; còn lại là địa chỉ / số điện thoại.
+          const onlySize = g.problems.every((p) => p.includes('kích thước'));
+          const fixBtn = onlySize
+            ? `<button type="button" class="link-btn" data-vtp-resize="${esc(g.orders[g.orders.length - 1].id)}">Nhập kích thước</button>`
+            : `<button type="button" class="link-btn" data-vtp-fix="${esc(g.customer?.uniqueId || g.orders[0].uniqueId)}">Sửa</button>`;
+          const sub = bad
+            ? `<span class="vtp-row-err">${esc(g.problems.join(' · '))}</span> ${fixBtn}`
+            : `${g.senderPays ? 'Shop trả ship' : 'Khách trả ship'}${g.shipFee ? ' (đơn nhỏ, COD +' + vndText(g.shipFee) + ')' : ''} · COD ${vndText(g.cod)} · ${g.weightG / 1000}kg`;
+          const notes = [];
+          if (g.recentExported.length)
+            notes.push(
+              `Khách đã có vận đơn xuất ${dmText(g.recentExported[0].ship.exportedAt)}`
+            );
+          const other = notes.map((t) => `<div class="vtp-row-note">${esc(t)}</div>`).join('') + (bad ? '' : vtpQuoteLine(g.quote));
+          return `
+          <label class="vtp-export-row ${bad ? 'is-bad' : ''}">
+            <input type="checkbox" data-vtp-key="${esc(g.key)}" ${vtpSelected.has(g.key) ? 'checked' : ''} ${bad ? 'disabled' : ''} />
+            <div class="vtp-row-main">
+              <div class="vtp-row-name">${esc(name)} ${merged} ${paid} ${addrTag}</div>
+              <div class="vtp-row-sub">${sub}</div>
+              ${other}
+            </div>
+          </label>`;
+        })
+        .join('')
+    : '<p class="ship-pay-hint" style="text-align:center;padding:16px 0">Chưa có đơn nào đã duyệt.</p>';
+
+  const n = vtpSelected.size;
+  const api = vtpConnected();
+  const picked = groups.filter((g) => vtpSelected.has(g.key));
+  const busy = api && picked.some((g) => g.quote === 'busy');
+  const feeTotal = picked.reduce((s, g) => s + (g.quote && g.quote !== 'busy' && g.quote.ok ? g.quote.fee : 0), 0);
+  $('#vtp-export-count').textContent = api && feeTotal ? `Đã chọn ${n} · cước dự tính ${vndText(feeTotal)}` : `Đã chọn ${n}`;
+  $('#vtp-export-title').textContent = api ? 'Nháp vận đơn' : 'Xuất Viettel Post';
+  const go = $('#btn-vtp-export-go');
+  go.textContent = api ? (busy ? 'Đang tính cước…' : `Tạo ${n} vận đơn Viettel Post`) : `Xuất Excel · ${n} vận đơn`;
+  go.disabled = busy;
+  $('#btn-vtp-excel-alt').hidden = !api;
+  const senderLine = $('#vtp-sender-line');
+  senderLine.hidden = !api;
+  if (api) {
+    senderLine.innerHTML = vtpConn.sender
+      ? `Lấy hàng tại <b>${esc(vtpConn.sender.name)}</b> · ${esc(vtpConn.sender.address)}`
+      : '<span class="vtp-row-err">Chưa chọn điểm lấy hàng</span> <button type="button" class="link-btn" data-vtp-pick-sender>Chọn</button>';
+  }
+}
+
+function refreshShipDialogs() {
+  if ($('#modal-ship')?.open) renderShipSheet();
+  if ($('#modal-vtp-export')?.open && $('#vtp-result')?.hidden) renderVtpExport();
+  renderOrdersView();
+}
+
+$('#btn-open-vtp-export')?.addEventListener('click', openVtpExport);
+
+$('#vtp-export-list')?.addEventListener('change', (e) => {
+  const cb = e.target.closest('[data-vtp-key]');
+  if (!cb) return;
+  vtpTouched = true;
+  if (cb.checked) vtpSelected.add(cb.dataset.vtpKey);
+  else vtpSelected.delete(cb.dataset.vtpKey);
+  renderVtpExport();
+});
+
+$('#vtp-export-list')?.addEventListener('click', (e) => {
+  const resize = e.target.closest('[data-vtp-resize]');
+  if (resize) {
+    e.preventDefault();
+    $('#modal-vtp-export')?.close();
+    openShipSheet(resize.dataset.vtpResize);
+    return;
+  }
+  const fix = e.target.closest('[data-vtp-fix]');
+  if (fix) {
+    e.preventDefault();
+    openAddressEditor(fix.dataset.vtpFix);
   }
 });
+
+$('#btn-vtp-select-all')?.addEventListener('click', () => {
+  vtpTouched = true;
+  const ok = vtpGroups().filter((g) => !g.problems.length);
+  vtpSelected = vtpSelected.size === ok.length ? new Set() : new Set(ok.map((g) => g.key));
+  renderVtpExport();
+});
+
+$('#vtp-service')?.addEventListener('change', (e) => {
+  S().vtpServiceCode = e.target.value;
+  save('settings_vtp_service');
+  // Đổi gói thì cước đổi: vẽ lại để hỏi cước gói mới.
+  if (vtpConnected()) renderVtpExport();
+});
+
+$('#btn-vtp-export-go')?.addEventListener('click', () => (vtpConnected() ? createVtpWaybills() : exportVtpExcel()));
+$('#btn-vtp-excel-alt')?.addEventListener('click', () => exportVtpExcel());
+$('#vtp-sender-line')?.addEventListener('click', (e) => {
+  if (!e.target.closest('[data-vtp-pick-sender]')) return;
+  $('#modal-vtp-export')?.close();
+  openVtpConnect();
+});
+
+function exportVtpExcel() {
+  const groups = vtpGroups().filter((g) => vtpSelected.has(g.key) && !g.problems.length);
+  if (!groups.length) return toast('Chọn ít nhất một khách đủ địa chỉ', '⚠️');
+  const service = $('#vtp-service').value || DEFAULT_VTP_SERVICE;
+  const now = new Date();
+  downloadBytes(buildVtpXlsx(groups, { service }), vtpFileName(now));
+  const batchId = 'vtp_' + now.getTime().toString(36);
+  const ids = groups.flatMap((g) => g.orders.map((o) => o.id));
+  setOrdersShip(ids, { state: 'exported', exportedAt: now.getTime(), batchId }, 'shipping');
+  $('#modal-vtp-export')?.close();
+  renderOrdersView();
+  toast(`Đã xuất ${groups.length} vận đơn (${ids.length} đơn). Mở Viettel Post › Nhập excel › Mở file để nhập.`, '📄', 5000);
+}
+
+/* ---------- Viettel Post qua API (khi shop đã dán token) ---------- */
+const VTP_LABEL_SIZES = [
+  ['a6', 'Tem A6 (máy in nhiệt 100×150)'],
+  ['k100', 'Tem 100mm'],
+  ['a5', 'Giấy A5']
+];
+function vtpConnected() {
+  return !!vtpConn.connected;
+}
+function vtpTrackUrl(code) {
+  return `https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=${encodeURIComponent(code)}`;
+}
+function vtpKindOf(o) {
+  return o.ship?.vtpKind || (o.ship?.vtpCode ? 'created' : '');
+}
+function vtpNeedsAction(o) {
+  return !!o.ship?.vtpCode && ['attention', 'returned'].includes(vtpKindOf(o)) && o.status !== 'done';
+}
+
+async function loadVtpStatus() {
+  try {
+    const r = await apiFetch('/api/vtp/status', { method: 'GET', cache: 'no-store' });
+    vtpConn = r.ok ? r : { connected: false };
+  } catch {
+    // Mất mạng: giữ trạng thái cũ.
+  }
+  applyVtpConnUI();
+}
+
+function applyVtpConnUI() {
+  const lbl = $('#lbl-vtp-conn-state');
+  if (lbl) {
+    lbl.textContent = vtpConnected() ? (vtpConn.sender ? 'Đã kết nối' : 'Chọn điểm lấy hàng') : 'Chưa kết nối';
+    lbl.className = vtpConnected() ? 'badge-in-use' : 'badge-off';
+  }
+  renderVtpReadyBanner();
+  if ($('#modal-vtp-export')?.open && $('#vtp-result')?.hidden) renderVtpExport();
+}
+
+function openVtpConnect() {
+  $('#vtp-connect-error').hidden = true;
+  $('#vtp-token-input').value = '';
+  renderVtpConnect();
+  $('#modal-vtp-connect')?.showModal();
+  if (vtpConnected()) loadVtpSenders();
+}
+
+function renderVtpConnect() {
+  const on = vtpConnected();
+  $('#vtp-connect-off').hidden = on;
+  $('#vtp-connect-on').hidden = !on;
+  if (!on) return;
+  $('#vtp-conn-phone').textContent = `Tài khoản ${vtpConn.phone || ''}`;
+  $('#vtp-hook-url').value = vtpConn.hookUrl || '';
+  $('#vtp-hook-hint').textContent = vtpConn.lastHookAt
+    ? `Đã nhận trạng thái gần nhất lúc ${new Date(vtpConn.lastHookAt).toLocaleString('vi-VN')}.`
+    : 'Dán địa chỉ này vào partner2.viettelpost.vn › Bảng điều khiển › Thông tin tài khoản › Production › Cấu hình webhook để đơn tự chuyển Đang giao / Đã giao.';
+  const size = $('#vtp-label-size');
+  if (size && !size.options.length) {
+    size.innerHTML = VTP_LABEL_SIZES.map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('');
+  }
+  if (size) size.value = S().vtpLabelSize || 'a6';
+}
+
+async function loadVtpSenders(list) {
+  const sel = $('#vtp-sender-select');
+  if (!list) {
+    sel.innerHTML = '<option value="">Đang tải…</option>';
+    const r = await apiFetch('/api/vtp/inventory', { method: 'GET', cache: 'no-store' }).catch(() => null);
+    if (!r?.ok) {
+      sel.innerHTML = `<option value="">${esc(r?.error || 'Không tải được điểm lấy hàng')}</option>`;
+      return;
+    }
+    list = r.list;
+  }
+  const cur = String(vtpConn.sender?.id ?? '');
+  sel.innerHTML =
+    (cur ? '' : '<option value="">— Chọn điểm lấy hàng —</option>') +
+    list
+      .map((k) => `<option value="${esc(k.id)}" ${String(k.id) === cur ? 'selected' : ''}>${esc(k.name)} · ${esc(k.phone)} · ${esc(k.address)}</option>`)
+      .join('');
+  $('#vtp-sender-hint').textContent = cur
+    ? 'Bưu tá đến địa chỉ này lấy hàng.'
+    : `Có ${list.length} điểm trên tài khoản. Chọn đúng địa chỉ shop trước khi gửi.`;
+}
+
+$('#menu-row-vtp')?.addEventListener('click', openVtpConnect);
+
+$('#btn-vtp-connect')?.addEventListener('click', async () => {
+  const input = $('#vtp-token-input');
+  const siteToken = input.value.trim();
+  const err = $('#vtp-connect-error');
+  err.hidden = true;
+  if (!siteToken) {
+    err.textContent = 'Chưa dán token';
+    err.hidden = false;
+    return;
+  }
+  const btn = $('#btn-vtp-connect');
+  btn.disabled = true;
+  btn.textContent = 'Đang kết nối…';
+  const r = await apiFetch('/api/vtp/connect', jsonPost({ siteToken })).catch(() => null);
+  btn.disabled = false;
+  btn.textContent = 'Kết nối';
+  input.value = '';
+  if (!r?.ok) {
+    err.textContent = r?.error || 'Không kết nối được máy chủ';
+    err.hidden = false;
+    return;
+  }
+  const { inventory, ...conn } = r;
+  vtpConn = conn;
+  applyVtpConnUI();
+  renderVtpConnect();
+  loadVtpSenders(inventory || []);
+  toast('Đã kết nối Viettel Post', '🚚');
+});
+
+$('#vtp-sender-select')?.addEventListener('change', async (e) => {
+  if (!e.target.value) return;
+  const r = await apiFetch('/api/vtp/sender', jsonPost({ id: e.target.value })).catch(() => null);
+  if (!r?.ok) return toast(r?.error || 'Không lưu được điểm lấy hàng', '⚠️');
+  vtpConn = r;
+  applyVtpConnUI();
+  $('#vtp-sender-hint').textContent = 'Bưu tá đến địa chỉ này lấy hàng.';
+  toast('Đã lưu điểm lấy hàng');
+});
+
+$('#vtp-label-size')?.addEventListener('change', (e) => {
+  S().vtpLabelSize = e.target.value;
+  save('settings_vtp_label');
+});
+
+$('#btn-vtp-hook-copy')?.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('#vtp-hook-url').value);
+    toast('Đã sao chép địa chỉ webhook');
+  } catch {
+    $('#vtp-hook-url').select();
+  }
+});
+
+$('#btn-vtp-disconnect')?.addEventListener('click', async () => {
+  if (!confirm('Ngắt kết nối Viettel Post? App sẽ quay về xuất Excel như cũ. Vận đơn đã tạo vẫn giữ nguyên.')) return;
+  await apiFetch('/api/vtp/disconnect', jsonPost({})).catch(() => null);
+  vtpConn = { connected: false };
+  applyVtpConnUI();
+  renderVtpConnect();
+});
+
+/** Mở link in tem. Mở cửa sổ trước khi chờ máy chủ để trình duyệt không chặn popup. */
+async function printVtpLabels(codes) {
+  codes = [...new Set(codes.filter(Boolean))];
+  if (!codes.length) return;
+  const win = window.open('', '_blank');
+  if (win) win.document.write('<p style="font-family:sans-serif;padding:24px">Đang lấy tem Viettel Post…</p>');
+  const r = await apiFetch('/api/vtp/print', jsonPost({ codes })).catch(() => null);
+  if (!r?.ok) {
+    win?.close();
+    return toast(r?.error || 'Không lấy được tem', '⚠️', 4000);
+  }
+  const url = r.links[S().vtpLabelSize || 'a6'] || r.links.a6;
+  if (win) win.location.href = url;
+  else window.location.href = url;
+}
+
+function vtpPayload(g) {
+  const codes = g.orders.map((o) => o.code).filter(Boolean).join('+') || g.key;
+  // Vận đơn cũ đã huỷ thì Viettel Post không nhận lại đúng mã đơn đó: thêm hậu tố.
+  const retry = g.orders.some((o) => o.ship?.vtpOldCode) ? '-' + Date.now().toString(36).slice(-4) : '';
+  return {
+    key: g.key,
+    orderIds: g.orders.map((o) => o.id),
+    ref: codes.slice(0, 50 - retry.length) + retry,
+    receiver: g.receiver,
+    phone: g.phone,
+    address: vtpAddressLine(g.address),
+    // Phường/tỉnh theo danh mục mới của Viettel Post để máy chủ đối chiếu với địa chỉ Viettel Post hiểu.
+    expect: { province: g.address.newProvince || g.address.province, ward: g.address.newWard || g.address.ward },
+    goodsName: 'Quần áo',
+    qty: g.qty || 1,
+    weightG: g.weightG,
+    goods: g.goods,
+    cod: g.cod,
+    senderPays: g.senderPays,
+    note: g.note ? String(g.note).slice(0, 150) : '',
+    size: g.size
+  };
+}
+
+async function createVtpWaybills() {
+  const groups = vtpGroups().filter((g) => vtpSelected.has(g.key) && !g.problems.length);
+  if (!groups.length) return toast('Chọn ít nhất một khách đủ địa chỉ', '⚠️');
+  if (!vtpConn.sender) {
+    toast('Chọn điểm lấy hàng trước', '⚠️');
+    $('#modal-vtp-export')?.close();
+    return openVtpConnect();
+  }
+  const service = $('#vtp-service').value || DEFAULT_VTP_SERVICE;
+  const btn = $('#btn-vtp-export-go');
+  btn.disabled = true;
+  btn.textContent = `Đang tạo ${groups.length} vận đơn…`;
+  const r = await apiFetch('/api/vtp/create', jsonPost({ service, groups: groups.map(vtpPayload) })).catch(() => null);
+  btn.disabled = false;
+  if (!r?.ok) {
+    renderVtpExport();
+    return toast(r?.error || 'Không tạo được vận đơn', '⚠️', 4000);
+  }
+  // Máy chủ đã ghi mã vận đơn vào đơn; ghi luôn ở máy này để không phải chờ đồng bộ.
+  for (const res of r.results) {
+    const g = groups.find((x) => x.key === res.key);
+    if (g && !res.ok) {
+      setOrdersShip(g.orders.map((o) => o.id), { vtpError: String(res.error || 'Lỗi').slice(0, 200), vtpErrorAt: Date.now() });
+      continue;
+    }
+    if (!g || !res.ok || res.already) continue;
+    // Đơn nào đã nhận mã này từ máy chủ thì thôi: ghi lại sẽ đè "Chờ lấy hàng" lên trạng thái Viettel Post vừa báo về.
+    const ids = g.orders.map((o) => o.id).filter((id) => state.orders.find((o) => o.id === id)?.ship?.vtpCode !== res.code);
+    if (!ids.length) continue;
+    setOrdersShip(
+      ids,
+      {
+        state: 'exported',
+        exportedAt: Date.now(),
+        vtpCode: res.code,
+        vtpFee: res.fee,
+        vtpService: service,
+        vtpStatus: 0,
+        vtpStatusName: 'Chờ lấy hàng',
+        vtpKind: 'created',
+        vtpNote: '',
+        vtpError: '',
+        vtpErrorAt: null
+      },
+      'shipping'
+    );
+  }
+  showVtpResult(groups, r.results);
+  renderOrdersView();
+}
+
+let vtpLastCodes = [];
+function showVtpResult(groups, results) {
+  const okList = results.filter((x) => x.ok);
+  vtpLastCodes = okList.map((x) => x.code);
+  $('#vtp-export-body').hidden = true;
+  $('#vtp-export-title').textContent = 'Kết quả gửi Viettel Post';
+  $('#vtp-export-subtitle').textContent = `Đã tạo ${okList.length}/${results.length} vận đơn`;
+  const rows = results
+    .map((res) => {
+      const g = groups.find((x) => x.key === res.key);
+      const name = esc(g?.receiver || g?.orders[0]?.nickname || res.key);
+      if (res.ok) {
+        return `<div class="vtp-result-row"><span class="mark">✓</span><div class="main"><b>${name}</b>
+          <div class="vtp-row-sub"><span class="vtp-code">${esc(res.code)}</span>${res.fee ? ' · cước ' + vndText(res.fee) : ''}${res.already ? ' · đã có từ trước' : ''}${res.parsed ? ' · VTP hiểu: ' + esc(res.parsed) : ''}</div></div></div>`;
+      }
+      const uid = g?.customer?.uniqueId || g?.orders[0]?.uniqueId || '';
+      return `<div class="vtp-result-row is-bad"><span class="mark">!</span><div class="main"><b>${name}</b>
+        <div class="vtp-row-sub"><span class="vtp-row-err">${esc(res.error || 'Lỗi')}</span>
+        ${uid ? `<button type="button" class="link-btn" data-vtp-fix="${esc(uid)}">Sửa</button>` : ''}</div></div></div>`;
+    })
+    .join('');
+  const box = $('#vtp-result');
+  box.innerHTML = `
+    <div class="vtp-result-list">${rows}</div>
+    <p class="ship-pay-hint">Đơn tạo xong đã chuyển sang <b>Đang giao</b>. Khách lỗi vẫn nằm ở Chờ gửi, sửa xong gửi lại.</p>
+    <div class="ship-actions">
+      <button type="button" class="btn-ghost-pill" data-close-dialog>Xong</button>
+      ${okList.length ? `<button type="button" class="btn-orange-pill" id="btn-vtp-print-batch">In tem · ${okList.length} vận đơn</button>` : ''}
+    </div>`;
+  box.hidden = false;
+}
+
+$('#vtp-result')?.addEventListener('click', (e) => {
+  if (e.target.closest('[data-close-dialog]')) return $('#modal-vtp-export')?.close();
+  if (e.target.closest('#btn-vtp-print-batch')) return printVtpLabels(vtpLastCodes);
+  const fix = e.target.closest('[data-vtp-fix]');
+  if (fix) openAddressEditor(fix.dataset.vtpFix);
+});
+
+/** Nhãn mã vận đơn / trạng thái dưới tên khách trên thẻ đơn. */
+function vtpTagHtml(o) {
+  const code = o.ship?.vtpCode;
+  if (!code) {
+    if (o.ship?.vtpKind === 'cancelled' && o.ship?.vtpOldCode && isPending(o)) {
+      return `<span class="ship-tag ship-tag-vtp-bad">Vận đơn ${esc(o.ship.vtpOldCode)} đã huỷ · gửi lại</span>`;
+    }
+    // Lần tạo vận đơn gần nhất bị Viettel Post từ chối: hiện lý do cho tới lần gửi sau.
+    if (o.ship?.vtpError && isPending(o)) {
+      return `<span class="ship-tag ship-tag-vtp-bad">Lỗi tạo vận đơn: ${esc(o.ship.vtpError)}</span>`;
+    }
+    return '';
+  }
+  const kind = vtpKindOf(o);
+  const cls = o.status === 'done' || kind === 'delivered' ? 'ship-tag-vtp-done' : vtpNeedsAction(o) ? 'ship-tag-vtp-bad' : 'ship-tag-vtp';
+  return `<span class="ship-tag ${cls}">VTP ${esc(code)} · ${esc(o.ship.vtpStatusName || 'Chờ lấy hàng')}</span>`;
+}
+
+function renderVtpAttention() {
+  const strip = $('#vtp-attention');
+  if (!strip) return;
+  const codes = new Map();
+  for (const o of state.orders || []) if (vtpNeedsAction(o) && !codes.has(o.ship.vtpCode)) codes.set(o.ship.vtpCode, o);
+  strip.hidden = codes.size === 0;
+  if (strip.hidden) return;
+  $('#vtp-attention-title').textContent = `${codes.size} đơn cần xử lý`;
+  $('#vtp-attention-sub').textContent = [...codes.values()]
+    .slice(0, 3)
+    .map((o) => `${o.nickname || o.uniqueId}: ${o.ship.vtpStatusName || ''}`)
+    .join(' · ');
+}
+
+$('#vtp-attention')?.addEventListener('click', () => {
+  $$('[data-order-filter]').forEach((b) => b.classList.remove('active'));
+  orderFilter = 'vtpattn';
+  renderOrdersView();
+});
+
+/** Ô vận đơn trong chi tiết đơn. */
+function renderDetailVtp(ord) {
+  const box = $('#detail-vtp-box');
+  if (!box) return;
+  const code = ord.ship?.vtpCode;
+  if (!code) {
+    if (ord.ship?.vtpKind === 'cancelled' && ord.ship?.vtpOldCode) {
+      box.className = 'detail-vtp-box is-bad';
+      box.innerHTML = `<div class="vtp-status">Vận đơn ${esc(ord.ship.vtpOldCode)} đã huỷ</div>
+        <div class="vtp-note">Đơn đã về Chờ gửi. Bấm Soát &amp; tạo ở danh sách đơn để tạo vận đơn mới.</div>`;
+      box.hidden = false;
+    } else box.hidden = true;
+    return;
+  }
+  const kind = vtpKindOf(ord);
+  const bad = vtpNeedsAction(ord);
+  const at = ord.ship.vtpStatusAt ? new Date(ord.ship.vtpStatusAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+  const canCancel = kind === 'created' || (Number(ord.ship.vtpStatus) > 0 && Number(ord.ship.vtpStatus) < 200 && kind === 'moving');
+  box.className = `detail-vtp-box${bad ? ' is-bad' : ''}`;
+  box.innerHTML = `
+    <div class="vtp-line"><span>Mã vận đơn <span class="vtp-code">${esc(code)}</span></span>${ord.ship.vtpFee ? `<span>Cước ${vndText(ord.ship.vtpFee)}</span>` : ''}</div>
+    <div class="vtp-status">${bad ? 'Cần xử lý · ' : ''}${esc(ord.ship.vtpStatusName || 'Chờ lấy hàng')}${at ? ` <span class="vtp-note" style="font-weight:400">· ${esc(at)}</span>` : ''}</div>
+    ${ord.ship.vtpNote ? `<div class="vtp-note">${esc(ord.ship.vtpNote)}</div>` : ''}
+    <div class="vtp-actions">
+      <button type="button" class="btn-outline-pill" data-vtp-act="print">In tem</button>
+      <button type="button" class="btn-outline-pill" data-vtp-act="track">Theo dõi</button>
+      <button type="button" class="btn-outline-pill" data-vtp-act="copy">Sao chép mã</button>
+      ${kind === 'attention' ? '<button type="button" class="btn-orange-pill" data-vtp-act="redeliver">Yêu cầu phát lại</button><button type="button" class="btn-outline-pill" data-vtp-act="return">Đồng ý hoàn</button>' : ''}
+      ${canCancel ? '<button type="button" class="btn-outline-pill btn-detail-del" data-vtp-act="cancel">Huỷ vận đơn</button>' : ''}
+    </div>`;
+  box.hidden = false;
+}
+
+$('#detail-vtp-box')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-vtp-act]');
+  const ord = state.orders.find((o) => o.id === currentDetailOrderId);
+  const code = ord?.ship?.vtpCode;
+  if (!btn || !code) return;
+  const act = btn.dataset.vtpAct;
+  if (act === 'print') return printVtpLabels([code]);
+  if (act === 'track') return window.open(vtpTrackUrl(code), '_blank');
+  if (act === 'copy') {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast('Đã sao chép mã vận đơn');
+    } catch {}
+    return;
+  }
+  if (!vtpConnected()) return toast('Chưa kết nối Viettel Post', '⚠️');
+  if (act === 'cancel') {
+    if (!confirm(`Huỷ vận đơn ${code}? Đơn sẽ về lại Chờ gửi.`)) return;
+    btn.disabled = true;
+    const r = await apiFetch('/api/vtp/cancel', jsonPost({ code })).catch(() => null);
+    btn.disabled = false;
+    if (!r?.ok) return toast(r?.error || 'Không huỷ được', '⚠️', 4000);
+    toast('Đã huỷ vận đơn, đơn về Chờ gửi', '↩');
+    return;
+  }
+  if (act === 'redeliver' || act === 'return') {
+    const type = act === 'redeliver' ? 3 : 2;
+    const note = act === 'redeliver' ? prompt('Ghi chú cho bưu tá (ví dụ: gọi trước khi giao, giao giờ hành chính):', '') : '';
+    if (note === null) return;
+    if (act === 'return' && !confirm(`Đồng ý cho Viettel Post hoàn đơn ${code} về shop?`)) return;
+    btn.disabled = true;
+    const r = await apiFetch('/api/vtp/resolve', jsonPost({ code, type, note })).catch(() => null);
+    btn.disabled = false;
+    if (!r?.ok) return toast(r?.error || 'Viettel Post không nhận yêu cầu', '⚠️', 4000);
+    toast(type === 3 ? 'Đã gửi yêu cầu phát lại' : 'Đã đồng ý hoàn', '✓');
+  }
+});
+
 
 // CHỈNH SỬA SẢN PHẨM TRONG ĐƠN (SCREEN 8)
 let editingOrderItemsCopy = [];
@@ -1912,9 +3329,7 @@ $('#btn-submit-create-order')?.addEventListener('click', () => {
   toast(`Đã tạo${syncedWord()} đơn ${order.code} cho ${name}!`, '✓');
 });
 
-$('#btn-order-filter-icon')?.addEventListener('click', () => {
-  $('#modal-filter-time')?.showModal();
-});
+$('#btn-order-filter-icon')?.addEventListener('click', openOrderTimeFilter);
 
 $$('[data-order-filter]').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -2429,6 +3844,7 @@ function applyAuthUserToUI(user) {
 
   overlay?.classList.add('hidden');
   const isAdmin = user.role === 'admin';
+  loadVtpStatus();
 
   if ($('#current-auth-avatar')) {
     $('#current-auth-avatar').textContent = avatarInitial(user.username);
@@ -3265,7 +4681,7 @@ function printSingleComment(commentId) {
   if (!c) return toast('Không tìm thấy bình luận này', '⚠️');
   const hasPrice = c.price > 0;
 
-  const { order, newItem, isDuplicate } = addOrMergeOrder({
+  const { order, newItem, isDuplicate, codReset } = addOrMergeOrder({
     uniqueId: c.uniqueId,
     userId: c.userId || '',
     nickname: c.nickname,
@@ -3280,6 +4696,7 @@ function printSingleComment(commentId) {
   const item = newItem || order.items.find((it) => it.commentId === c.id);
   if (!item) return toast('Không lưu được bình luận vào khách', '⚠️');
   if (isDuplicate) toast('Bình luận này đã lưu trước đó, in lại tem', 'ℹ️');
+  if (codReset) toast(`Đơn của ${order.nickname} có thêm món: đã bỏ tiền thu hộ nhập tay, tính lại theo hàng mới`, 'ℹ️', 5000);
 
   c.printed = true;
   state.selectedCustomerUniqueId = c.uniqueId;
@@ -3289,7 +4706,8 @@ function printSingleComment(commentId) {
 async function handlePrintOrder(order, isRemoteTrigger = false, onlyItem = null) {
   toast(`Đang in tem cho ${order.nickname}...`, '🖨');
   order.printCount = (order.printCount || 0) + 1;
-  order.status = 'printed';
+  // In lại tem của đơn đã duyệt, đang giao hay đã giao thì không kéo đơn lùi về "Đã in".
+  if (!order.status || order.status === 'new') order.status = 'printed';
   if (!isRemoteTrigger) {
     save('order_printed');
     sendUiEvent({ action: 'print_order', orderId: order.id, itemId: onlyItem?.id || '' });
@@ -3377,7 +4795,8 @@ $('#btn-modal-connect-usb')?.addEventListener('click', async () => {
 });
 
 $('#btn-modal-test-print')?.addEventListener('click', () => {
-  const testOrder = state.orders[0] || {
+  // In thử trên bản sao: không đổi trạng thái, số lần in của đơn thật và không ghi vào lịch sử in.
+  const testOrder = state.orders[0] ? { ...state.orders[0] } : {
     code: 'TEST80',
     uniqueId: 'linh.nguyen98',
     nickname: 'Linh Nguyễn',
@@ -3391,7 +4810,7 @@ $('#btn-modal-test-print')?.addEventListener('click', () => {
     total: 450000,
     ts: Date.now()
   };
-  handlePrintOrder(testOrder);
+  handlePrintOrder(testOrder, true);
 });
 
 $('#btn-clear-tray')?.addEventListener('click', () => {
