@@ -302,18 +302,52 @@ test('LAN_MODE=1 (server chạy ở shop): in LAN vẫn dùng được', async (
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chotlive-lan-'));
   const port = PORT + 100;
   const base = `http://127.0.0.1:${port}`;
-  const child = startServer({ LAN_MODE: '1' }, port, dir);
+  const child = startServer({ LAN_MODE: '1', PRINT_LAN_TEST_LOOPBACK: '1' }, port, dir);
   try {
     await waitUp(base);
     const reg = await post('/api/auth/register', { username: 'shop.lan', password: 'mat-khau-tot', confirmPassword: 'mat-khau-tot' }, { base });
     let received = 0;
     const printer = net.createServer((s) => s.on('data', (d) => (received += d.length)));
-    await new Promise((r) => printer.listen(0, '127.0.0.1', r));
-    const res = await post('/api/print-lan', { ip: '127.0.0.1', port: printer.address().port, bytes: [1, 2, 3] }, { token: reg.body.token, base });
+    // Máy in giả nghe ở một cổng máy in (9100–9109) còn trống.
+    let printerPort = 0;
+    for (let p = 9100; p <= 9109 && !printerPort; p++) {
+      printerPort = await new Promise((r) => {
+        printer.once('error', () => r(0));
+        printer.listen(p, '127.0.0.1', () => r(p));
+      });
+    }
+    assert.ok(printerPort, 'có cổng máy in trống để thử');
+    const res = await post('/api/print-lan', { ip: '127.0.0.1', port: printerPort, bytes: [1, 2, 3] }, { token: reg.body.token, base });
     await sleep(100);
-    printer.close();
     assert.equal(res.status, 200);
     assert.equal(received, 3);
+
+    // Cổng không phải cổng máy in thì từ chối, không gửi gì.
+    let leaked = 0;
+    const other = net.createServer((s) => s.on('data', (d) => (leaked += d.length)));
+    await new Promise((r) => other.listen(0, '127.0.0.1', r));
+    const bad = await post('/api/print-lan', { ip: '127.0.0.1', port: other.address().port, bytes: [1, 2, 3] }, { token: reg.body.token, base });
+    await sleep(100);
+    other.close();
+    printer.close();
+    assert.equal(bad.status, 400);
+    assert.equal(leaked, 0);
+  } finally {
+    await stop(child);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('LAN_MODE=1: không in tới địa chỉ 127.x của chính máy chủ', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chotlive-lan2-'));
+  const port = PORT + 101;
+  const base = `http://127.0.0.1:${port}`;
+  const child = startServer({ LAN_MODE: '1' }, port, dir);
+  try {
+    await waitUp(base);
+    const reg = await post('/api/auth/register', { username: 'shop.lan2', password: 'mat-khau-tot', confirmPassword: 'mat-khau-tot' }, { base });
+    const res = await post('/api/print-lan', { ip: '127.0.0.1', port: 9100, bytes: [1, 2, 3] }, { token: reg.body.token, base });
+    assert.equal(res.status, 400);
   } finally {
     await stop(child);
     fs.rmSync(dir, { recursive: true, force: true });

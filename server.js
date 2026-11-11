@@ -735,7 +735,7 @@ app.post('/api/auth/register', async (req, res) => {
 
   usersDb.users.push(newUser);
   getStateForUser(newUser.id);
-  persistAllStates();
+  persistAllStates(newUser.id);
 
   const token = createSessionToken(newUser.id);
   persistUsersDb();
@@ -1455,8 +1455,10 @@ app.post('/api/reset', requireAuth, (req, res) => {
 const isPrivateIPv4 = (ip) => {
   if (net.isIPv4(ip) !== true) return false;
   const [a, b] = ip.split('.').map(Number);
-  return a === 10 || a === 127 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+  return a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
 };
+// Máy in nhiệt nghe ở cổng 9100 (máy nhiều cổng dùng tới 9109); không cho gửi dữ liệu tới cổng dịch vụ khác.
+const isPrinterPort = (p) => Number.isInteger(p) && p >= 9100 && p <= 9109;
 
 app.post('/api/print-lan', requireAuth, syncJson, (req, res) => {
   if (!LAN_MODE) {
@@ -1469,8 +1471,14 @@ app.post('/api/print-lan', requireAuth, syncJson, (req, res) => {
   if (!ip || !Array.isArray(bytes) || bytes.length === 0) {
     return res.status(400).json({ error: 'Thiếu ip hoặc bytes in' });
   }
-  if (!isPrivateIPv4(String(ip))) {
+  // Địa chỉ 127.x chỉ để test tự động (máy in giả chạy cùng máy); bình thường bị chặn.
+  const loopbackForTest = process.env.PRINT_LAN_TEST_LOOPBACK === '1' && String(ip) === '127.0.0.1';
+  if (!isPrivateIPv4(String(ip)) && !loopbackForTest) {
     return res.status(400).json({ error: 'IP máy in phải là địa chỉ mạng nội bộ (LAN)' });
+  }
+  const printerPort = Number(port);
+  if (!isPrinterPort(printerPort)) {
+    return res.status(400).json({ error: 'Cổng máy in phải từ 9100 đến 9109' });
   }
 
   const client = new net.Socket();
@@ -1483,7 +1491,7 @@ app.post('/api/print-lan', requireAuth, syncJson, (req, res) => {
     res.status(status).json(body);
   };
 
-  client.connect(Number(port) || 9100, String(ip), () => {
+  client.connect(printerPort, String(ip), () => {
     client.write(Buffer.from(bytes), (err) => {
       if (err) return reply(500, { error: 'Gửi dữ liệu in thất bại: ' + err.message });
       client.end();
@@ -1863,12 +1871,13 @@ function mapChat(data, kind = 'chat') {
   const isSticker = kind === 'emote' || (!text && (data.emotes?.length || data.emoteList?.length));
   const comment = text || (isSticker ? '[Sticker]' : '');
 
-  // Có mã tin của TikTok thì nối lại không bị trùng; không có thì dựng mã ổn định từ nội dung.
+  // Có mã tin của TikTok thì nối lại không bị trùng; không có thì dựng mã ổn định từ nội dung và giờ gửi.
+  // Thiếu cả giờ gửi thì thêm giờ máy chủ nhận: khách gõ lại đúng câu cũ (chốt thêm món) vẫn là bình luận mới.
   const msgId = data.common?.msgId || data.msgId;
   const id = String(
     msgId && String(msgId) !== '0'
       ? msgId
-      : crypto.createHash('sha1').update(`${userId}|${uniqueId}|${comment}|${rawTs}`).digest('hex').slice(0, 24)
+      : crypto.createHash('sha1').update(`${userId}|${uniqueId}|${comment}|${rawTs || `nhan_${Date.now()}`}`).digest('hex').slice(0, 24)
   );
 
   return { id, userId, uniqueId, nickname: nickname || uniqueId, comment, ts };
@@ -1962,7 +1971,10 @@ function closeSessionFor(userId, entry) {
     const s = state.sessions?.find((x) => x.id === entry.sessionId);
     if (!s || !s.isLive) return;
     const now = Date.now();
-    const last = s.lastActivityTs || s.startTs;
+    // Mốc hoạt động cuối: bình luận cuối, hoặc lần cuối TikTok còn gửi dữ liệu (số người xem, lượt thích…)
+    // trong lần chạy này, để live vắng bình luận không bị ghi kết thúc sớm.
+    const seen = entry.everConnected ? Number(entry.lastDataAt) || 0 : 0;
+    const last = Math.max(s.lastActivityTs || s.startTs, seen);
     // Server tắt lâu rồi mới chạy lại: lấy mốc hoạt động cuối thay vì lúc này.
     const end = now - last > 10 * 60 * 1000 ? last : now;
     s.isLive = false;
