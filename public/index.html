@@ -2,87 +2,111 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>ChốtLive – Quản lý Livestream &amp; Đơn hàng TikTok</title>
-  <meta name="description" content="Nền tảng đọc bình luận TikTok Live, chốt đơn tự động, đồng bộ thời gian thực Web & App IPA và in tem nhiệt 80mm." />
+  <meta name="description" content="Đọc bình luận TikTok Live, chốt đơn, đồng bộ Web và App, in tem nhiệt 80mm." />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="ChốtLive" />
   <link rel="apple-touch-icon" href="/img/icon-180.png" />
   <link rel="icon" href="/img/icon-192.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <meta name="theme-color" content="#f6f4f0" />
+  <meta name="theme-color" content="#f2f1ee" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#141312" media="(prefers-color-scheme: dark)" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/style.css" />
-  <link rel="stylesheet" href="/css/theme.css" />
+  <link rel="stylesheet" href="/css/app.css?v=7" />
+  <script src="/js/theme.js"></script>
 </head>
 <body>
 
-  <!-- ================== KHUNG ĐĂNG NHẬP & ĐĂNG KÝ TÀI KHOẢN ================== -->
+  <!-- Bộ biểu tượng dùng chung: <svg class="ic"><use href="#i-ten"/></svg> -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20h16M7 20v-8M12 20V6M17 20v-5"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></symbol>
+    <symbol id="i-bag" viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+    <symbol id="i-print" viewBox="0 0 24 24"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></symbol>
+    <symbol id="i-truck" viewBox="0 0 24 24"><path d="M1 3h15v13H1zM16 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><path d="M3 4h18v18H3zM16 2v4M8 2v4M3 10h18"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M16 7l3 3"/></symbol>
+    <symbol id="i-out" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><path d="M7 7h.01"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
+    <symbol id="i-sync" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20c1.4 0 2-1 2-2 0-1.6-1.2-2 0-3.2 1-1 2.2-.8 4-.8a4 4 0 0 0 4-4c0-5.5-4.5-10-10-10z"/><path d="M7.5 11h.01M10.5 7h.01M15 7.5h.01"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+  </svg>
+
+  <!-- ================== ĐĂNG NHẬP & ĐĂNG KÝ ================== -->
   <div class="auth-screen-overlay" id="auth-screen-overlay">
     <div class="auth-card-box">
       <div class="auth-brand-header">
         <div class="auth-logo-badge">CL</div>
         <div>
-          <h1 class="auth-brand-title">ChốtLive TikTok</h1>
-          <p class="auth-brand-sub">Đồng bộ Web &amp; App IPA · Quản lý Livestream &amp; In đơn</p>
+          <h1 class="auth-brand-title">ChốtLive</h1>
+          <p class="auth-brand-sub">Đọc bình luận TikTok Live, chốt đơn, in tem</p>
         </div>
       </div>
 
-      <!-- Chuyển đổi Đăng nhập / Đăng ký -->
       <div class="auth-tabs-switcher">
         <button type="button" class="auth-tab-btn active" id="tab-auth-login">Đăng nhập</button>
         <button type="button" class="auth-tab-btn" id="tab-auth-register">Đăng ký</button>
       </div>
 
-      <!-- Thông báo lỗi / trạng thái trong khung đăng nhập -->
-      <div class="auth-alert-banner" id="auth-alert-banner" style="display:none"></div>
+      <div class="auth-alert-banner" id="auth-alert-banner" role="alert" style="display:none"></div>
 
-      <!-- FORM 1: ĐĂNG NHẬP -->
-      <form id="form-auth-login" class="auth-form-body" autocomplete="on">
+      <form id="form-auth-login" class="auth-form-body" autocomplete="on" novalidate>
         <div class="form-field-group">
           <label for="auth-login-username">Tên tài khoản <span class="req">*</span></label>
           <input type="text" class="form-field-input" id="auth-login-username" placeholder="Nhập tên tài khoản" required autocomplete="username" />
         </div>
-
         <div class="form-field-group">
           <label for="auth-login-password">Mật khẩu <span class="req">*</span></label>
-          <input type="password" class="form-field-input" id="auth-login-password" placeholder="Nhập mật khẩu" required autocomplete="current-password" />
+          <div class="pass-wrap">
+            <input type="password" class="form-field-input" id="auth-login-password" placeholder="Nhập mật khẩu" required autocomplete="current-password" />
+            <button type="button" class="btn-pass-toggle" data-toggle-pass="auth-login-password" aria-pressed="false">Hiện</button>
+          </div>
         </div>
-
-        <button type="submit" class="btn-orange-pill auth-submit-btn" id="btn-submit-login">
-          Đăng nhập vào hệ thống
-        </button>
+        <button type="submit" class="btn-orange-pill auth-submit-btn" id="btn-submit-login">Đăng nhập vào hệ thống</button>
       </form>
 
-      <!-- FORM 2: ĐĂNG KÝ (CHỈ GỒM 3 Ô: TÊN, MẬT KHẨU, XÁC NHẬN MẬT KHẨU) -->
-      <form id="form-auth-register" class="auth-form-body" style="display:none" autocomplete="off">
+      <form id="form-auth-register" class="auth-form-body" style="display:none" autocomplete="off" novalidate>
         <div class="form-field-group">
           <label for="auth-reg-username">Tên tài khoản <span class="req">*</span></label>
-          <input type="text" class="form-field-input" id="auth-reg-username" placeholder="Nhập tên tài khoản muốn tạo" required autocomplete="new-username" />
+          <input type="text" class="form-field-input" id="auth-reg-username" placeholder="Tên tài khoản muốn tạo" required autocomplete="username" />
         </div>
-
         <div class="form-field-group">
           <label for="auth-reg-password">Mật khẩu <span class="req">*</span></label>
-          <input type="password" class="form-field-input" id="auth-reg-password" placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)" required autocomplete="new-password" />
+          <div class="pass-wrap">
+            <input type="password" class="form-field-input" id="auth-reg-password" placeholder="Tối thiểu 6 ký tự" required autocomplete="new-password" />
+            <button type="button" class="btn-pass-toggle" data-toggle-pass="auth-reg-password" aria-pressed="false">Hiện</button>
+          </div>
         </div>
-
         <div class="form-field-group">
           <label for="auth-reg-confirm">Xác nhận mật khẩu <span class="req">*</span></label>
-          <input type="password" class="form-field-input" id="auth-reg-confirm" placeholder="Nhập lại mật khẩu lần nữa" required autocomplete="new-password" />
+          <input type="password" class="form-field-input" id="auth-reg-confirm" placeholder="Nhập lại mật khẩu" required autocomplete="new-password" />
         </div>
-
-        <button type="submit" class="btn-orange-pill auth-submit-btn" id="btn-submit-register">
-          Đăng ký tài khoản
-        </button>
+        <button type="submit" class="btn-orange-pill auth-submit-btn" id="btn-submit-register">Đăng ký tài khoản</button>
       </form>
 
       <div class="auth-card-footer">
-        <button type="button" class="btn-auth-server-link" id="btn-auth-server-config">
-          🌐 Cài đặt địa chỉ máy chủ đồng bộ (Web / App IPA)
-        </button>
+        <button type="button" class="btn-auth-server-link" id="btn-auth-server-config">Cài đặt địa chỉ máy chủ đồng bộ</button>
       </div>
     </div>
   </div>
@@ -90,957 +114,698 @@
 
   <div class="app-container">
 
-    <!-- ================== SIDEBAR TRÁI (DÀNH CHO WEB / DESKTOP) ================== -->
+    <!-- ================== THANH BÊN (máy tính) ================== -->
     <aside class="app-sidebar" aria-label="Menu chính">
-      <!-- Profile Shop -->
-      <div class="shop-profile-card" id="btn-sidebar-shop-profile" title="Xem cài đặt tài khoản">
-        <div class="shop-avatar" id="sidebar-shop-avatar">SH</div>
-        <div class="shop-info">
-          <span class="shop-name" id="sidebar-shop-name">Shop Hoa Hồng</span>
-          <span class="shop-handle" id="sidebar-shop-handle">@shophoahong.live</span>
-        </div>
-      </div>
+      <button type="button" class="shop-profile-card" id="btn-sidebar-shop-profile" title="Đổi tài khoản TikTok">
+        <span class="shop-avatar" id="sidebar-shop-avatar">SH</span>
+        <span class="shop-info">
+          <span class="shop-name" id="sidebar-shop-name">Shop</span>
+          <span class="shop-handle" id="sidebar-shop-handle"></span>
+        </span>
+      </button>
 
-      <!-- Navigation Menu -->
       <nav class="sidebar-nav">
-        <button class="nav-item-btn" data-tab="sales" id="nav-btn-sales">
-          <span>Doanh số</span>
-        </button>
-        <button class="nav-item-btn active" data-tab="live" id="nav-btn-live">
-          <span>Bình luận</span>
-        </button>
-        <button class="nav-item-btn" data-tab="customers" id="nav-btn-customers">
-          <span>Khách hàng</span>
-        </button>
-        <button class="nav-item-btn" data-tab="orders" id="nav-btn-orders">
-          <span>Đơn hàng</span>
-        </button>
-        <button class="nav-item-btn" data-tab="settings" id="nav-btn-settings">
-          <span>Tôi</span>
-        </button>
-        <button class="nav-item-btn admin-nav-shortcut" id="nav-btn-admin-shortcut" style="display:none">
-          <span>🛡 Quản trị TK</span>
-        </button>
+        <button class="nav-item-btn" data-tab="sales" id="nav-btn-sales"><svg class="ic lg"><use href="#i-chart"/></svg><span>Doanh số</span></button>
+        <button class="nav-item-btn active" data-tab="live" id="nav-btn-live"><svg class="ic lg"><use href="#i-chat"/></svg><span>Bình luận</span></button>
+        <button class="nav-item-btn" data-tab="customers" id="nav-btn-customers"><svg class="ic lg"><use href="#i-users"/></svg><span>Khách hàng</span></button>
+        <button class="nav-item-btn" data-tab="orders" id="nav-btn-orders"><svg class="ic lg"><use href="#i-bag"/></svg><span>Đơn hàng</span><span class="nav-badge" id="nav-orders-badge" hidden></span></button>
+        <button class="nav-item-btn" data-tab="settings" id="nav-btn-settings"><svg class="ic lg"><use href="#i-user"/></svg><span>Tôi</span></button>
+        <button class="nav-item-btn" data-tab="admin" id="nav-btn-admin-shortcut" style="display:none"><svg class="ic lg"><use href="#i-shield"/></svg><span>Quản trị</span></button>
       </nav>
 
-      <!-- Footer Máy In & Đồng Bộ Nhỏ Gọn Ở Sidebar -->
-      <div class="sidebar-footer" style="display:flex;flex-direction:column;gap:8px">
+      <div class="sidebar-footer">
         <button type="button" class="sidebar-access-badge" id="btn-sidebar-access" title="Xem thời hạn tài khoản" style="display:none">
           <span class="sidebar-access-label" id="sidebar-access-label"></span>
           <span class="sidebar-access-value" id="sidebar-access-value"></span>
         </button>
-        <div class="quick-printer-badge" id="btn-sidebar-sync" title="Trạng thái đồng bộ Web & App IPA">
-          <span class="printer-dot" id="sidebar-sync-led" style="background:#16a34a"></span>
-          <span id="sidebar-sync-text">Đồng bộ Live (1 thiết bị)</span>
-        </div>
-        <div class="quick-printer-badge" id="btn-sidebar-printer" title="Cài đặt kết nối máy in">
+        <button type="button" class="quick-printer-badge" id="btn-sidebar-sync" title="Trạng thái đồng bộ Web và App">
+          <span class="printer-dot" id="sidebar-sync-led"></span>
+          <span id="sidebar-sync-text">Đang kết nối...</span>
+        </button>
+        <button type="button" class="quick-printer-badge" id="btn-sidebar-printer" title="Cài đặt máy in">
           <span class="printer-dot" id="quick-printer-led"></span>
-          <span id="quick-printer-name">Xprinter 80mm</span>
-        </div>
+          <span id="quick-printer-name">Chưa kết nối máy in</span>
+        </button>
       </div>
     </aside>
 
-    <!-- ================== MAIN CONTENT AREA ================== -->
     <main class="app-main">
 
-      <!-- ================== 1. TAB DOANH SỐ (SCREEN 1) ================== -->
+      <!-- ================== 1. DOANH SỐ ================== -->
       <section class="view-section" id="view-sales">
-        <header class="view-header view-header-row-mobile">
+        <header class="view-header">
           <div class="header-left">
-            <span class="header-sub" id="sales-header-date">Chủ nhật, 25/10/2026</span>
-            <h1 class="header-title">Doanh số</h1>
+            <span class="header-sub" id="sales-header-date"></span>
+            <h1 class="header-title">Doanh số
+              <span class="live-indicator-tag" id="sales-live-badge"><span class="pulse-dot"></span><span>Đang live</span></span>
+            </h1>
           </div>
-          <div class="header-right header-right-auto">
-            <span class="live-indicator-tag" id="sales-live-badge">
-              <span class="pulse-dot"></span>
-              <span>Đang live</span>
-            </span>
+          <div class="header-right">
+            <button class="btn-outline-pill" id="btn-export-sales-report"><svg class="ic"><use href="#i-down"/></svg><span>Xuất CSV đơn hàng</span></button>
           </div>
         </header>
+
+        <div class="kpi-row">
+          <div class="hero-revenue-card">
+            <div class="hero-rev-label">Doanh thu hôm nay</div>
+            <div class="hero-rev-amount" id="sales-hero-revenue">0 đ</div>
+            <div class="hero-growth-row">
+              <span class="hero-growth-pill"><svg class="ic sm"><use href="#i-up"/></svg><span id="sales-today-growth-pct">—</span></span>
+              <span class="hero-growth-compare">so với hôm qua</span>
+            </div>
+          </div>
+          <div class="stat-white-box">
+            <div class="stat-box-top"><span>Khách hôm nay</span></div>
+            <div class="stat-box-number" id="sales-today-guests">0</div>
+            <div class="stat-box-sub orange" id="sales-new-guests-sub">0 khách mới</div>
+          </div>
+          <div class="stat-white-box">
+            <div class="stat-box-top"><span id="sales-month-label">Doanh thu tháng</span></div>
+            <div class="stat-box-number" id="sales-month-revenue">0 đ</div>
+            <div class="stat-box-sub green" id="sales-month-growth"></div>
+          </div>
+        </div>
 
         <div class="sales-layout-grid">
-          <!-- Cột Trái: Thẻ Cam Doanh thu + 2 thẻ phụ + Biểu đồ cột theo ngày -->
-          <div>
-            <!-- Thẻ Cam Hero Doanh thu hôm nay (Screen 1) -->
-            <div class="hero-revenue-card">
-              <div class="hero-rev-label">Doanh thu hôm nay</div>
-              <div class="hero-rev-amount" id="sales-hero-revenue">4.860.000 <span class="vnd-underline">đ</span></div>
-              <div class="hero-growth-row">
-                <span class="hero-growth-pill">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
-                  <span id="sales-today-growth-pct">+18%</span>
-                </span>
-                <span class="hero-growth-compare">so với hôm qua</span>
+          <div class="daily-barchart-card">
+            <div class="barchart-header">
+              <h3 class="barchart-title">Doanh thu theo ngày</h3>
+              <div class="chart-toggle-group">
+                <button class="chart-toggle-btn active" id="chip-chart-7days">7 ngày</button>
+                <button class="chart-toggle-btn" id="chip-chart-30days">30 ngày</button>
               </div>
             </div>
-
-            <!-- 2 Thẻ phụ bên dưới (Screen 1) -->
-            <div class="sub-stats-2col">
-              <div class="stat-white-box">
-                <div class="stat-box-top">
-                  <svg class="stat-box-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                  <span>Khách hôm nay</span>
-                </div>
-                <div class="stat-box-number" id="sales-today-guests">37</div>
-                <div class="stat-box-sub orange" id="sales-new-guests-sub">9 khách mới</div>
-              </div>
-
-              <div class="stat-white-box">
-                <div class="stat-box-top">
-                  <svg class="stat-box-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                  <span id="sales-month-label">Doanh thu tháng 10</span>
-                </div>
-                <div class="stat-box-number stat-box-number-money" id="sales-month-revenue">68.450.000 <span class="vnd-underline">đ</span></div>
-                <div class="stat-box-sub green" id="sales-month-growth">+12% so với tháng 9</div>
-              </div>
-            </div>
-
-            <!-- Biểu đồ Doanh thu theo ngày (Screen 1) -->
-            <div class="daily-barchart-card">
-              <div class="barchart-header">
-                <h3 class="barchart-title">Doanh thu theo ngày</h3>
-                <div class="chart-toggle-group">
-                  <button class="chart-toggle-btn active" id="chip-chart-7days">7 ngày</button>
-                  <button class="chart-toggle-btn" id="chip-chart-30days">30 ngày</button>
-                </div>
-              </div>
-
-              <!-- 7 Cột biểu đồ -->
-              <div class="barchart-container" id="barchart-bars-container">
-                <!-- Render động từ JS -->
-              </div>
-              <div class="barchart-days-labels-row" id="barchart-labels-container">
-                <span class="barchart-day-label">T2</span>
-                <span class="barchart-day-label">T3</span>
-                <span class="barchart-day-label">T4</span>
-                <span class="barchart-day-label">T5</span>
-                <span class="barchart-day-label">T6</span>
-                <span class="barchart-day-label">T7</span>
-                <span class="barchart-day-label highlight">CN</span>
-              </div>
-            </div>
+            <div class="barchart-container" id="barchart-bars-container"></div>
+            <div class="barchart-days-labels-row" id="barchart-labels-container"></div>
           </div>
 
-          <!-- Cột Phải (Web Desktop): Phân bổ trạng thái & Thống kê Web chuyên sâu -->
-          <div class="clean-white-card desktop-only-card">
-            <h3 style="font-size:16px;font-weight:700;margin-bottom:18px">Trạng thái đơn hàng hôm nay</h3>
-            <div style="display:flex;align-items:center;justify-content:center;position:relative;margin:16px 0 24px">
-              <svg viewBox="0 0 120 120" width="180" height="180">
-                <circle cx="60" cy="60" r="46" fill="transparent" stroke="#f6f3ee" stroke-width="16"></circle>
-                <circle id="sales-donut-circle" cx="60" cy="60" r="46" fill="transparent" stroke="#f58238" stroke-width="16" stroke-dasharray="289" stroke-dashoffset="60" transform="rotate(-90 60 60)"></circle>
-              </svg>
-              <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
-                <span style="font-size:24px;font-weight:800;color:var(--text-main)" id="sales-donut-pct">75%</span>
-                <span style="font-size:12px;color:var(--text-sub)">Đơn mới</span>
-              </div>
-            </div>
-
-            <div style="display:flex;flex-direction:column;gap:10px">
-              <div style="display:flex;justify-content:space-between;padding:12px 14px;background:#fef5ee;border-radius:10px">
-                <span style="font-weight:600;color:#c2410c">● Đơn mới</span>
-                <b id="sales-cnt-new">12</b>
-              </div>
-              <div style="display:flex;justify-content:space-between;padding:12px 14px;background:#f0f9ff;border-radius:10px">
-                <span style="font-weight:600;color:#0369a1">● Đã in</span>
-                <b id="sales-cnt-printed">31</b>
-              </div>
-              <div style="display:flex;justify-content:space-between;padding:12px 14px;background:#fff8ee;border-radius:10px">
-                <span style="font-weight:600;color:#d97706">● Đang giao</span>
-                <b id="sales-cnt-shipping">7</b>
-              </div>
-              <div style="display:flex;justify-content:space-between;padding:12px 14px;background:#f0fdf4;border-radius:10px">
-                <span style="font-weight:600;color:#15803d">● Hoàn tất</span>
-                <b id="sales-cnt-done">0</b>
-              </div>
-            </div>
-
-            <div style="margin-top:20px;padding-top:16px;border-top:1px solid #f2ede6;display:flex;flex-direction:column;gap:12px">
-              <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-sub)">
-                <span>Tỉ lệ chốt đơn thành công</span>
-                <b style="color:var(--text-main);font-weight:700" id="sales-rate-pct">83.8%</b>
-              </div>
-              <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-sub)">
-                <span>Giá trị trung bình đơn (AOV)</span>
-                <b style="color:var(--text-main);font-weight:700" id="sales-aov-val">97.200 ₫</b>
-              </div>
-              <button class="btn-outline-pill" id="btn-export-sales-report" style="width:100%;height:40px;margin-top:6px;gap:6px">
-                <span>📥</span>
-                <span>Xuất file Excel / CSV đơn hàng</span>
-              </button>
-            </div>
+          <div class="clean-white-card status-list">
+            <div class="status-row"><h3 class="card-title">Đơn hôm nay theo trạng thái</h3></div>
+            <button type="button" class="status-row" data-goto-orders="new"><span class="badge-order-status status-new-badge">Đơn mới</span><b id="sales-cnt-new">0</b><svg class="ic"><use href="#i-next"/></svg></button>
+            <div class="status-row"><span class="badge-order-status status-printed-badge">Đã in</span><b id="sales-cnt-printed">0</b></div>
+            <button type="button" class="status-row" data-goto-orders="shipping"><span class="badge-order-status ship-tag-ready">Đang giao</span><b id="sales-cnt-shipping">0</b><svg class="ic"><use href="#i-next"/></svg></button>
+            <div class="status-row"><span class="badge-order-status status-done-badge">Hoàn tất</span><b id="sales-cnt-done">0</b></div>
           </div>
         </div>
       </section>
 
-      <!-- ================== 2. TAB BÌNH LUẬN & TIMELINE PHIÊN LIVE (SCREEN 2) ================== -->
+      <!-- ================== 2. BÌNH LUẬN ================== -->
       <section class="view-section active" id="view-live">
-        <header class="view-header view-header-row-mobile">
+        <header class="view-header">
           <div class="header-left">
-            <span class="header-sub" id="btn-open-time-filter" title="Bấm để xem lại thời điểm hoặc lọc theo ngày">
-              Các phiên live đã ghi lại
-            </span>
+            <span class="header-sub" id="live-header-date"></span>
             <h1 class="header-title">Bình luận</h1>
           </div>
-          <div class="header-right header-right-auto">
-            <!-- Nút Segmented chuyển đổi trên Desktop -->
-            <div class="segmented-control-pills desktop-only-flex">
-              <button class="segment-pill-btn" id="btn-seg-live-stream">💬 Phiên trực tiếp</button>
-              <button class="segment-pill-btn active" id="btn-seg-timeline">📅 Các phiên hôm nay</button>
-            </div>
-            <button class="btn-outline-pill desktop-only-flex" id="btn-header-printer-status" title="Cài đặt & khay máy in Xprinter">
-              <span class="printer-dot" id="header-printer-led"></span>
-              <span>🖨 Máy in</span>
-            </button>
-            <button class="btn-orange-pill btn-new-live-top" id="btn-open-live-modal">
-              <span>+ Live mới</span>
-            </button>
+          <div class="header-right">
+            <button class="btn-outline-pill" id="btn-header-printer-status" title="Cài đặt máy in"><span class="printer-dot" id="header-printer-led"></span><span>Máy in</span></button>
+            <button class="btn-orange-pill" id="btn-open-live-modal"><span>+ Live mới</span></button>
           </div>
         </header>
 
-        <!-- Hết dùng thử hoặc hết gói -->
         <div class="live-access-notice" id="live-access-notice" role="alert" style="display:none"></div>
-
-        <!-- Các live đang theo dõi cùng lúc -->
         <div class="active-lives-strip" id="active-lives-strip" style="display:none"></div>
 
-        <!-- KHỐI 1: TỔNG QUAN CÁC PHIÊN LIVE & TIMELINE 24H (SCREEN 2 CHUẨN MOBILE & WEB) -->
-        <div class="sessions-overview-wrapper" id="sessions-timeline-overview">
-          <!-- Hàng chọn ngày: <  [ Hôm nay · CN 25/10 v ]  > -->
-          <div class="date-navigator-row">
-            <button class="nav-circle-arrow" id="btn-prev-day-nav" aria-label="Ngày trước">‹</button>
-            <button class="btn-date-nav-pill" id="btn-date-picker-trigger">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-              <span id="lbl-current-nav-date">Hôm nay · CN 25/10</span>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"></polyline></svg>
-            </button>
-            <button class="nav-circle-arrow" id="btn-next-day-nav" aria-label="Ngày tiếp">›</button>
-          </div>
-
-          <!-- Hàng chip lọc ngày: Hôm nay | Hôm qua | 7 ngày | Tháng này -->
-          <div class="filter-chips-row chips-scroll-mobile" id="live-day-quick-chips">
-            <button class="chip-pill active" data-day-chip="Hôm nay">Hôm nay</button>
-            <button class="chip-pill" data-day-chip="Hôm qua">Hôm qua</button>
-            <button class="chip-pill" data-day-chip="7 ngày">7 ngày</button>
-            <button class="chip-pill" data-day-chip="Tháng này">Tháng này</button>
-          </div>
-
-          <!-- Thẻ trắng chứa 4 ô chỉ số 2x2 + Thanh Timeline 24h (Screen 2) -->
-          <div class="sessions-overview-box">
-            <div class="live-metrics-4tiles">
-              <div class="tile-metric-item">
-                <span class="tile-icon-svg">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#eb6b1e" stroke-width="2.2"><circle cx="12" cy="12" r="2"></circle><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"></path></svg>
-                </span>
-                <div>
-                  <span class="tile-bold-num" id="overview-cnt-sessions">2</span>
-                  <span class="tile-lbl-sub">phiên live</span>
-                </div>
+        <div class="md-grid">
+          <!-- Cột trái: các phiên -->
+          <div class="sessions-overview-wrapper" id="sessions-timeline-overview">
+            <div class="sessions-overview-box">
+              <div class="date-navigator-row">
+                <button class="nav-circle-arrow" id="btn-prev-day-nav" aria-label="Ngày trước"><svg class="ic"><use href="#i-back"/></svg></button>
+                <button class="btn-date-nav-pill" id="btn-date-picker-trigger"><svg class="ic"><use href="#i-cal"/></svg><span id="lbl-current-nav-date">Hôm nay</span></button>
+                <button class="nav-circle-arrow" id="btn-next-day-nav" aria-label="Ngày sau"><svg class="ic"><use href="#i-next"/></svg></button>
               </div>
-              <div class="tile-metric-item">
-                <span class="tile-icon-svg">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#eb6b1e" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-                </span>
-                <div>
-                  <span class="tile-bold-num" id="overview-cnt-comments">310</span>
-                  <span class="tile-lbl-sub">bình luận</span>
-                </div>
+              <div class="filter-chips-row" id="live-day-quick-chips">
+                <button class="chip-pill active" data-day-chip="Hôm nay">Hôm nay</button>
+                <button class="chip-pill" data-day-chip="Hôm qua">Hôm qua</button>
+                <button class="chip-pill" data-day-chip="7 ngày">7 ngày</button>
+                <button class="chip-pill" data-day-chip="Tháng này">Tháng này</button>
               </div>
-              <div class="tile-metric-item">
-                <span class="tile-icon-svg">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#eb6b1e" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                </span>
-                <div>
-                  <span class="tile-bold-num" id="overview-cnt-guests">37</span>
-                  <span class="tile-lbl-sub">khách</span>
-                </div>
+              <div class="live-metrics-4tiles">
+                <div class="tile-metric-item"><span class="tile-bold-num" id="overview-cnt-sessions">0</span><span class="tile-lbl-sub">phiên</span></div>
+                <div class="tile-metric-item"><span class="tile-bold-num" id="overview-cnt-comments">0</span><span class="tile-lbl-sub">bình luận</span></div>
+                <div class="tile-metric-item"><span class="tile-bold-num" id="overview-cnt-guests">0</span><span class="tile-lbl-sub">khách</span></div>
+                <div class="tile-metric-item"><span class="tile-bold-num" id="overview-cnt-orders">0</span><span class="tile-lbl-sub">đơn</span></div>
               </div>
-              <div class="tile-metric-item">
-                <span class="tile-icon-svg">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#eb6b1e" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
-                </span>
-                <div>
-                  <span class="tile-bold-num" id="overview-cnt-orders">50</span>
-                  <span class="tile-lbl-sub">đơn</span>
-                </div>
+              <div class="timeline-scrubber-wrap">
+                <div class="timeline-track-bar"></div>
+                <div class="timeline-hours-markers"><span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>24h</span></div>
               </div>
             </div>
 
-            <!-- Thanh Dòng Thời Gian 24 Giờ (Screen 2) -->
-            <div class="timeline-scrubber-wrap">
-              <div class="timeline-track-bar">
-                <!-- Khối cam phiên trưa (12h - 13h40) -->
-                <div class="timeline-live-chunk" style="left:47%;width:7.5%"></div>
-                <!-- Khối cam phiên tối (19h30 - nay) -->
-                <div class="timeline-live-chunk active-chunk" style="left:77%;width:8%"></div>
-                <!-- Vạch chỉ thời điểm hiện tại -->
-                <div class="timeline-cursor-line" style="left:84.8%"></div>
-              </div>
-              <div class="timeline-hours-markers">
-                <span>0h</span>
-                <span>6h</span>
-                <span>12h</span>
-                <span>18h</span>
-                <span>24h</span>
-              </div>
+            <div class="sessions-section-heading">
+              <h3>Các phiên hôm nay</h3>
+              <span id="overview-sessions-sub">0 phiên</span>
             </div>
+            <div class="sessions-list-container" id="sessions-list-container"></div>
           </div>
 
-          <!-- Danh sách các phiên hôm nay (Screen 2) -->
-          <div class="sessions-section-heading">
-            <h3>Các phiên hôm nay</h3>
-            <span id="overview-sessions-sub">2 phiên</span>
-          </div>
-
-          <div class="sessions-list-container" id="sessions-list-container">
-            <!-- Phiên tối (Đang live) -->
-            <div class="session-row-card" data-select-session="s_evening">
-              <div class="session-time-col">
-                <span class="session-time-main">19:30</span>
-                <span class="session-time-stem"></span>
-                <span class="session-time-status">Đang<br/>live</span>
-              </div>
-              <div class="session-info-bubble active-live-bubble">
-                <div class="session-bubble-left">
-                  <div class="session-bubble-title-line">
-                    <span class="session-bubble-title">Phiên tối</span>
-                    <span class="badge-live-tag"><span class="live-red-dot"></span>Live</span>
-                    <span class="session-bubble-duration">1g 25p</span>
+          <!-- Cột phải: bình luận -->
+          <div class="live-layout-grid" id="live-stream-details-layout" style="display:none">
+            <div class="live-session-card">
+              <div class="live-session-header">
+                <button class="btn-outline-pill mobile-only" id="btn-back-to-sessions-timeline"><svg class="ic"><use href="#i-back"/></svg>Các phiên</button>
+                <div>
+                  <div class="session-title-wrap">
+                    <span class="session-title" id="session-title-text">Tất cả bình luận</span>
+                    <span class="badge-live-tag" id="session-live-tag" style="display:none"><span class="live-red-dot"></span>Live</span>
+                    <button type="button" class="btn-stop-live" id="btn-stop-live" hidden>Dừng live</button>
                   </div>
-                  <div class="session-bubble-stats-row">
-                    <span>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-                      <b id="s-evening-cmts">214</b>
-                    </span>
-                    <span>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                      <b id="s-evening-guests">22</b>
-                    </span>
-                    <span>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
-                      <b id="s-evening-orders">31</b>
-                    </span>
-                  </div>
+                  <div class="session-subtitle" id="session-subtitle-text"></div>
                 </div>
-                <span class="session-chevron">›</span>
+                <div class="session-stats-right" id="session-stats-counter"></div>
               </div>
-            </div>
-
-            <!-- Phiên trưa -->
-            <div class="session-row-card" data-select-session="s_noon">
-              <div class="session-time-col">
-                <span class="session-time-main">12:00</span>
-                <span class="session-time-stem"></span>
-                <span class="session-time-end">13:40</span>
+              <div class="filter-chips-row">
+                <button class="chip-pill active" data-livefilter="all" id="chip-live-all">Tất cả 0</button>
+                <button class="chip-pill" data-livefilter="deals" id="chip-live-deals">Chốt đơn 0</button>
+                <button class="chip-pill" data-livefilter="new" id="chip-live-new">Khách mới 0</button>
               </div>
-              <div class="session-info-bubble">
-                <div class="session-bubble-left">
-                  <div class="session-bubble-title-line">
-                    <span class="session-bubble-title">Phiên trưa</span>
-                    <span class="session-bubble-duration">1g 40p</span>
-                  </div>
-                  <div class="session-bubble-stats-row">
-                    <span>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-                      <b>96</b>
-                    </span>
-                    <span>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                      <b>15</b>
-                    </span>
-                    <span>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
-                      <b>19</b>
-                    </span>
-                  </div>
-                </div>
-                <span class="session-chevron">›</span>
-              </div>
+              <div class="comment-list-stream" id="comment-stream-container"></div>
+              <button type="button" class="btn-load-older-comments" id="btn-load-older-comments" style="display:none">Xem thêm bình luận cũ hơn</button>
             </div>
           </div>
         </div>
-
-        <!-- KHỐI 2: CHI TIẾT BÌNH LUẬN & CHỐT ĐƠN PHIÊN LIVE -->
-        <div class="live-layout-grid" id="live-stream-details-layout" style="display:none">
-          <!-- Cột 1: Thẻ Phiên Live Stream Trực Tiếp -->
-          <div class="live-session-card">
-            <div style="margin-bottom:14px">
-              <button class="btn-outline-pill" id="btn-back-to-sessions-timeline" style="padding:5px 14px;font-size:12.5px">
-                ‹ Quay lại các phiên hôm nay
-              </button>
-            </div>
-            <div class="live-session-header">
-              <div>
-                <div class="session-title-wrap">
-                  <span class="session-title" id="session-title-text">Phiên tối</span>
-                  <span class="badge-live-tag" id="session-live-tag"><span class="live-red-dot"></span>Live</span>
-                  <button type="button" class="btn-stop-live" id="btn-stop-live" hidden>■ Dừng live</button>
-                </div>
-                <div class="session-subtitle" id="session-subtitle-text">
-                  Từ 19:30 · 1g 25p · @shophoahong.live
-                </div>
-              </div>
-              <div class="session-stats-right" id="session-stats-counter">
-                214 bình luận · 22 khách · 31 đơn
-              </div>
-            </div>
-
-            <!-- Filter Chips -->
-            <div class="filter-chips-row">
-              <button class="chip-pill active" data-livefilter="all" id="chip-live-all">Tất cả 214</button>
-              <button class="chip-pill" data-livefilter="deals" id="chip-live-deals">Chốt đơn 31</button>
-              <button class="chip-pill" data-livefilter="new" id="chip-live-new">Khách mới 9</button>
-            </div>
-
-            <!-- Danh sách bình luận -->
-            <div class="comment-list-stream" id="comment-stream-container">
-              <!-- Render động từ JavaScript -->
-            </div>
-            <button type="button" class="btn-load-older-comments" id="btn-load-older-comments" style="display:none">Xem thêm bình luận cũ hơn</button>
-          </div>
-
-        </div>
-
       </section>
 
-      <!-- ================== 3. TAB KHÁCH HÀNG (SCREEN 4 & SCREEN 9) ================== -->
+      <!-- ================== 3. KHÁCH HÀNG ================== -->
       <section class="view-section" id="view-customers">
-        <!-- Subview 1: Danh sách khách hàng (Screen 4) -->
-        <div id="subview-customers-list">
-          <header class="view-header">
-            <div class="header-left">
-              <span class="header-sub" id="customers-sub-count">128 khách · 9 khách mới hôm nay</span>
-              <h1 class="header-title">Khách hàng</h1>
-            </div>
-            <div class="header-right">
-              <div class="header-search-box">
-                <svg class="search-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                <input type="text" id="input-search-customers" placeholder="Tìm tên hoặc @tiktok" />
+        <div class="md-grid wide-list">
+          <div id="subview-customers-list">
+            <header class="view-header">
+              <div class="header-left">
+                <span class="header-sub" id="customers-sub-count"></span>
+                <h1 class="header-title">Khách hàng</h1>
               </div>
+            </header>
+            <div class="header-search-box">
+              <svg class="ic search-icon-svg"><use href="#i-search"/></svg>
+              <input type="search" id="input-search-customers" placeholder="Tìm tên, @tiktok hoặc số điện thoại" aria-label="Tìm khách hàng" />
             </div>
-          </header>
-
-          <div class="filter-chips-row">
-            <button class="chip-pill active" data-cust-filter="all">Tất cả</button>
-            <button class="chip-pill" data-cust-filter="today">Mới hôm nay</button>
-            <button class="chip-pill" data-cust-filter="loyal">Mua nhiều</button>
+            <div class="filter-chips-row">
+              <button class="chip-pill active" data-cust-filter="all">Tất cả</button>
+              <button class="chip-pill" data-cust-filter="today">Mới hôm nay</button>
+              <button class="chip-pill" data-cust-filter="loyal">Mua nhiều</button>
+            </div>
+            <div class="customers-list-table" id="customers-list-container"></div>
           </div>
 
-          <div class="customers-list-table" id="customers-list-container">
-            <!-- Render động từ JS -->
-          </div>
-        </div>
-
-        <!-- Subview 2: Hồ sơ khách hàng chi tiết (Screen 9) -->
-        <div id="subview-customer-profile" style="display: none">
-          <header class="view-header view-header-row-mobile">
-            <div class="header-left">
-              <h1 class="header-title header-title-subpage">
-                <button class="back-header-btn" id="btn-back-to-customers" title="Quay lại danh sách khách hàng">‹</button>
+          <div id="subview-customer-profile" style="display: none">
+            <header class="view-header">
+              <h1 class="header-title">
+                <button class="back-header-btn mobile-only" id="btn-back-to-customers" title="Quay lại danh sách khách hàng"><svg class="ic"><use href="#i-back"/></svg>Danh sách</button>
                 <span>Hồ sơ khách hàng</span>
               </h1>
-            </div>
-          </header>
+            </header>
 
-          <div class="profile-layout-grid">
-            <!-- Cột trái: Thông tin tổng quan & Địa chỉ nhận hàng -->
-            <div class="profile-card-left">
-              <!-- Thẻ tổng quan khách hàng (Screen 9) -->
-              <div class="profile-summary-card">
-                <div class="profile-avatar-row">
-                  <div class="user-circle-avatar warm" id="prof-cust-avatar" style="width: 52px; height: 52px; font-size: 16px">LN</div>
-                  <div>
-                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                      <span class="cust-name" id="prof-cust-name" style="font-size: 17px">Linh Nguyễn</span>
-                      <span class="badge-pill-tag badge-tag-loyal" id="prof-cust-tag">Mua nhiều</span>
-                    </div>
-                    <div class="cust-handle-time" id="prof-cust-handle">@linh.nguyen98</div>
+            <div class="profile-summary-card">
+              <div class="profile-avatar-row">
+                <div class="user-circle-avatar warm" id="prof-cust-avatar"></div>
+                <div>
+                  <div class="cust-row-title-line">
+                    <span class="cust-name" id="prof-cust-name"></span>
+                    <span class="badge-pill-tag badge-tag-loyal" id="prof-cust-tag"></span>
                   </div>
-                </div>
-
-                <div class="profile-3metrics-grid">
-                  <div class="profile-metric-item">
-                    <span class="profile-metric-num" id="prof-total-spent">3.450.000 <span class="vnd-underline">đ</span></span>
-                    <span class="profile-metric-lbl">Tổng chi tiêu</span>
-                  </div>
-                  <div class="profile-metric-item">
-                    <span class="profile-metric-num" id="prof-order-count">12</span>
-                    <span class="profile-metric-lbl">Số đơn</span>
-                  </div>
-                  <div class="profile-metric-item">
-                    <span class="profile-metric-num" id="prof-last-buy">25/10</span>
-                    <span class="profile-metric-lbl">Mua gần nhất</span>
-                  </div>
+                  <div class="cust-handle-time" id="prof-cust-handle"></div>
                 </div>
               </div>
-
-              <!-- Thẻ địa chỉ nhận hàng (Screen 9) -->
-              <div class="profile-address-card">
-                <div class="profile-address-header">
-                  <h3 style="display:flex;align-items:center;gap:8px">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#eb6b1e" stroke-width="2.2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                    <span>Địa chỉ nhận hàng</span>
-                  </h3>
-                  <button class="btn-edit-link" id="btn-open-edit-address">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-                    <span>Sửa</span>
-                  </button>
-                </div>
-                <div class="address-rows-list">
-                  <div class="address-row">
-                    <span class="address-label">Người nhận</span>
-                    <span class="address-value" id="prof-addr-receiver">Linh Nguyễn</span>
-                  </div>
-                  <div class="address-row">
-                    <span class="address-label">Số điện thoại</span>
-                    <span class="address-value" id="prof-addr-phone">0905 123 456</span>
-                  </div>
-                  <div class="address-row">
-                    <span class="address-label">Địa chỉ</span>
-                    <span class="address-value" id="prof-addr-street">25 Lê Lợi</span>
-                  </div>
-                  <div class="address-row">
-                    <span class="address-label">Phường / Quận / Tỉnh</span>
-                    <span class="address-value" id="prof-addr-region">Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh</span>
-                  </div>
-                  <div class="address-row">
-                    <span class="address-label">Ghi chú giao</span>
-                    <span class="address-value" id="prof-addr-note">Giao giờ hành chính, gọi trước khi giao</span>
-                  </div>
-                </div>
+              <div class="profile-3metrics-grid">
+                <div><span class="profile-metric-num" id="prof-total-spent">0 đ</span><span class="profile-metric-lbl">Tổng chi tiêu</span></div>
+                <div><span class="profile-metric-num" id="prof-order-count">0</span><span class="profile-metric-lbl">Số đơn</span></div>
+                <div><span class="profile-metric-num" id="prof-last-buy">—</span><span class="profile-metric-lbl">Mua gần nhất</span></div>
               </div>
             </div>
 
-            <!-- Cột phải: Lịch sử mua hàng (Screen 9) -->
+            <div class="profile-address-card">
+              <div class="profile-address-header">
+                <h3><svg class="ic"><use href="#i-pin"/></svg><span>Địa chỉ nhận hàng</span></h3>
+                <button class="btn-edit-link" id="btn-open-edit-address"><svg class="ic sm"><use href="#i-edit"/></svg><span>Sửa</span></button>
+              </div>
+              <div class="address-rows-list">
+                <div class="address-row"><span class="address-label">Người nhận</span><span class="address-value" id="prof-addr-receiver"></span></div>
+                <div class="address-row"><span class="address-label">Số điện thoại</span><span class="address-value" id="prof-addr-phone"></span></div>
+                <div class="address-row"><span class="address-label">Địa chỉ</span><span class="address-value" id="prof-addr-street"></span></div>
+                <div class="address-row"><span class="address-label">Phường / Quận / Tỉnh</span><span class="address-value" id="prof-addr-region"></span></div>
+                <div class="address-row"><span class="address-label">Ghi chú giao</span><span class="address-value" id="prof-addr-note"></span></div>
+              </div>
+            </div>
+
             <div class="profile-history-card">
               <div class="history-card-header">
                 <h3>Lịch sử mua hàng</h3>
-                <span id="prof-hist-count">12 đơn</span>
+                <small id="prof-hist-count"></small>
               </div>
-              <div class="history-orders-list" id="prof-history-orders-list">
-                <!-- Render động các đơn hàng của khách -->
-              </div>
+              <div class="history-orders-list" id="prof-history-orders-list"></div>
             </div>
           </div>
+          <div class="md-empty">Chọn một khách ở danh sách bên trái để xem hồ sơ.</div>
         </div>
       </section>
 
-      <!-- ================== 4. TAB ĐƠN HÀNG (SCREEN 5 & SCREEN 8) ================== -->
+      <!-- ================== 4. ĐƠN HÀNG ================== -->
       <section class="view-section" id="view-orders">
-        <!-- Subview 1: Danh sách đơn hàng (Screen 5) -->
-        <div id="subview-orders-list">
-          <header class="view-header orders-header-top">
-            <div class="header-left">
-              <span class="header-sub" id="orders-sub-count">50 đơn hôm nay · CN 25/10</span>
-              <h1 class="header-title">Đơn hàng</h1>
-            </div>
-            <div class="header-right orders-header-actions">
-              <button class="btn-orange-pill btn-create-order-top" id="btn-create-order-pill">
-                <span>+ Tạo đơn</span>
-              </button>
-            </div>
-          </header>
+        <div class="md-grid wide-list">
+          <div id="subview-orders-list">
+            <header class="view-header">
+              <div class="header-left">
+                <span class="header-sub" id="orders-sub-count"></span>
+                <h1 class="header-title">Đơn hàng</h1>
+              </div>
+              <div class="header-right">
+                <button class="btn-orange-pill" id="btn-create-order-pill"><span>+ Tạo đơn</span></button>
+              </div>
+            </header>
 
-          <!-- Thanh tìm kiếm + nút lọc bên phải (Screen 5) -->
-          <div class="orders-search-bar-row">
-            <div class="header-search-box flex-1-search">
-              <svg class="search-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-              <input type="text" id="input-search-orders" placeholder="Tìm tên hoặc @tiktok" />
+            <div class="orders-search-bar-row">
+              <div class="header-search-box">
+                <svg class="ic search-icon-svg"><use href="#i-search"/></svg>
+                <input type="search" id="input-search-orders" placeholder="Tìm tên, @tiktok, mã đơn, số điện thoại" aria-label="Tìm đơn hàng" />
+              </div>
+              <button class="btn-filter-icon" id="btn-order-filter-icon" title="Chọn ngày hoặc khoảng ngày"><svg class="ic"><use href="#i-cal"/></svg><span id="order-range-label">Hôm nay</span></button>
             </div>
-            <button class="btn-filter-icon" id="btn-order-filter-icon" title="Lọc đơn hàng">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"></line><line x1="7" y1="12" x2="17" y2="12"></line><line x1="10" y1="17" x2="14" y2="17"></line></svg>
+
+            <div class="filter-chips-row">
+              <button class="chip-pill active" data-order-filter="all" id="chip-ord-all">Tất cả · 0</button>
+              <button class="chip-pill" data-order-filter="new" id="chip-ord-new">Đơn mới · 0</button>
+              <button class="chip-pill" data-order-filter="pending" id="chip-ord-pending">Chờ gửi · 0</button>
+              <button class="chip-pill" data-order-filter="hold" id="chip-ord-hold">Gom sau · 0</button>
+              <button class="chip-pill" data-order-filter="shipping" id="chip-ord-shipping">Đang giao · 0</button>
+              <button class="chip-pill chip-attn" id="chip-ord-attn" hidden>Cần xử lý ×</button>
+            </div>
+
+            <div class="vtp-ready-banner" id="vtp-ready-banner" hidden>
+              <div class="vtp-ready-text">
+                <b id="vtp-ready-title">0 khách sẵn sàng gửi</b>
+                <span id="vtp-ready-sub"></span>
+              </div>
+              <button type="button" class="btn-orange-pill" id="btn-open-vtp-export"><span>Xuất VTP</span></button>
+            </div>
+
+            <button type="button" class="vtp-attention-strip" id="vtp-attention" hidden>
+              <span class="vtp-attn-dot">!</span>
+              <span class="vtp-attn-text"><b id="vtp-attention-title">0 đơn cần xử lý</b><span id="vtp-attention-sub"></span></span>
+              <svg class="ic"><use href="#i-next"/></svg>
             </button>
+
+            <div class="orders-list-table" id="orders-list-container"></div>
           </div>
 
-          <!-- Filter chips: Tất cả · 50 | Đơn mới · 12 | Đã in · 31 | Đang giao · 7 -->
-          <div class="filter-chips-row chips-scroll-mobile">
-            <button class="chip-pill active" data-order-filter="all" id="chip-ord-all">Tất cả · 50</button>
-            <button class="chip-pill" data-order-filter="new" id="chip-ord-new">Đơn mới · 12</button>
-            <button class="chip-pill" data-order-filter="pending" id="chip-ord-pending">Chờ gửi · 0</button>
-            <button class="chip-pill" data-order-filter="hold" id="chip-ord-hold">Gom sau · 0</button>
-            <button class="chip-pill" data-order-filter="shipping" id="chip-ord-shipping">Đang giao · 7</button>
-          </div>
-
-          <!-- Có khách sẵn sàng gửi thì hiện thẻ này để xuất file Viettel Post -->
-          <div class="vtp-ready-banner" id="vtp-ready-banner" hidden>
-            <div class="vtp-ready-text">
-              <b id="vtp-ready-title">0 khách sẵn sàng gửi</b>
-              <span id="vtp-ready-sub">Gộp đơn cũ · thu hộ 0đ</span>
-            </div>
-            <button type="button" class="btn-orange-pill vtp-ready-btn" id="btn-open-vtp-export">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line></svg>
-              <span>Xuất VTP</span>
-            </button>
-          </div>
-
-          <button type="button" class="vtp-attention-strip" id="vtp-attention" hidden>
-            <span class="vtp-attn-dot">!</span>
-            <span class="vtp-attn-text"><b id="vtp-attention-title">0 đơn cần xử lý</b><span id="vtp-attention-sub"></span></span>
-            <span class="row-chevron">›</span>
-          </button>
-
-          <div class="orders-list-table" id="orders-list-container">
-            <!-- Render động danh sách đơn hàng chuẩn Screen 5 -->
-          </div>
-        </div>
-
-        <!-- Subview 2: Chi tiết đơn hàng (Screen 8) -->
-        <div id="subview-order-detail" style="display: none">
-          <header class="view-header view-header-row-mobile">
-            <div class="header-left" style="display:flex;align-items:center;gap:12px">
-              <button class="back-header-btn" id="btn-back-to-orders" title="Quay lại danh sách đơn hàng">‹</button>
-              <h1 class="header-title header-title-subpage" style="margin:0">Chi tiết đơn hàng</h1>
-            </div>
-            <div class="header-right header-right-auto">
+          <div id="subview-order-detail" style="display: none">
+            <header class="view-header">
+              <h1 class="header-title">
+                <button class="back-header-btn mobile-only" id="btn-back-to-orders" title="Quay lại danh sách đơn hàng"><svg class="ic"><use href="#i-back"/></svg>Đơn hàng</button>
+                <span>Chi tiết đơn hàng</span>
+              </h1>
               <span class="badge-order-status status-new-badge" id="detail-order-badge">Đơn mới</span>
-            </div>
-          </header>
+            </header>
 
-          <!-- Thẻ thông tin khách & thời gian tạo đơn (Screen 8) -->
-          <div class="order-detail-cust-card" id="btn-detail-goto-customer" title="Bấm để xem hồ sơ khách hàng">
-            <div class="order-detail-cust-top">
-              <div class="detail-cust-box">
-                <div class="user-circle-avatar warm" id="detail-cust-avatar" style="width:48px;height:48px;font-size:15px">LN</div>
-                <div>
-                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                    <span class="cust-name" id="detail-cust-name">Linh Nguyễn</span>
-                    <span class="badge-pill-tag badge-tag-loyal" id="detail-cust-tag">Mua nhiều</span>
+            <div class="order-detail-cust-card" id="btn-detail-goto-customer" role="button" tabindex="0" title="Xem hồ sơ khách hàng">
+              <div class="order-detail-cust-top">
+                <div class="detail-cust-box">
+                  <div class="user-circle-avatar warm" id="detail-cust-avatar"></div>
+                  <div>
+                    <div class="cust-row-title-line">
+                      <span class="cust-name" id="detail-cust-name"></span>
+                      <span class="badge-pill-tag badge-tag-loyal" id="detail-cust-tag"></span>
+                    </div>
+                    <div class="cust-handle-time" id="detail-cust-meta"></div>
                   </div>
-                  <div class="cust-handle-time" id="detail-cust-meta">@linh.nguyen98 · 12 đơn</div>
                 </div>
+                <svg class="ic"><use href="#i-next"/></svg>
               </div>
-              <span style="font-size:20px;color:var(--text-sub)">›</span>
+              <div class="order-detail-cust-divider"></div>
+              <div class="detail-created-time"><svg class="ic sm"><use href="#i-cal"/></svg><span id="detail-created-text"></span></div>
             </div>
-            <div class="order-detail-cust-divider"></div>
-            <div class="detail-created-time" id="detail-created-desc">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-              <span id="detail-created-text">Tạo lúc 20:42 · CN 25/10/2026</span>
-            </div>
+
             <div class="detail-vtp-box" id="detail-vtp-box" hidden></div>
-          </div>
 
-          <div class="order-detail-grid">
-            <!-- Cột trái: Danh sách sản phẩm trong đơn -->
-            <div class="order-detail-left">
-              <div class="order-items-card">
-                <div class="items-card-title" id="detail-items-count-title">Sản phẩm (3)</div>
-                <div class="product-lines-list" id="detail-product-lines">
-                  <!-- Render động các sản phẩm -->
-                </div>
-                <div class="order-total-highlight-row">
-                  <span>Tổng tiền</span>
-                  <span class="total-sum" id="detail-total-sum">450.000 <span class="vnd-underline">đ</span></span>
-                </div>
+            <div class="order-items-card">
+              <div class="items-card-title" id="detail-items-count-title">Sản phẩm (0)</div>
+              <div class="product-lines-list" id="detail-product-lines"></div>
+              <div class="order-total-highlight-row">
+                <span>Tổng tiền</span>
+                <span class="total-sum" id="detail-total-sum">0 đ</span>
               </div>
             </div>
 
-            <!-- Cột phải / Thanh đáy: Các nút hành động thao tác nhanh (Screen 8) -->
             <div class="order-detail-right">
-              <button class="btn-orange-pill btn-detail-edit-main" id="btn-detail-edit-order">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-                <span>Chỉnh sửa đơn</span>
-              </button>
-              <div class="detail-bottom-3btns">
-                <button class="btn-outline-pill" id="btn-detail-ship-order">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
-                  <span id="detail-ship-label">Duyệt đơn</span>
-                </button>
-                <button class="btn-outline-pill" id="btn-detail-print-order">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-                  <span id="detail-print-label">In đơn</span>
-                </button>
-                <button class="btn-outline-pill btn-detail-del" id="btn-detail-delete-order">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                  <span>Xoá đơn</span>
-                </button>
-              </div>
+              <button class="btn-orange-pill" id="btn-detail-edit-order"><svg class="ic"><use href="#i-edit"/></svg><span>Chỉnh sửa đơn</span></button>
+              <button class="btn-outline-pill" id="btn-detail-ship-order"><svg class="ic"><use href="#i-truck"/></svg><span id="detail-ship-label">Duyệt đơn</span></button>
+              <button class="btn-outline-pill" id="btn-detail-print-order"><svg class="ic"><use href="#i-print"/></svg><span id="detail-print-label">In đơn</span></button>
+              <button class="btn-outline-pill" id="btn-detail-comments"><svg class="ic"><use href="#i-chat"/></svg><span>Bình luận chốt</span></button>
+              <button class="btn-outline-pill btn-detail-del" id="btn-detail-delete-order"><svg class="ic"><use href="#i-trash"/></svg><span>Xoá đơn</span></button>
             </div>
           </div>
+          <div class="md-empty">Chọn một đơn ở danh sách bên trái để xem chi tiết.</div>
         </div>
       </section>
 
-      <!-- ================== 5. TAB TÔI (SCREEN 6) & BẢNG QUẢN TRỊ ADMIN ================== -->
+      <!-- ================== 5. TÔI ================== -->
       <section class="view-section" id="view-settings">
         <header class="view-header">
           <div class="header-left">
-            <span class="header-sub">Tài khoản hệ thống &amp; Phân quyền</span>
+            <span class="header-sub">Tài khoản và cài đặt</span>
             <h1 class="header-title">Tôi</h1>
           </div>
         </header>
 
-        <!-- THẺ TÀI KHOẢN ĐANG ĐĂNG NHẬP -->
-        <div class="current-auth-user-banner" id="current-auth-user-card">
-          <div class="auth-user-left">
-            <div class="user-circle-avatar warm" id="current-auth-avatar" style="width:48px;height:48px;font-size:16px">AD</div>
-            <div>
-              <div class="auth-user-name-row">
-                <span class="auth-user-name" id="current-auth-username">admin</span>
-                <span class="role-pill-badge admin" id="current-auth-role-badge">Quản trị viên (Admin)</span>
-              </div>
-              <div class="auth-user-sub" id="current-auth-desc">Toàn quyền quản lý các tài khoản khác, khoá và đổi mật khẩu</div>
-              <div class="auth-user-access" id="current-auth-access" style="display:none"></div>
-            </div>
-          </div>
-          <div class="auth-user-actions">
-            <button type="button" class="btn-outline-pill" id="btn-open-change-own-pass" style="height:38px;padding:0 14px;font-size:13px">
-              🔑 Đổi mật khẩu
-            </button>
-          </div>
-        </div>
-
-        <!-- ================== BẢNG QUẢN LÝ TÀI KHOẢN DÀNH RIÊNG CHO ADMIN ================== -->
-        <div class="admin-accounts-panel" id="admin-accounts-panel" style="display:none">
-          <div class="admin-panel-header">
-            <div>
-              <div class="admin-panel-title-row">
-                <h2 class="admin-panel-title">🛡 Quản lý Tài khoản &amp; Phân quyền (Admin)</h2>
-                <span class="admin-count-pill" id="admin-users-count-badge">1 tài khoản</span>
-              </div>
-              <p class="admin-panel-sub">Quản lý tất cả các tài khoản đã đăng ký: Tạo mới, Khoá/Mở khoá tức thì và Đổi mật khẩu</p>
-            </div>
-            <div class="admin-panel-header-actions">
-              <div class="header-search-box admin-search-input-wrap">
-                <svg class="search-icon-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                <input type="text" id="input-admin-search-user" placeholder="Tìm tên tài khoản..." />
-              </div>
-              <button type="button" class="btn-orange-pill" id="btn-admin-open-create" style="height:40px;padding:0 16px;font-size:13.5px;white-space:nowrap">
-                + Tạo tài khoản mới
+        <div class="md-grid" id="settings-md">
+          <div class="settings-menu" id="settings-menu">
+            <div class="settings-menu-list">
+              <button type="button" class="setting-menu-row active" id="menu-row-account" data-pane="account">
+                <span class="setting-row-left"><span class="setting-peach-icon"><svg class="ic"><use href="#i-user"/></svg></span><span class="setting-row-title">Tài khoản</span></span>
+                <span class="setting-row-right"><svg class="ic"><use href="#i-next"/></svg></span>
+              </button>
+              <button type="button" class="setting-menu-row" id="menu-row-tiktok" data-pane="tiktok">
+                <span class="setting-row-left"><span class="setting-peach-icon"><svg class="ic"><use href="#i-chat"/></svg></span><span class="setting-row-title">Tài khoản TikTok</span></span>
+                <span class="setting-row-right"><svg class="ic"><use href="#i-next"/></svg></span>
+              </button>
+              <button type="button" class="setting-menu-row" id="menu-row-printer" data-pane="printer">
+                <span class="setting-row-left"><span class="setting-peach-icon"><svg class="ic"><use href="#i-print"/></svg></span><span class="setting-row-title">Máy in</span></span>
+                <span class="setting-row-right"><span class="badge-off" id="lbl-printer-conn-state">Chưa kết nối</span><svg class="ic"><use href="#i-next"/></svg></span>
+              </button>
+              <button type="button" class="setting-menu-row" id="menu-row-vtp" data-pane="vtp">
+                <span class="setting-row-left"><span class="setting-peach-icon"><svg class="ic"><use href="#i-truck"/></svg></span><span class="setting-row-title">Viettel Post</span></span>
+                <span class="setting-row-right"><span class="badge-off" id="lbl-vtp-conn-state">Chưa kết nối</span><svg class="ic"><use href="#i-next"/></svg></span>
+              </button>
+              <button type="button" class="setting-menu-row" id="menu-row-keywords" data-pane="keywords">
+                <span class="setting-row-left"><span class="setting-peach-icon"><svg class="ic"><use href="#i-tag"/></svg></span><span class="setting-row-title">Từ khoá chốt đơn</span></span>
+                <span class="setting-row-right"><svg class="ic"><use href="#i-next"/></svg></span>
+              </button>
+              <button type="button" class="setting-menu-row" id="menu-row-appearance" data-pane="appearance">
+                <span class="setting-row-left"><span class="setting-peach-icon"><svg class="ic"><use href="#i-palette"/></svg></span><span class="setting-row-title">Giao diện và màu sắc</span></span>
+                <span class="setting-row-right"><span class="badge-in-use" id="lbl-theme-summary"></span><svg class="ic"><use href="#i-next"/></svg></span>
+              </button>
+              <button type="button" class="setting-menu-row" id="menu-row-notify" data-pane="notify">
+                <span class="setting-row-left"><span class="setting-peach-icon"><svg class="ic"><use href="#i-bell"/></svg></span><span class="setting-row-title">Thông báo</span></span>
+                <span class="setting-row-right"><svg class="ic"><use href="#i-next"/></svg></span>
+              </button>
+              <button type="button" class="setting-menu-row" id="menu-row-sync" data-pane="sync">
+                <span class="setting-row-left"><span class="setting-peach-icon"><svg class="ic"><use href="#i-sync"/></svg></span><span class="setting-row-title">Đồng bộ Web và App</span></span>
+                <span class="setting-row-right"><span class="badge-in-use" id="lbl-sync-conn-state">Đang kết nối...</span><svg class="ic"><use href="#i-next"/></svg></span>
+              </button>
+              <button type="button" class="setting-menu-row" id="menu-row-help" data-pane="help">
+                <span class="setting-row-left"><span class="setting-peach-icon"><svg class="ic"><use href="#i-help"/></svg></span><span class="setting-row-title">Trợ giúp</span></span>
+                <span class="setting-row-right"><span class="support-badge" id="help-unread-badge" style="display:none"></span><svg class="ic"><use href="#i-next"/></svg></span>
+              </button>
+              <button type="button" class="setting-menu-row mobile-only" id="menu-row-admin" hidden>
+                <span class="setting-row-left"><span class="setting-peach-icon"><svg class="ic"><use href="#i-shield"/></svg></span><span class="setting-row-title">Quản trị</span></span>
+                <span class="setting-row-right"><svg class="ic"><use href="#i-next"/></svg></span>
               </button>
             </div>
+            <span class="app-version-text">Phiên bản 1.0.0</span>
           </div>
 
-          <div class="admin-users-list" id="admin-users-list">
-            <!-- Render động danh sách tất cả tài khoản từ /api/admin/users -->
-          </div>
-        </div>
+          <div class="settings-panes">
+            <button type="button" class="back-header-btn mobile-only" id="btn-settings-back"><svg class="ic"><use href="#i-back"/></svg>Tôi</button>
 
-        <!-- ================== HỖ TRỢ KHÁCH (CHAT) DÀNH CHO ADMIN ================== -->
-        <div class="admin-accounts-panel" id="admin-support-panel" style="display:none">
-          <div class="admin-panel-header">
-            <div>
-              <div class="admin-panel-title-row">
-                <h2 class="admin-panel-title">💬 Hỗ trợ khách</h2>
-                <span class="admin-count-pill" id="admin-support-unread">0 tin mới</span>
-              </div>
-              <p class="admin-panel-sub">Khách nhắn từ mục Trợ giúp trong app. Phiên tự đóng sau 24 giờ không có tin mới, tin nhắn lưu 30 ngày.</p>
-            </div>
-          </div>
-          <div class="support-admin-layout">
-            <div class="support-admin-list" id="support-admin-list"></div>
-            <div class="support-admin-thread" id="support-admin-thread">
-              <p class="support-empty">Chọn một khách để xem và trả lời.</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="settings-2col-grid">
-          <!-- Khối 1: Tài khoản TikTok (Screen 6) -->
-          <div class="settings-section-block">
-            <h2 class="settings-section-label">Tài khoản TikTok</h2>
-            <div class="settings-white-group-card">
-              <div class="accounts-cards-list" id="accounts-cards-list">
-                <!-- Render danh sách tài khoản -->
-              </div>
-              <button class="btn-add-account-row" id="btn-add-tiktok-account">
-                <span class="dashed-plus-circle">+</span>
-                <span class="add-acc-label">Thêm tài khoản</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Khối 2: Cài đặt hệ thống (Screen 6) -->
-          <div class="settings-section-block">
-            <h2 class="settings-section-label">Cài đặt</h2>
-            <div class="settings-white-group-card">
-              <div class="settings-menu-list">
-                <div class="setting-menu-row" id="menu-row-printer">
-                  <div class="setting-row-left">
-                    <span class="setting-peach-icon">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c25e1a" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-                    </span>
-                    <span class="setting-row-title">Máy in</span>
-                  </div>
-                  <div class="setting-row-right">
-                    <span class="badge-in-use" id="lbl-printer-conn-state">Đã kết nối</span>
-                    <span class="row-chevron">›</span>
+            <!-- Tài khoản -->
+            <div class="settings-pane active" data-pane-id="account">
+              <div class="settings-pane-card" id="current-auth-user-card">
+                <div class="auth-user-left">
+                  <div class="user-circle-avatar warm" id="current-auth-avatar"></div>
+                  <div>
+                    <div class="auth-user-name-row">
+                      <span class="auth-user-name" id="current-auth-username"></span>
+                      <span class="role-pill-badge user" id="current-auth-role-badge">Thành viên</span>
+                    </div>
+                    <div class="auth-user-sub" id="current-auth-desc"></div>
                   </div>
                 </div>
-
-                <div class="setting-menu-row" id="menu-row-vtp">
-                  <div class="setting-row-left">
-                    <span class="setting-peach-icon">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c25e1a" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
-                    </span>
-                    <span class="setting-row-title">Kết nối Viettel Post</span>
-                  </div>
-                  <div class="setting-row-right">
-                    <span class="badge-off" id="lbl-vtp-conn-state">Chưa kết nối</span>
-                    <span class="row-chevron">›</span>
-                  </div>
-                </div>
-
-                <div class="setting-menu-row" id="menu-row-keywords">
-                  <div class="setting-row-left">
-                    <span class="setting-peach-icon">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c25e1a" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
-                    </span>
-                    <span class="setting-row-title">Từ khoá chốt đơn</span>
-                  </div>
-                  <div class="setting-row-right">
-                    <span class="row-chevron">›</span>
-                  </div>
-                </div>
-
-                <div class="setting-menu-row" id="menu-row-notify">
-                  <div class="setting-row-left">
-                    <span class="setting-peach-icon">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c25e1a" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
-                    </span>
-                    <span class="setting-row-title">Thông báo</span>
-                  </div>
-                  <div class="setting-row-right">
-                    <span class="row-chevron">›</span>
-                  </div>
-                </div>
-
-                <div class="setting-menu-row" id="menu-row-sync">
-                  <div class="setting-row-left">
-                    <span class="setting-peach-icon">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c25e1a" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-                    </span>
-                    <span class="setting-row-title">Đồng bộ Web &amp; App (IPA)</span>
-                  </div>
-                  <div class="setting-row-right">
-                    <span class="badge-in-use" id="lbl-sync-conn-state">Đang đồng bộ</span>
-                    <span class="row-chevron">›</span>
-                  </div>
-                </div>
-
-                <div class="setting-menu-row" id="menu-row-help">
-                  <div class="setting-row-left">
-                    <span class="setting-peach-icon">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c25e1a" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-                    </span>
-                    <span class="setting-row-title">Trợ giúp</span>
-                  </div>
-                  <div class="setting-row-right">
-                    <span class="support-badge" id="help-unread-badge" style="display:none"></span>
-                    <span class="row-chevron">›</span>
-                  </div>
+                <div class="auth-user-access" id="current-auth-access" style="display:none"></div>
+                <div class="btn-row">
+                  <button type="button" class="btn-outline-pill" id="btn-open-change-own-pass"><svg class="ic"><use href="#i-key"/></svg>Đổi mật khẩu</button>
+                  <button type="button" class="btn-logout-card" id="btn-logout-app"><svg class="ic"><use href="#i-out"/></svg><span>Đăng xuất</span></button>
                 </div>
               </div>
             </div>
+
+            <!-- Tài khoản TikTok -->
+            <div class="settings-pane" data-pane-id="tiktok">
+              <div class="settings-pane-card">
+                <h2 class="pane-title">Tài khoản TikTok</h2>
+                <div class="accounts-cards-list" id="accounts-cards-list"></div>
+                <button class="btn-outline-pill" id="btn-add-tiktok-account">+ Thêm tài khoản</button>
+              </div>
+            </div>
+
+            <!-- Máy in -->
+            <div class="settings-pane" data-pane-id="printer">
+              <div class="settings-pane-card">
+                <h2 class="pane-title">Máy in tem nhiệt</h2>
+                <p class="form-hint">Kết nối máy in hoá đơn Xprinter Q80BS (80mm) qua Bluetooth hoặc cáp USB.</p>
+                <button class="btn-orange-pill" id="btn-modal-connect-bt">Quét và kết nối Bluetooth</button>
+                <div class="form-grid-2col">
+                  <button class="btn-outline-pill" id="btn-modal-connect-usb">Kết nối cáp USB</button>
+                  <button class="btn-outline-pill" id="btn-modal-test-print">In thử tem</button>
+                </div>
+                <div class="form-field-group">
+                  <label for="cfg-paper-select">Khổ giấy</label>
+                  <select class="form-field-input" id="cfg-paper-select">
+                    <option value="80">80mm (chuẩn Xprinter Q80BS)</option>
+                    <option value="58">58mm (khổ nhỏ)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="settings-pane-card">
+                <div class="vtp-export-toolbar"><h2 class="pane-title">Tem vừa in</h2><button type="button" class="link-btn" id="btn-clear-tray">Xoá khay</button></div>
+                <div class="paper-tray" id="printer-paper-tray"><p class="form-hint" id="tray-empty-hint">Tem in sẽ hiện ở đây khi in</p></div>
+              </div>
+            </div>
+
+            <!-- Viettel Post -->
+            <div class="settings-pane" data-pane-id="vtp">
+              <div class="settings-pane-card" id="vtp-connect-off">
+                <h2 class="pane-title">Kết nối Viettel Post</h2>
+                <p class="form-hint">Kết nối một lần để tạo vận đơn, in tem và tự cập nhật trạng thái giao ngay trong app. Chưa kết nối thì vẫn xuất Excel như cũ.</p>
+                <ol class="vtp-steps">
+                  <li>Mở <b>viettelpost.vn</b> › <b>Cấu hình tài khoản</b> › <b>Thêm mới token</b>.</li>
+                  <li>Bấm sao chép token (Viettel Post gửi mã OTP).</li>
+                  <li>Dán vào ô dưới rồi bấm <b>Kết nối</b>.</li>
+                </ol>
+                <div class="form-field-group">
+                  <label for="vtp-token-input">Token Viettel Post</label>
+                  <input type="password" class="form-field-input" id="vtp-token-input" autocomplete="off" spellcheck="false" placeholder="Dán token vào đây" />
+                  <p class="field-error" id="vtp-connect-error" hidden></p>
+                  <p class="ship-pay-hint">Token chỉ lưu ở máy chủ của shop, không hiện lại trên app.</p>
+                </div>
+                <div class="modal-actions"><button type="button" class="btn-orange-pill" id="btn-vtp-connect">Kết nối</button></div>
+              </div>
+
+              <div class="settings-pane-card" id="vtp-connect-on" hidden>
+                <h2 class="pane-title">Viettel Post</h2>
+                <div class="vtp-connected-card"><span class="vtp-ok-dot"><svg class="ic"><use href="#i-check"/></svg></span><div><b>Đã kết nối</b><div id="vtp-conn-phone"></div></div></div>
+                <div class="form-field-group">
+                  <label for="vtp-sender-select">Điểm lấy hàng</label>
+                  <select class="form-field-input" id="vtp-sender-select"><option value="">Đang tải…</option></select>
+                  <p class="ship-pay-hint" id="vtp-sender-hint">Bưu tá đến địa chỉ này lấy hàng.</p>
+                </div>
+                <div class="form-field-group">
+                  <label for="vtp-label-size">Khổ tem khi in</label>
+                  <select class="form-field-input" id="vtp-label-size"></select>
+                </div>
+                <div class="form-field-group">
+                  <label for="vtp-hook-url">Địa chỉ nhận trạng thái (webhook)</label>
+                  <div class="vtp-hook-row">
+                    <input type="text" class="form-field-input" id="vtp-hook-url" readonly />
+                    <button type="button" class="btn-outline-pill" id="btn-vtp-hook-copy">Sao chép</button>
+                  </div>
+                  <p class="ship-pay-hint" id="vtp-hook-hint"></p>
+                </div>
+                <div class="btn-row"><button type="button" class="btn-outline-pill btn-detail-del" id="btn-vtp-disconnect">Ngắt kết nối</button></div>
+              </div>
+            </div>
+
+            <!-- Từ khoá chốt đơn -->
+            <div class="settings-pane" data-pane-id="keywords">
+              <div class="settings-pane-card">
+                <h2 class="pane-title">Từ khoá chốt đơn</h2>
+                <div class="form-field-group">
+                  <label for="cfg-kw-triggers">Từ khoá nhận diện chốt đơn</label>
+                  <input type="text" class="form-field-input" id="cfg-kw-triggers" placeholder="chốt, lấy" />
+                  <p class="form-hint">Cách nhau bằng dấu phẩy. Dùng cho bộ lọc “Chốt đơn” ở tab Bình luận.</p>
+                </div>
+                <label class="switch-row">
+                  <span><b>Tự động in tem khi khách chốt</b><small>Máy in xuất tem ngay khi có bình luận chốt</small></span>
+                  <input type="checkbox" class="chk-custom" id="cfg-kw-autoprint" checked />
+                </label>
+                <div class="modal-actions"><button type="button" class="btn-orange-pill" id="btn-save-keyword-setup">Lưu cài đặt</button></div>
+              </div>
+            </div>
+
+            <!-- Thông báo -->
+            <div class="settings-pane" data-pane-id="appearance">
+              <div class="settings-pane-card">
+                <h2 class="pane-title">Giao diện và màu sắc</h2>
+                <p class="form-hint">Đổi là thấy ngay. Lựa chọn được lưu trên trình duyệt này.</p>
+                <fieldset class="theme-group">
+                  <legend>Nền</legend>
+                  <div class="segmented-control-pills">
+                    <button type="button" class="segment-pill-btn" data-theme-mode="auto" aria-pressed="false">Theo máy</button>
+                    <button type="button" class="segment-pill-btn" data-theme-mode="light" aria-pressed="false">Sáng</button>
+                    <button type="button" class="segment-pill-btn" data-theme-mode="dark" aria-pressed="false">Tối</button>
+                  </div>
+                </fieldset>
+                <fieldset class="theme-group">
+                  <legend>Màu chủ đạo</legend>
+                  <div class="theme-swatches">
+                    <button type="button" class="theme-swatch" data-theme-accent="orange" aria-pressed="false" style="--sw:#bf4f0c"><i><svg class="ic"><use href="#i-check"/></svg></i>Cam</button>
+                    <button type="button" class="theme-swatch" data-theme-accent="red" aria-pressed="false" style="--sw:#c0271f"><i><svg class="ic"><use href="#i-check"/></svg></i>Đỏ</button>
+                    <button type="button" class="theme-swatch" data-theme-accent="pink" aria-pressed="false" style="--sw:#c2255c"><i><svg class="ic"><use href="#i-check"/></svg></i>Hồng</button>
+                    <button type="button" class="theme-swatch" data-theme-accent="purple" aria-pressed="false" style="--sw:#6d3fc4"><i><svg class="ic"><use href="#i-check"/></svg></i>Tím</button>
+                    <button type="button" class="theme-swatch" data-theme-accent="blue" aria-pressed="false" style="--sw:#1d5fd0"><i><svg class="ic"><use href="#i-check"/></svg></i>Xanh dương</button>
+                    <button type="button" class="theme-swatch" data-theme-accent="teal" aria-pressed="false" style="--sw:#0b7a75"><i><svg class="ic"><use href="#i-check"/></svg></i>Xanh ngọc</button>
+                    <button type="button" class="theme-swatch" data-theme-accent="green" aria-pressed="false" style="--sw:#1f7a35"><i><svg class="ic"><use href="#i-check"/></svg></i>Xanh lá</button>
+                    <button type="button" class="theme-swatch" data-theme-accent="mono" aria-pressed="false" style="--sw:#3a3835"><i><svg class="ic"><use href="#i-check"/></svg></i>Đen trắng</button>
+                  </div>
+                </fieldset>
+                <div class="btn-row"><button type="button" class="btn-outline-pill" id="btn-theme-reset">Về mặc định</button></div>
+              </div>
+            </div>
+
+            <div class="settings-pane" data-pane-id="notify">
+              <div class="settings-pane-card">
+                <h2 class="pane-title">Thông báo và giọng nói</h2>
+                <label class="switch-row">
+                  <span><b>Chuông khi có đơn chốt</b><small>Phát tiếng chuông khi khách bình luận chốt</small></span>
+                  <input type="checkbox" class="chk-custom" id="cfg-notify-sound" checked />
+                </label>
+                <div class="btn-row"><button type="button" class="btn-outline-pill" id="btn-test-chime">Nghe thử tiếng chuông</button></div>
+                <label class="switch-row">
+                  <span><b>Đọc đơn bằng giọng nói tiếng Việt</b><small>Tự đọc to, ví dụ “Linh Nguyễn chốt mã 150”</small></span>
+                  <input type="checkbox" class="chk-custom" id="cfg-notify-voice" />
+                </label>
+                <div class="btn-row"><button type="button" class="btn-outline-pill" id="btn-test-voice">Thử giọng đọc</button></div>
+              </div>
+            </div>
+
+            <!-- Đồng bộ -->
+            <div class="settings-pane" data-pane-id="sync">
+              <div class="settings-pane-card">
+                <h2 class="pane-title">Đồng bộ Web và App</h2>
+                <p class="form-hint">Web và điện thoại chỉ đồng bộ khi cùng <b>một server</b> và cùng <b>một tài khoản</b>.</p>
+                <div class="sync-status-card">
+                  <div><b id="modal-sync-status-title">Đang kết nối máy chủ</b><div id="modal-sync-devices-sub"></div></div>
+                  <button type="button" class="btn-outline-pill" id="btn-sync-pull-now">Đồng bộ ngay</button>
+                </div>
+                <div class="sync-phone-guide" id="sync-phone-guide">
+                  <div class="sync-guide-row"><span>Tài khoản trên máy này</span><b id="sync-guide-account">—</b></div>
+                  <div class="sync-guide-row"><span>Server đang dùng</span><b id="sync-guide-server">—</b></div>
+                  <div id="sync-guide-lan" style="display:none">
+                    <div class="sync-guide-note"><b>localhost</b> chỉ mở được trên máy tính này. Trên điện thoại (cùng Wi-Fi), hãy đăng nhập server:</div>
+                    <div class="sync-guide-url" id="sync-guide-lan-urls"></div>
+                  </div>
+                </div>
+                <div class="form-field-group">
+                  <label for="input-sync-server-url">Địa chỉ máy chủ</label>
+                  <input type="text" class="form-field-input" id="input-sync-server-url" placeholder="https://ten-mien-cua-ban.vn" />
+                  <p class="form-hint">Để trống nếu đang dùng trực tiếp trên trình duyệt. Chỉ nhập khi cần nối tới một máy chủ khác.</p>
+                </div>
+                <div class="modal-actions"><button type="button" class="btn-orange-pill" id="btn-save-sync-url">Lưu và kết nối</button></div>
+              </div>
+            </div>
+
+            <!-- Trợ giúp -->
+            <div class="settings-pane" data-pane-id="help">
+              <div class="settings-pane-card">
+                <h2 class="pane-title">Chat với quản trị viên</h2>
+                <p class="form-hint">Phiên tự đóng sau 24 giờ không có tin mới. Tin nhắn lưu 30 ngày.</p>
+                <div class="support-toolbar" id="support-toolbar">
+                  <span class="support-toolbar-label">Các phiên chat</span>
+                  <button type="button" class="btn-orange-pill" id="support-new-session">+ Phiên mới</button>
+                </div>
+                <div class="support-cards" id="support-cards"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================== 6. QUẢN TRỊ (chỉ Admin) ================== -->
+      <section class="view-section" id="view-admin">
+        <header class="view-header">
+          <div class="header-left">
+            <span class="header-sub">Chỉ tài khoản Admin thấy trang này</span>
+            <h1 class="header-title">Quản trị</h1>
+          </div>
+          <div class="segmented-control-pills">
+            <button type="button" class="segment-pill-btn active" data-admin-tab="users">Tài khoản · <span id="admin-tab-users-count">0</span></button>
+            <button type="button" class="segment-pill-btn" data-admin-tab="support">Hỗ trợ khách · <span id="admin-support-unread">0 tin mới</span></button>
+          </div>
+        </header>
+
+        <div id="admin-tab-users">
+          <div class="admin-accounts-panel" id="admin-accounts-panel" style="display:none">
+            <div class="admin-panel-header">
+              <span class="admin-count-pill" id="admin-users-count-badge">0 tài khoản</span>
+              <div class="admin-panel-header-actions">
+                <div class="header-search-box admin-search-input-wrap">
+                  <svg class="ic search-icon-svg"><use href="#i-search"/></svg>
+                  <input type="search" id="input-admin-search-user" placeholder="Tìm tên tài khoản" aria-label="Tìm tài khoản" />
+                </div>
+                <button type="button" class="btn-orange-pill" id="btn-admin-open-create">+ Tạo tài khoản</button>
+              </div>
+            </div>
+            <div class="admin-users-list" id="admin-users-list"></div>
           </div>
         </div>
 
-        <div class="settings-bottom-bar">
-          <button class="btn-logout-card" id="btn-logout-app">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-            <span>Đăng xuất</span>
-          </button>
-          <span class="app-version-text">Phiên bản 1.0.0</span>
+        <div id="admin-tab-support" hidden>
+          <div class="admin-accounts-panel" id="admin-support-panel" style="display:none">
+            <div class="admin-panel-header"><p class="admin-panel-sub">Khách nhắn từ mục Trợ giúp. Phiên tự đóng sau 24 giờ không có tin mới, tin nhắn lưu 30 ngày.</p></div>
+            <div class="support-admin-layout">
+              <div class="support-admin-list" id="support-admin-list"></div>
+              <div class="support-admin-thread" id="support-admin-thread"><p class="support-empty">Chọn một khách để xem và trả lời.</p></div>
+            </div>
+          </div>
         </div>
       </section>
 
     </main>
-
   </div>
 
-  <!-- ================== THANH ĐIỀU HƯỚNG DƯỚI ĐÁY CHO MOBILE (BOTTOM NAV - CHUẨN SCREEN 1-6) ================== -->
+  <!-- ================== THANH DƯỚI (điện thoại) ================== -->
   <nav class="app-bottom-nav" aria-label="Điều hướng điện thoại">
-    <div class="bottom-nav-item" data-tab="sales">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="4" y1="20" x2="20" y2="20"></line>
-        <line x1="7" y1="20" x2="7" y2="12"></line>
-        <line x1="12" y1="20" x2="12" y2="6"></line>
-        <line x1="17" y1="20" x2="17" y2="15"></line>
-      </svg>
-      <span>Doanh số</span>
-    </div>
-    <div class="bottom-nav-item active" data-tab="live">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
-        <line x1="9" y1="10" x2="15" y2="10"></line>
-        <line x1="9" y1="14" x2="13" y2="14"></line>
-      </svg>
-      <span>Bình luận</span>
-    </div>
-    <div class="bottom-nav-item" data-tab="customers">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-        <circle cx="9" cy="7" r="4"></circle>
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-      </svg>
-      <span>Khách hàng</span>
-    </div>
-    <div class="bottom-nav-item" data-tab="orders">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
-        <line x1="3" y1="6" x2="21" y2="6"></line>
-        <path d="M16 10a4 4 0 0 1-8 0"></path>
-      </svg>
-      <span>Đơn hàng</span>
-    </div>
-    <div class="bottom-nav-item" data-tab="settings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-        <circle cx="12" cy="7" r="4"></circle>
-      </svg>
-      <span>Tôi</span>
-    </div>
+    <button type="button" class="bottom-nav-item" data-tab="sales"><svg class="ic"><use href="#i-chart"/></svg><span>Doanh số</span></button>
+    <button type="button" class="bottom-nav-item active" data-tab="live"><svg class="ic"><use href="#i-chat"/></svg><span>Bình luận</span></button>
+    <button type="button" class="bottom-nav-item" data-tab="customers"><svg class="ic"><use href="#i-users"/></svg><span>Khách hàng</span></button>
+    <button type="button" class="bottom-nav-item" data-tab="orders"><svg class="ic"><use href="#i-bag"/></svg><span>Đơn hàng</span></button>
+    <button type="button" class="bottom-nav-item" data-tab="settings"><svg class="ic"><use href="#i-user"/></svg><span>Tôi</span></button>
   </nav>
 
-  <!-- ================== MODAL 4: LIVE MỚI ================== -->
+  <!-- ================== LIVE MỚI ================== -->
   <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-new-live">
     <div class="modal-content-card">
       <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
       <h2 class="modal-title-main">Live mới</h2>
       <p class="modal-subtitle-text">Thêm một live để theo dõi. Các live đang theo dõi vẫn chạy tiếp.</p>
-
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <span style="font-size:14px;font-weight:700">ID đã lưu</span>
-        <span style="font-size:12px;color:var(--text-sub)">Bấm để bắt đầu ngay</span>
-      </div>
-
-      <div class="saved-live-ids-list" id="saved-live-ids-container">
-        <!-- Render danh sách tài khoản đã lưu -->
-      </div>
-
-      <div class="divider-with-text">
-        <span>hoặc nhập ID mới</span>
-      </div>
-
+      <div class="vtp-export-toolbar"><span>ID đã lưu</span><small>Bấm để bắt đầu ngay</small></div>
+      <div class="list-box" id="saved-live-ids-container"></div>
+      <div class="divider-with-text"><span>hoặc nhập ID mới</span></div>
       <div class="form-field-group">
-        <label>ID TikTok Live <span class="req">*</span></label>
+        <label for="input-new-live-id">ID TikTok Live <span class="req">*</span></label>
         <div class="input-with-action">
-          <input type="text" class="form-field-input" id="input-new-live-id" placeholder="@ ten.tai.khoan" style="width:100%" />
+          <input type="text" class="form-field-input" id="input-new-live-id" placeholder="@ten.tai.khoan" />
           <button type="button" class="btn-inside-paste" id="btn-paste-live-id">Dán</button>
         </div>
-        <small style="color:var(--text-sub);font-size:12px;margin-top:4px">Nhập tên tài khoản đang live hoặc dán link phiên live.</small>
+        <p class="form-hint">Nhập tên tài khoản đang live hoặc dán link phiên live.</p>
       </div>
-
-      <label class="checkbox-remember-row">
-        <div>
-          <div style="font-weight:600;font-size:13.5px">Lưu ID này cho lần sau</div>
-          <div style="font-size:12px;color:var(--text-sub)">Lần sau chỉ cần bấm vào ID đã lưu</div>
-        </div>
+      <label class="switch-row">
+        <span><b>Lưu ID này cho lần sau</b><small>Lần sau chỉ cần bấm vào ID đã lưu</small></span>
         <input type="checkbox" class="chk-custom" id="chk-remember-live-id" checked />
       </label>
-
-      <button type="button" class="btn-orange-pill" style="width:100%;height:46px" id="btn-confirm-start-live">
-        Theo dõi live này
-      </button>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
+        <button type="button" class="btn-orange-pill" id="btn-confirm-start-live">Theo dõi live này</button>
+      </div>
     </div>
   </dialog>
 
-  <!-- ================== MODAL 11: XEM LẠI THỜI ĐIỂM (SCREEN 3) ================== -->
+  <!-- ================== CHỌN THỜI ĐIỂM ================== -->
   <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-filter-time">
     <div class="modal-content-card">
       <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main" style="margin-bottom:18px">Xem lại thời điểm</h2>
-
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
+      <h2 class="modal-title-main">Chọn thời điểm</h2>
       <div class="quick-time-chips-grid">
         <button class="chip-pill active" data-time-chip="today">Hôm nay</button>
         <button class="chip-pill" data-time-chip="yesterday">Hôm qua</button>
@@ -1049,104 +814,69 @@
         <button class="chip-pill" data-time-chip="thismonth">Tháng này</button>
         <button class="chip-pill" data-time-chip="lastmonth">Tháng trước</button>
       </div>
-
       <div class="calendar-widget-box">
         <div class="cal-month-header">
-          <span id="cal-month-label">Tháng 10, 2026</span>
-          <div style="display:flex;align-items:center;gap:14px">
-            <button class="cal-nav-arrow" id="btn-cal-prev">‹</button>
-            <button class="cal-nav-arrow" id="btn-cal-next">›</button>
+          <span id="cal-month-label"></span>
+          <div class="btn-row">
+            <button class="cal-nav-arrow" id="btn-cal-prev" aria-label="Tháng trước">‹</button>
+            <button class="cal-nav-arrow" id="btn-cal-next" aria-label="Tháng sau">›</button>
           </div>
         </div>
         <table class="cal-grid-table">
-          <thead>
-            <tr><th>T2</th><th>T3</th><th>T4</th><th>T5</th><th>T6</th><th>T7</th><th>CN</th></tr>
-          </thead>
-          <tbody id="cal-grid-tbody">
-            <tr><td class="muted" data-cal-day="28"><span>28</span></td><td class="muted" data-cal-day="29"><span>29</span></td><td class="muted" data-cal-day="30"><span>30</span></td><td data-cal-day="1"><span>1</span></td><td data-cal-day="2"><span>2</span></td><td data-cal-day="3"><span>3</span></td><td data-cal-day="4"><span>4</span></td></tr>
-            <tr><td data-cal-day="5"><span>5</span></td><td data-cal-day="6"><span>6</span></td><td data-cal-day="7"><span>7</span></td><td data-cal-day="8"><span>8</span></td><td data-cal-day="9"><span>9</span></td><td data-cal-day="10"><span>10</span></td><td data-cal-day="11"><span>11</span></td></tr>
-            <tr><td data-cal-day="12"><span>12</span></td><td data-cal-day="13"><span>13</span></td><td data-cal-day="14"><span>14</span></td><td data-cal-day="15"><span>15</span></td><td data-cal-day="16"><span>16</span></td><td data-cal-day="17"><span>17</span></td><td data-cal-day="18"><span>18</span></td></tr>
-            <tr><td data-cal-day="19"><span>19</span></td><td data-cal-day="20"><span>20</span></td><td data-cal-day="21"><span>21</span></td><td data-cal-day="22"><span>22</span></td><td data-cal-day="23"><span>23</span></td><td data-cal-day="24"><span>24</span></td><td class="active" data-cal-day="25"><span>25</span></td></tr>
-            <tr><td class="muted" data-cal-day="26"><span>26</span></td><td class="muted" data-cal-day="27"><span>27</span></td><td class="muted" data-cal-day="28"><span>28</span></td><td class="muted" data-cal-day="29"><span>29</span></td><td class="muted" data-cal-day="30"><span>30</span></td><td class="muted" data-cal-day="31"><span>31</span></td><td class="muted" data-cal-day="1"><span>1</span></td></tr>
-          </tbody>
+          <thead><tr><th>T2</th><th>T3</th><th>T4</th><th>T5</th><th>T6</th><th>T7</th><th>CN</th></tr></thead>
+          <tbody id="cal-grid-tbody"></tbody>
         </table>
       </div>
-
-      <div style="font-size:14px;font-weight:700;margin-top:16px">Khung giờ trong ngày</div>
-      <div class="time-range-inputs-row">
-        <div class="form-field-group" style="margin-bottom:0">
-          <label>Từ</label>
-          <input type="text" class="form-field-input time-box-input" value="00:00" id="input-time-from" />
-        </div>
-        <div class="form-field-group" style="margin-bottom:0">
-          <label>Đến</label>
-          <input type="text" class="form-field-input time-box-input" value="23:59" id="input-time-to" />
+      <div id="time-range-block">
+        <div class="form-section-title">Khung giờ trong ngày</div>
+        <div class="time-range-inputs-row">
+          <div class="form-field-group"><label for="input-time-from">Từ</label><input type="text" class="form-field-input" value="00:00" id="input-time-from" /></div>
+          <div class="form-field-group"><label for="input-time-to">Đến</label><input type="text" class="form-field-input" value="23:59" id="input-time-to" /></div>
         </div>
       </div>
-
-      <button type="button" class="btn-orange-pill" style="width:100%;height:48px;font-size:15px" id="btn-apply-time-filter">
-        Áp dụng
-      </button>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
+        <button type="button" class="btn-orange-pill" id="btn-apply-time-filter">Áp dụng</button>
+      </div>
     </div>
   </dialog>
 
-  <!-- ================== MODAL 2: SỬA ĐỊA CHỈ ================== -->
+  <!-- ================== SỬA ĐỊA CHỈ ================== -->
   <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-edit-address">
     <div class="modal-content-card">
       <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
       <h2 class="modal-title-main">Sửa địa chỉ</h2>
       <p class="modal-subtitle-text" id="edit-addr-subtitle"></p>
-
-      <div class="form-section-title">● Người nhận</div>
+      <div class="form-section-title">Người nhận</div>
       <div class="form-grid-2col">
-        <div class="form-field-group">
-          <label>Số điện thoại</label>
-          <input type="tel" class="form-field-input" id="edit-addr-input-phone" placeholder="Số điện thoại người nhận" />
-        </div>
-        <div class="form-field-group">
-          <label>Họ tên <span class="req">*</span></label>
-          <input type="text" class="form-field-input" id="edit-addr-input-name" placeholder="Họ tên người nhận" />
-        </div>
+        <div class="form-field-group"><label for="edit-addr-input-phone">Số điện thoại</label><input type="tel" class="form-field-input" id="edit-addr-input-phone" placeholder="Số điện thoại người nhận" autocomplete="off" /></div>
+        <div class="form-field-group"><label for="edit-addr-input-name">Họ tên <span class="req">*</span></label><input type="text" class="form-field-input" id="edit-addr-input-name" placeholder="Họ tên người nhận" autocomplete="off" /></div>
       </div>
-
-      <div class="form-section-title">● Địa chỉ nhận hàng</div>
-      <div class="form-field-group">
-        <label>Địa chỉ</label>
-        <input type="text" class="form-field-input" id="edit-addr-input-street" placeholder="Số nhà, tên đường" />
-      </div>
+      <div class="form-section-title">Địa chỉ nhận hàng</div>
+      <div class="form-field-group"><label for="edit-addr-input-street">Địa chỉ</label><input type="text" class="form-field-input" id="edit-addr-input-street" placeholder="Số nhà, tên đường" autocomplete="off" /></div>
       <div class="form-field-group">
         <label>Phường / Quận / Tỉnh <span class="req">*</span></label>
-        <div class="form-field-input form-select-trigger addr-trigger" id="edit-addr-trigger-area">
-          <span id="edit-addr-display-area">Chọn khu vực</span>
-          <span style="font-size:10px;color:var(--text-sub)">⌵</span>
-        </div>
+        <button type="button" class="form-field-input form-select-trigger" id="edit-addr-trigger-area"><span id="edit-addr-display-area">Chọn khu vực</span><svg class="ic"><use href="#i-next"/></svg></button>
       </div>
-
-      <div class="form-field-group">
-        <label>Ghi chú giao hàng</label>
-        <input type="text" class="form-field-input" id="edit-addr-input-note" placeholder="Ví dụ: gọi trước khi giao" />
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:24px">
+      <div class="form-field-group"><label for="edit-addr-input-note">Ghi chú giao hàng</label><input type="text" class="form-field-input" id="edit-addr-input-note" placeholder="Ví dụ: gọi trước khi giao" /></div>
+      <div class="modal-actions">
         <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
         <button type="button" class="btn-orange-pill" id="btn-save-address-changes">Lưu thay đổi</button>
       </div>
     </div>
   </dialog>
 
-  <!-- ================== MODAL 3: CHỌN KHU VỰC ================== -->
+  <!-- ================== KHU VỰC NHẬN HÀNG ================== -->
   <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-select-area">
     <div class="modal-content-card">
       <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
       <h2 class="modal-title-main">Khu vực nhận hàng</h2>
-
       <div class="area-mode-toggle" role="group" aria-label="Loại địa chỉ">
         <button type="button" data-area-mode="new" class="active">Địa chỉ mới</button>
         <button type="button" data-area-mode="old">Địa chỉ cũ</button>
       </div>
-
       <div class="form-field-group">
         <label for="area-input-province">Tỉnh / Thành phố</label>
         <select class="form-field-input" id="area-input-province" data-combo="Gõ để tìm tỉnh / thành, ví dụ: Hà Nội"></select>
@@ -1158,70 +888,58 @@
       <div class="form-field-group">
         <label for="area-input-ward-search">Phường / Xã</label>
         <input type="search" class="form-field-input" id="area-input-ward-search" placeholder="Gõ để tìm, ví dụ: Tân Định" autocomplete="off" />
-        <select class="form-field-input area-ward-select" id="area-input-ward" size="6"></select>
+        <select class="form-field-input area-ward-select" id="area-input-ward" size="6" aria-label="Danh sách phường / xã"></select>
       </div>
       <p class="area-old-hint" id="area-old-hint" hidden></p>
       <p class="area-equiv-hint" id="area-equiv-hint" hidden></p>
-
-      <div class="area-selected-summary">
-        Địa chỉ đã nhập:
-        <b id="area-summary-text">Chưa nhập</b>
+      <div class="area-selected-summary">Địa chỉ đã chọn: <b id="area-summary-text">Chưa chọn đủ</b></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
+        <button type="button" class="btn-orange-pill" id="btn-confirm-area">Xác nhận</button>
       </div>
-
-      <button type="button" class="btn-orange-pill" style="width:100%;height:44px" id="btn-confirm-area">
-        Xác nhận
-      </button>
     </div>
   </dialog>
 
-  <!-- ================== BÌNH LUẬN CHỐT ĐƠN của một đơn (giống app điện thoại) ================== -->
+  <!-- ================== BÌNH LUẬN CHỐT ĐƠN ================== -->
   <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-order-comments">
     <div class="modal-content-card oc-card">
       <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
       <h2 class="modal-title-main">Bình luận chốt đơn</h2>
       <p class="modal-subtitle-text" id="oc-subtitle"></p>
       <div class="oc-cust">
         <div class="oc-cust-top">
           <span class="oc-avatar" id="oc-avatar"></span>
-          <div class="oc-cust-info">
-            <b id="oc-name"></b>
-            <small id="oc-uid"></small>
-          </div>
+          <div class="oc-cust-info"><b id="oc-name"></b><small id="oc-uid"></small></div>
           <span class="oc-count" id="oc-count"></span>
         </div>
         <div class="oc-value"><small>Giá trị đơn</small><b id="oc-value"></b></div>
       </div>
       <div class="oc-head"><b>Các bình luận đã chốt</b><span>Theo thời gian</span></div>
       <div class="oc-list" id="oc-list"></div>
-      <button type="button" class="btn-orange-pill oc-detail-btn" id="btn-oc-detail">Xem chi tiết đơn</button>
+      <div class="modal-actions"><button type="button" class="btn-orange-pill" id="btn-oc-detail">Xem chi tiết đơn</button></div>
     </div>
   </dialog>
 
-  <!-- ================== GIAO HÀNG: gộp đơn chờ gửi của một khách ================== -->
+  <!-- ================== DUYỆT ĐƠN ================== -->
   <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-ship">
     <div class="modal-content-card">
       <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
       <h2 class="modal-title-main">Duyệt đơn</h2>
-
-      <div class="ship-orders-box" id="ship-orders-list"></div>
-      <p class="ship-merge-note" id="ship-merge-note"></p>
+      <div class="list-box" id="ship-orders-list"></div>
+      <p class="ship-pay-hint" id="ship-merge-note"></p>
 
       <div class="form-section-title">Khách thanh toán</div>
-      <div class="ship-seg ship-seg-wrap" role="radiogroup" aria-label="Khách thanh toán">
+      <div class="ship-seg" role="radiogroup" aria-label="Khách thanh toán">
         <button type="button" class="ship-seg-btn active" data-ship-pay="cod" role="radio" aria-checked="true">Thu tiền hàng</button>
         <button type="button" class="ship-seg-btn" data-ship-pay="paid" role="radio" aria-checked="false">Đã bank đủ</button>
       </div>
-
-      <div class="form-grid-2col ship-money-row">
-        <div class="form-field-group">
-          <label for="ship-deposit">Khách đã cọc / đã chuyển (trừ vào COD)</label>
-          <input type="number" class="form-field-input" id="ship-deposit" min="0" step="1000" placeholder="0" inputmode="numeric" />
-        </div>
+      <div class="form-field-group">
+        <label for="ship-deposit">Khách đã cọc / đã chuyển (trừ vào COD)</label>
+        <input type="number" class="form-field-input" id="ship-deposit" min="0" step="1000" placeholder="0" inputmode="numeric" />
       </div>
-
-      <div class="form-grid-2col ship-money-row">
+      <div class="form-grid-2col">
         <div class="form-field-group">
           <label for="ship-cod">Tiền thu hộ (COD) <button type="button" class="link-btn" id="btn-ship-cod-auto" hidden>Tự tính</button></label>
           <input type="number" class="form-field-input" id="ship-cod" min="0" step="1000" placeholder="0" inputmode="numeric" />
@@ -1231,538 +949,197 @@
           <input type="number" class="form-field-input" id="ship-weight" min="0.1" step="0.1" value="1" inputmode="decimal" />
         </div>
       </div>
-
-      <!-- Từ 10kg Viettel Post cần kích thước kiện: hiện 3 ô và bắt buộc nhập -->
-      <div class="form-field-group ship-size-group" id="ship-size-group" hidden>
+      <div class="form-field-group" id="ship-size-group" hidden>
         <label>Kích thước (cm) <span class="req">*</span></label>
         <div class="ship-size-row">
-          <input type="number" class="form-field-input" id="ship-length" min="1" step="1" placeholder="Dài (cm)" inputmode="numeric" aria-label="Dài (cm)" />
-          <input type="number" class="form-field-input" id="ship-width" min="1" step="1" placeholder="Rộng (cm)" inputmode="numeric" aria-label="Rộng (cm)" />
-          <input type="number" class="form-field-input" id="ship-height" min="1" step="1" placeholder="Cao (cm)" inputmode="numeric" aria-label="Cao (cm)" />
+          <input type="number" class="form-field-input" id="ship-length" min="1" step="1" placeholder="Dài" inputmode="numeric" aria-label="Dài (cm)" />
+          <input type="number" class="form-field-input" id="ship-width" min="1" step="1" placeholder="Rộng" inputmode="numeric" aria-label="Rộng (cm)" />
+          <input type="number" class="form-field-input" id="ship-height" min="1" step="1" placeholder="Cao" inputmode="numeric" aria-label="Cao (cm)" />
         </div>
         <p class="ship-size-warn" id="ship-size-warn" hidden>Hàng từ 10kg phải nhập đủ dài, rộng, cao.</p>
       </div>
 
       <div class="form-section-title">Người trả cước Viettel Post</div>
-      <div class="ship-seg ship-seg-wrap" role="radiogroup" aria-label="Người trả cước">
+      <div class="ship-seg" role="radiogroup" aria-label="Người trả cước">
         <button type="button" class="ship-seg-btn active" data-ship-payer="receiver" role="radio" aria-checked="true">Người nhận trả</button>
         <button type="button" class="ship-seg-btn" data-ship-payer="sender" role="radio" aria-checked="false">Người gửi trả</button>
       </div>
       <p class="ship-payer-warn" id="ship-payer-warn" hidden>Tiền COD dưới 17.000đ tự động chuyển qua người gửi trả ship và cộng tiền ship vào COD.</p>
-      
       <p class="ship-addr-warn" id="ship-addr-warn" hidden></p>
 
       <div class="ship-actions">
-        <button type="button" class="btn-ghost-pill" id="btn-ship-hold">Gom sau</button>
+        <button type="button" class="btn-outline-pill" id="btn-ship-hold">Gom sau</button>
         <button type="button" class="btn-orange-pill" id="btn-ship-ready">Xác nhận gửi</button>
       </div>
       <button type="button" class="ship-undo-link" id="btn-ship-undo" hidden>Hoàn tác xuất Viettel Post</button>
     </div>
   </dialog>
 
-  <!-- ================== XUẤT EXCEL VIETTEL POST ================== -->
+  <!-- ================== XUẤT VIETTEL POST / NHÁP VẬN ĐƠN ================== -->
   <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-vtp-export">
     <div class="modal-content-card">
       <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
       <h2 class="modal-title-main" id="vtp-export-title">Xuất Viettel Post</h2>
       <p class="modal-subtitle-text" id="vtp-export-subtitle"></p>
-
       <div class="vtp-result" id="vtp-result" hidden></div>
-
-      <div id="vtp-export-body">
-      <div class="vtp-sender-line" id="vtp-sender-line" hidden></div>
-      <div class="vtp-export-toolbar">
-        <span id="vtp-export-count">Đã chọn 0</span>
-        <button type="button" class="link-btn" id="btn-vtp-select-all">Chọn tất cả</button>
-      </div>
-      <div class="vtp-export-list" id="vtp-export-list"></div>
-
-      <div class="form-field-group" style="margin-top:12px">
-        <label for="vtp-service">Dịch vụ Viettel Post</label>
-        <select class="form-field-input" id="vtp-service"></select>
-      </div>
-
-      <div class="ship-actions">
-        <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
-        <button type="button" class="btn-orange-pill" id="btn-vtp-export-go">Xuất Excel · 0 vận đơn</button>
-      </div>
-      <button type="button" class="link-btn vtp-excel-alt" id="btn-vtp-excel-alt" hidden>Hoặc xuất Excel như cũ</button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- ================== KẾT NỐI VIETTEL POST ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-vtp-connect">
-    <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">Kết nối Viettel Post</h2>
-
-      <div id="vtp-connect-off">
-        <p class="modal-subtitle-text">Kết nối một lần để tạo vận đơn, in tem và tự cập nhật trạng thái giao ngay trong app. Chưa kết nối thì vẫn xuất Excel như cũ.</p>
-        <ol class="vtp-steps">
-          <li>Mở <b>viettelpost.vn</b> › <b>Cấu hình tài khoản</b> › <b>Thêm mới token</b>.</li>
-          <li>Bấm sao chép token (Viettel Post gửi mã OTP).</li>
-          <li>Dán vào ô dưới rồi bấm <b>Kết nối</b>.</li>
-        </ol>
-        <div class="form-field-group">
-          <label for="vtp-token-input">Token Viettel Post</label>
-          <input type="password" class="form-field-input" id="vtp-token-input" autocomplete="off" spellcheck="false" placeholder="Dán token vào đây" />
-          <p class="ship-pay-hint">Token chỉ lưu ở máy chủ của shop, không hiện lại trên app.</p>
+      <div id="vtp-export-body" class="md-col">
+        <div class="vtp-sender-line" id="vtp-sender-line" hidden></div>
+        <div class="vtp-export-toolbar">
+          <span id="vtp-export-count">Đã chọn 0</span>
+          <button type="button" class="link-btn" id="btn-vtp-select-all">Chọn tất cả</button>
         </div>
-        <p class="vtp-row-err" id="vtp-connect-error" hidden></p>
+        <div class="list-box" id="vtp-export-list"></div>
+        <div class="form-field-group">
+          <label for="vtp-service">Dịch vụ Viettel Post</label>
+          <select class="form-field-input" id="vtp-service"></select>
+        </div>
         <div class="ship-actions">
-          <button type="button" class="btn-ghost-pill" data-close-dialog>Để sau</button>
-          <button type="button" class="btn-orange-pill" id="btn-vtp-connect">Kết nối</button>
+          <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
+          <button type="button" class="btn-orange-pill" id="btn-vtp-export-go">Xuất Excel · 0 vận đơn</button>
         </div>
-      </div>
-
-      <div id="vtp-connect-on" hidden>
-        <div class="vtp-connected-card">
-          <span class="vtp-ok-dot">✓</span>
-          <div><b>Đã kết nối</b><div class="vtp-row-sub" id="vtp-conn-phone"></div></div>
-        </div>
-
-        <div class="form-field-group">
-          <label for="vtp-sender-select">Điểm lấy hàng</label>
-          <select class="form-field-input" id="vtp-sender-select"><option value="">Đang tải…</option></select>
-          <p class="ship-pay-hint" id="vtp-sender-hint">Bưu tá đến địa chỉ này lấy hàng.</p>
-        </div>
-
-        <div class="form-field-group">
-          <label for="vtp-label-size">Khổ tem khi in</label>
-          <select class="form-field-input" id="vtp-label-size"></select>
-        </div>
-
-        <div class="form-field-group">
-          <label>Địa chỉ nhận trạng thái (webhook)</label>
-          <div class="vtp-hook-row">
-            <input type="text" class="form-field-input" id="vtp-hook-url" readonly />
-            <button type="button" class="btn-ghost-pill" id="btn-vtp-hook-copy">Sao chép</button>
-          </div>
-          <p class="ship-pay-hint" id="vtp-hook-hint">Dán địa chỉ này vào partner2.viettelpost.vn › Bảng điều khiển › Thông tin tài khoản › Production › Cấu hình webhook để đơn tự chuyển Đang giao / Đã giao.</p>
-        </div>
-
-        <div class="ship-actions">
-          <button type="button" class="btn-ghost-pill btn-detail-del" id="btn-vtp-disconnect">Ngắt kết nối</button>
-          <button type="button" class="btn-orange-pill" data-close-dialog>Xong</button>
-        </div>
+        <button type="button" class="link-btn" id="btn-vtp-excel-alt" hidden>Hoặc xuất Excel như cũ</button>
       </div>
     </div>
   </dialog>
 
-  <!-- ================== MODAL 7: MENU 3 CHẤM ĐƠN HÀNG (SCREEN 7) ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-order-menu">
+  <!-- ================== MENU BA CHẤM CỦA ĐƠN ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog dialog-center" id="modal-order-menu">
     <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:16px;border-bottom:1px solid var(--border-light)">
-        <div style="display:flex;align-items:center;gap:12px">
-          <div class="user-circle-avatar warm" id="sheet-order-avatar">LN</div>
-          <div>
-            <div style="font-weight:700;font-size:16px" id="sheet-order-name">Linh Nguyễn</div>
-            <div style="font-size:13px;color:var(--text-sub)" id="sheet-order-meta">3 sản phẩm · 20:42</div>
-          </div>
+      <div class="sheet-order-head">
+        <div class="detail-cust-box">
+          <div class="user-circle-avatar warm" id="sheet-order-avatar"></div>
+          <div><div class="cust-name" id="sheet-order-name"></div><small id="sheet-order-meta"></small></div>
         </div>
-        <span style="font-size:18px;font-weight:800;color:var(--text-main)" id="sheet-order-price">450.000 <span class="vnd-underline">đ</span></span>
+        <b id="sheet-order-price"></b>
       </div>
-
-      <div class="order-action-sheet-options">
-        <div class="sheet-option-item" id="sheet-act-products">
-          <span class="sheet-opt-circle-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c25e1a" stroke-width="2"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
-          </span>
-          <div style="flex:1">
-            <div class="sheet-opt-title" id="sheet-title-items">Sản phẩm (3)</div>
-            <div class="sheet-opt-sub">Xem và sửa sản phẩm trong đơn</div>
-          </div>
-          <span class="row-chevron">›</span>
-        </div>
-        <div class="sheet-option-item" id="sheet-act-comments">
-          <span class="sheet-opt-circle-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c25e1a" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-          </span>
-          <div style="flex:1">
-            <div class="sheet-opt-title">Bình luận</div>
-            <div class="sheet-opt-sub">Xem các comment khách đã chốt đơn</div>
-          </div>
-          <span class="row-chevron">›</span>
-        </div>
-        <div class="sheet-option-item danger" id="sheet-act-delete">
-          <span class="sheet-opt-circle-icon danger">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c8322b" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-          </span>
-          <div style="flex:1">
-            <div class="sheet-opt-title">Xoá đơn</div>
-            <div class="sheet-opt-sub">Không thể khôi phục sau khi xoá</div>
-          </div>
-          <span class="row-chevron">›</span>
-        </div>
-      </div>
-
-      <button type="button" class="btn-sheet-close-grey" data-close-dialog>
-        Đóng
-      </button>
-    </div>
-  </dialog>
-
-  <!-- ================== MODAL CÀI ĐẶT ĐỒNG BỘ WEB & APP IPA ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-sync-setup">
-    <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">Đồng bộ Web &amp; App (IPA)</h2>
-      <p class="modal-subtitle-text">Web và điện thoại chỉ đồng bộ khi cùng <b>một server</b> và cùng <b>một tài khoản</b>.</p>
-
-      <div style="padding:14px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between">
-        <div>
-          <div style="font-weight:700;color:#15803d;font-size:14px" id="modal-sync-status-title">● Đang kết nối máy chủ</div>
-          <div style="font-size:12.5px;color:#166534;margin-top:2px" id="modal-sync-devices-sub">Số thiết bị đang mở cùng lúc: 1</div>
-        </div>
-        <button type="button" class="btn-outline-pill" id="btn-sync-pull-now" style="padding:5px 12px;font-size:12px">Đồng bộ ngay</button>
-      </div>
-
-      <div class="sync-phone-guide" id="sync-phone-guide">
-        <div class="sync-guide-row"><span>Tài khoản trên máy này</span><b id="sync-guide-account">—</b></div>
-        <div class="sync-guide-row"><span>Server đang dùng</span><b id="sync-guide-server">—</b></div>
-        <div id="sync-guide-lan" style="display:none">
-          <div class="sync-guide-note"><b>localhost</b> chỉ mở được trên máy tính này. Trên điện thoại (cùng Wi-Fi), hãy đăng nhập server:</div>
-          <div class="sync-guide-url" id="sync-guide-lan-urls"></div>
-        </div>
-      </div>
-
-      <div class="form-field-group">
-        <label>Địa chỉ máy chủ Web (Server URL)</label>
-        <input type="text" class="form-field-input" id="input-sync-server-url" placeholder="https://ten-mien-cua-ban.vn" />
-        <small style="color:var(--text-sub);font-size:12px;margin-top:4px">
-          Để trống nếu đang dùng trực tiếp trên trình duyệt Web. Chỉ nhập khi cần nối tới một máy chủ khác.
-        </small>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
-        <button type="button" class="btn-ghost-pill" data-close-dialog>Đóng</button>
-        <button type="button" class="btn-orange-pill" id="btn-save-sync-url">Lưu &amp; Kết nối</button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- ================== MODAL CÀI ĐẶT MÁY IN & KẾT NỐI (BLUETOOTH / USB / LAN) ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-printer-setup">
-    <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">Máy in &amp; In nhiệt Xprinter</h2>
-      <p class="modal-subtitle-text">Kết nối máy in hoá đơn Xprinter Q80BS (80mm) qua Bluetooth, USB hoặc mạng LAN</p>
-
-      <div style="display:flex;flex-direction:column;gap:12px;margin:20px 0">
-        <button class="btn-orange-pill" id="btn-modal-connect-bt" style="height:44px">
-          📶 Quét &amp; Kết nối Bluetooth Xprinter
+      <div class="list-box">
+        <button type="button" class="sheet-option-item" id="sheet-act-products">
+          <span class="sheet-opt-circle-icon"><svg class="ic"><use href="#i-bag"/></svg></span>
+          <span style="flex:1"><span class="sheet-opt-title" id="sheet-title-items">Sản phẩm</span><br /><span class="sheet-opt-sub">Xem và sửa sản phẩm trong đơn</span></span>
+          <svg class="ic"><use href="#i-next"/></svg>
         </button>
-        <div style="display:flex;gap:10px">
-          <button class="btn-outline-pill" id="btn-modal-connect-usb" style="flex:1">🔌 Cáp USB Serial</button>
-          <button class="btn-outline-pill" id="btn-modal-test-print" style="flex:1">🖨 In thử tem 80mm</button>
-        </div>
+        <button type="button" class="sheet-option-item" id="sheet-act-comments">
+          <span class="sheet-opt-circle-icon"><svg class="ic"><use href="#i-chat"/></svg></span>
+          <span style="flex:1"><span class="sheet-opt-title">Bình luận</span><br /><span class="sheet-opt-sub">Xem các bình luận khách đã chốt</span></span>
+          <svg class="ic"><use href="#i-next"/></svg>
+        </button>
+        <button type="button" class="sheet-option-item danger" id="sheet-act-delete">
+          <span class="sheet-opt-circle-icon danger"><svg class="ic"><use href="#i-trash"/></svg></span>
+          <span style="flex:1"><span class="sheet-opt-title">Xoá đơn</span><br /><span class="sheet-opt-sub">Có 5 giây để hoàn tác</span></span>
+        </button>
       </div>
-
-      <div class="form-field-group">
-        <label>Khổ giấy</label>
-        <select class="form-field-input" id="cfg-paper-select">
-          <option value="80">80mm (Khổ chuẩn Xprinter Q80BS)</option>
-          <option value="58">58mm (Khổ nhỏ mini)</option>
-        </select>
-      </div>
-
-      <!-- Khay giấy máy in ảo -->
-      <div style="margin-top:16px;border-top:1px solid var(--border-light);padding-top:16px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span style="font-weight:700;font-size:13.5px">Tem in vừa xuất:</span>
-          <button style="font-size:12px;color:var(--text-sub)" id="btn-clear-tray">Xoá khay</button>
-        </div>
-        <div id="printer-paper-tray" style="max-height:220px;overflow-y:auto;text-align:center;background:#fbf9f6;border-radius:10px;padding:12px;border:1px dashed #e4dfd7">
-          <p style="color:var(--text-muted);font-size:12.5px" id="tray-empty-hint">Tem in sẽ hiện ở đây khi in</p>
-        </div>
-      </div>
+      <button type="button" class="btn-sheet-close-grey" data-close-dialog>Đóng</button>
     </div>
   </dialog>
 
-  <!-- ================== MODAL: TẠO ĐƠN HÀNG MỚI (WEB / MOBILE) ================== -->
+  <!-- ================== TẠO ĐƠN HÀNG MỚI ================== -->
   <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-create-order">
     <div class="modal-content-card">
       <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">+ Tạo đơn hàng mới</h2>
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
+      <h2 class="modal-title-main">Tạo đơn hàng mới</h2>
       <p class="modal-subtitle-text">Thêm đơn thủ công hoặc chốt bổ sung ngoài livestream</p>
-
-      <div class="form-section-title">● Thông tin khách hàng</div>
+      <div class="form-section-title">Khách hàng</div>
       <div class="form-grid-2col">
-        <div class="form-field-group">
-          <label>Tên khách hàng <span class="req">*</span></label>
-          <input type="text" class="form-field-input" id="new-ord-name" placeholder="Nguyễn Văn A" />
-        </div>
-        <div class="form-field-group">
-          <label>TikTok Handle</label>
-          <input type="text" class="form-field-input" id="new-ord-handle" placeholder="@ username" />
-        </div>
+        <div class="form-field-group"><label for="new-ord-name">Tên khách hàng <span class="req">*</span></label><input type="text" class="form-field-input" id="new-ord-name" placeholder="Nguyễn Văn A" autocomplete="off" /></div>
+        <div class="form-field-group"><label for="new-ord-handle">TikTok</label><input type="text" class="form-field-input" id="new-ord-handle" placeholder="@username" autocomplete="off" /></div>
       </div>
       <div class="form-grid-2col">
-        <div class="form-field-group">
-          <label>Số điện thoại</label>
-          <input type="text" class="form-field-input" id="new-ord-phone" placeholder="0905 xxx xxx" />
-        </div>
-        <div class="form-field-group">
-          <label>Địa chỉ nhận hàng</label>
-          <input type="text" class="form-field-input" id="new-ord-address" placeholder="25 Lê Lợi, Q.1, TP.HCM" />
-        </div>
+        <div class="form-field-group"><label for="new-ord-phone">Số điện thoại</label><input type="tel" class="form-field-input" id="new-ord-phone" placeholder="0905 xxx xxx" autocomplete="off" /></div>
+        <div class="form-field-group"><label for="new-ord-address">Địa chỉ nhận hàng</label><input type="text" class="form-field-input" id="new-ord-address" placeholder="25 Lê Lợi, Q.1, TP.HCM" autocomplete="off" /></div>
       </div>
-
-      <div class="form-section-title">● Món hàng chốt</div>
+      <div class="form-section-title">Món hàng</div>
       <div class="form-grid-2col">
-        <div class="form-field-group">
-          <label>Mã / Tên sản phẩm <span class="req">*</span></label>
-          <input type="text" class="form-field-input" id="new-ord-product-name" placeholder="Mã 150 (Đầm hoa nhí)" />
-        </div>
-        <div class="form-field-group">
-          <label>Giá tiền (VND) <span class="req">*</span></label>
-          <input type="text" class="form-field-input" id="new-ord-price" placeholder="150 hoặc 150000" />
-        </div>
+        <div class="form-field-group"><label for="new-ord-product-name">Mã / Tên sản phẩm</label><input type="text" class="form-field-input" id="new-ord-product-name" placeholder="Mã 150" /></div>
+        <div class="form-field-group"><label for="new-ord-price">Giá tiền <span class="req">*</span></label><input type="text" class="form-field-input" id="new-ord-price" placeholder="150 hoặc 150000" inputmode="numeric" /></div>
       </div>
-
-      <div class="form-field-group">
-        <label>Ghi chú giao hàng</label>
-        <input type="text" class="form-field-input" id="new-ord-note" placeholder="Giao giờ hành chính, gọi trước khi giao" />
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px">
+      <div class="form-field-group"><label for="new-ord-note">Ghi chú giao hàng</label><input type="text" class="form-field-input" id="new-ord-note" placeholder="Giao giờ hành chính, gọi trước khi giao" /></div>
+      <div class="modal-actions">
         <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
         <button type="button" class="btn-orange-pill" id="btn-submit-create-order">Tạo đơn ngay</button>
       </div>
     </div>
   </dialog>
 
-  <!-- ================== MODAL: CHỈNH SỬA SẢN PHẨM TRONG ĐƠN (SCREEN 8) ================== -->
+  <!-- ================== CHỈNH SỬA SẢN PHẨM TRONG ĐƠN ================== -->
   <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-edit-order-items">
     <div class="modal-content-card">
       <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
       <h2 class="modal-title-main">Chỉnh sửa sản phẩm trong đơn</h2>
-      <p class="modal-subtitle-text" id="edit-items-order-subtitle">Đơn HD26102501 · Linh Nguyễn</p>
-
-      <div class="edit-items-table" id="edit-items-container" style="display:flex;flex-direction:column;gap:10px;margin:18px 0">
-        <!-- Render động các dòng sản phẩm có thể sửa số lượng, giá và nút xoá -->
-      </div>
-
-      <button type="button" class="btn-outline-pill" id="btn-add-item-to-order" style="width:100%;height:38px;margin-bottom:18px">
-        + Thêm món hàng khác vào đơn
-      </button>
-
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:#fbf9f6;border-radius:10px;margin-bottom:18px">
-        <span style="font-weight:700">Tổng tiền mới:</span>
-        <span style="font-size:18px;font-weight:800;color:var(--primary-orange)" id="edit-items-total-preview">450.000 ₫</span>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:12px">
-        <button type="button" class="btn-ghost-pill" data-close-dialog>Đóng</button>
+      <p class="modal-subtitle-text" id="edit-items-order-subtitle"></p>
+      <div class="md-col" id="edit-items-container"></div>
+      <button type="button" class="btn-outline-pill" id="btn-add-item-to-order">+ Thêm món hàng</button>
+      <div class="total-preview-row"><span>Tổng tiền mới</span><span id="edit-items-total-preview">0 ₫</span></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
         <button type="button" class="btn-orange-pill" id="btn-save-order-items">Lưu đơn hàng</button>
       </div>
     </div>
   </dialog>
 
-  <!-- ================== MODAL: THÊM TÀI KHOẢN TIKTOK (SCREEN 6) ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-add-account">
+  <!-- ================== THÊM TÀI KHOẢN TIKTOK ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog dialog-center" id="modal-add-account">
     <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
       <h2 class="modal-title-main">Thêm tài khoản TikTok</h2>
       <p class="modal-subtitle-text">Thêm shop hoặc chi nhánh TikTok Live của bạn</p>
-
-      <div class="form-field-group" style="margin-top:16px">
-        <label>Tên Shop / Thương hiệu <span class="req">*</span></label>
-        <input type="text" class="form-field-input" id="input-new-acc-name" placeholder="Ví dụ: Kho Thời Trang Linh" />
-      </div>
-
-      <div class="form-field-group">
-        <label>Username TikTok (@handle) <span class="req">*</span></label>
-        <input type="text" class="form-field-input" id="input-new-acc-handle" placeholder="@ thoi.trang.linh" />
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px">
+      <div class="form-field-group"><label for="input-new-acc-name">Tên shop <span class="req">*</span></label><input type="text" class="form-field-input" id="input-new-acc-name" placeholder="Ví dụ: Kho Thời Trang Linh" /></div>
+      <div class="form-field-group"><label for="input-new-acc-handle">Username TikTok <span class="req">*</span></label><input type="text" class="form-field-input" id="input-new-acc-handle" placeholder="@thoi.trang.linh" /></div>
+      <div class="modal-actions">
         <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
         <button type="button" class="btn-orange-pill" id="btn-save-new-account">Thêm tài khoản</button>
       </div>
     </div>
   </dialog>
 
-  <!-- ================== MODAL: TỪ KHOÁ CHỐT ĐƠN & BẮT GIÁ ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-keyword-setup">
+  <!-- ================== ADMIN: ĐỔI MẬT KHẨU TÀI KHOẢN KHÁC ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog dialog-center" id="modal-admin-reset-pass">
     <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">Từ khoá chốt đơn</h2>
-      <p class="modal-subtitle-text">Hệ thống AI tự động lọc và gom đơn dựa trên cú pháp comment</p>
-
-      <div class="form-field-group" style="margin-top:16px">
-        <label>Hệ số nhân giá khi bình luận chỉ có số (vd: 150)</label>
-        <select class="form-field-input" id="cfg-kw-multiplier">
-          <option value="1000">Tự nhân 1.000 (Gõ 150 -> 150.000 ₫)</option>
-          <option value="1">Giữ nguyên mệnh giá (Gõ 150 -> 150 ₫)</option>
-        </select>
-        <small style="color:var(--text-sub);font-size:12px">Ví dụ: khi khách gõ "mã 150", hệ thống tự nhận là 150.000đ.</small>
-      </div>
-
-      <div class="form-field-group">
-        <label>Từ khoá nhận diện chốt đơn</label>
-        <input type="text" class="form-field-input" id="cfg-kw-triggers" value="chốt, lấy, mua, mã, m, đầm, áo, set" />
-      </div>
-
-      <label class="checkbox-remember-row" style="margin-top:14px">
-        <div>
-          <div style="font-weight:600;font-size:13.5px">Tự động in tem nhiệt khi khách chốt</div>
-          <div style="font-size:12px;color:var(--text-sub)">Máy in Xprinter sẽ tự xuất tem sau 3 giây</div>
-        </div>
-        <input type="checkbox" class="chk-custom" id="cfg-kw-autoprint" checked />
-      </label>
-
-      <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px">
-        <button type="button" class="btn-ghost-pill" data-close-dialog>Đóng</button>
-        <button type="button" class="btn-orange-pill" id="btn-save-keyword-setup">Lưu cài đặt</button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- ================== MODAL: THÔNG BÁO & GIỌNG NÓI TIẾNG VIỆT ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-notify-setup">
-    <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">Thông báo &amp; Giọng nói</h2>
-      <p class="modal-subtitle-text">Âm thanh chuông báo và trợ lý đọc đơn hàng tiếng Việt</p>
-
-      <label class="checkbox-remember-row" style="margin-top:16px">
-        <div>
-          <div style="font-weight:600;font-size:13.5px">Âm thanh chuông chốt đơn ("Kaching")</div>
-          <div style="font-size:12px;color:var(--text-sub)">Phát tiếng chuông khi khách bình luận chốt thành công</div>
-        </div>
-        <input type="checkbox" class="chk-custom" id="cfg-notify-sound" checked />
-      </label>
-
-      <div style="margin:12px 0">
-        <button type="button" class="btn-outline-pill" id="btn-test-chime" style="height:36px;font-size:12.5px">
-          🔔 Nghe thử tiếng chuông
-        </button>
-      </div>
-
-      <div class="divider-with-text"><span>Trợ lý giọng nói</span></div>
-
-      <label class="checkbox-remember-row">
-        <div>
-          <div style="font-weight:600;font-size:13.5px">Trợ lý đọc đơn tiếng Việt (TTS)</div>
-          <div style="font-size:12px;color:var(--text-sub)">Tự động đọc to: "Linh Nguyễn chốt Mã 150"</div>
-        </div>
-        <input type="checkbox" class="chk-custom" id="cfg-notify-voice" />
-      </label>
-
-      <div style="margin-top:12px">
-        <button type="button" class="btn-outline-pill" id="btn-test-voice" style="height:36px;font-size:12.5px">
-          🗣 Thử giọng đọc tiếng Việt
-        </button>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:24px">
-        <button type="button" class="btn-orange-pill" id="btn-save-notify-setup" style="width:100%">
-          Hoàn tất
-        </button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- ================== MODAL: CHAT VỚI QUẢN TRỊ VIÊN ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-support-chat">
-    <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">Chat với quản trị viên</h2>
-      <p class="modal-subtitle-text">Phiên tự đóng sau 24 giờ không có tin mới. Tin nhắn lưu 30 ngày.</p>
-      <div class="support-toolbar" id="support-toolbar">
-        <span class="support-toolbar-label">Các phiên chat</span>
-        <button type="button" class="btn-orange-pill" id="support-new-session" style="height:40px;padding:0 18px">＋ Phiên mới</button>
-              </div>
-      <div class="support-cards" id="support-cards"></div>
-    </div>
-  </dialog>
-
-  <!-- ================== MODAL ADMIN: ĐỔI MẬT KHẨU CHO TÀI KHOẢN KHÁC ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-admin-reset-pass">
-    <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">🔑 Đổi mật khẩu tài khoản</h2>
-      <p class="modal-subtitle-text" id="admin-reset-pass-subtitle">Cập nhật mật khẩu mới cho tài khoản: <b>user</b></p>
-
-      <div class="form-field-group" style="margin-top:16px">
-        <label>Mật khẩu mới <span class="req">*</span></label>
-        <input type="password" class="form-field-input" id="admin-input-new-pass" placeholder="Nhập mật khẩu mới (tối thiểu 6 ký tự)" />
-      </div>
-
-      <div class="form-field-group">
-        <label>Xác nhận mật khẩu mới <span class="req">*</span></label>
-        <input type="password" class="form-field-input" id="admin-input-confirm-pass" placeholder="Nhập lại mật khẩu mới lần nữa" />
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px">
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
+      <h2 class="modal-title-main">Đổi mật khẩu tài khoản</h2>
+      <p class="modal-subtitle-text" id="admin-reset-pass-subtitle"></p>
+      <div class="form-field-group"><label for="admin-input-new-pass">Mật khẩu mới <span class="req">*</span></label><input type="password" class="form-field-input" id="admin-input-new-pass" placeholder="Tối thiểu 6 ký tự" autocomplete="new-password" /></div>
+      <div class="form-field-group"><label for="admin-input-confirm-pass">Xác nhận mật khẩu mới <span class="req">*</span></label><input type="password" class="form-field-input" id="admin-input-confirm-pass" placeholder="Nhập lại mật khẩu mới" autocomplete="new-password" /></div>
+      <div class="modal-actions">
         <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
         <button type="button" class="btn-orange-pill" id="btn-confirm-admin-reset-pass">Lưu mật khẩu mới</button>
       </div>
     </div>
   </dialog>
 
-  <!-- ================== MODAL ADMIN: TẠO TÀI KHOẢN MỚI & PHÂN QUYỀN ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-admin-create-user">
+  <!-- ================== ADMIN: TẠO TÀI KHOẢN ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog dialog-center" id="modal-admin-create-user">
     <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">+ Tạo tài khoản mới</h2>
-      <p class="modal-subtitle-text">Tạo tài khoản và cấp quyền sử dụng hệ thống</p>
-
-      <div class="form-field-group" style="margin-top:16px">
-        <label>Tên tài khoản <span class="req">*</span></label>
-        <input type="text" class="form-field-input" id="admin-create-username" placeholder="Nhập tên tài khoản" />
-      </div>
-
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
+      <h2 class="modal-title-main">Tạo tài khoản mới</h2>
+      <div class="form-field-group"><label for="admin-create-username">Tên tài khoản <span class="req">*</span></label><input type="text" class="form-field-input" id="admin-create-username" placeholder="Nhập tên tài khoản" autocomplete="off" /></div>
       <div class="form-grid-2col">
-        <div class="form-field-group">
-          <label>Mật khẩu <span class="req">*</span></label>
-          <input type="password" class="form-field-input" id="admin-create-password" placeholder="Tối thiểu 6 ký tự" />
-        </div>
-        <div class="form-field-group">
-          <label>Xác nhận mật khẩu <span class="req">*</span></label>
-          <input type="password" class="form-field-input" id="admin-create-confirm" placeholder="Nhập lại mật khẩu" />
-        </div>
+        <div class="form-field-group"><label for="admin-create-password">Mật khẩu <span class="req">*</span></label><input type="password" class="form-field-input" id="admin-create-password" placeholder="Tối thiểu 6 ký tự" autocomplete="new-password" /></div>
+        <div class="form-field-group"><label for="admin-create-confirm">Xác nhận <span class="req">*</span></label><input type="password" class="form-field-input" id="admin-create-confirm" placeholder="Nhập lại" autocomplete="new-password" /></div>
       </div>
-
       <div class="form-field-group">
-        <label>Phân quyền tài khoản</label>
+        <label for="admin-create-role">Quyền</label>
         <select class="form-field-input" id="admin-create-role">
-          <option value="user">Thành viên (Sử dụng ChốtLive &amp; In đơn)</option>
-          <option value="admin">Quản trị viên (Admin - Quản lý các tài khoản khác)</option>
+          <option value="user">Thành viên (dùng ChốtLive và in đơn)</option>
+          <option value="admin">Quản trị viên (quản lý tài khoản khác)</option>
         </select>
       </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px">
+      <div class="modal-actions">
         <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
         <button type="button" class="btn-orange-pill" id="btn-submit-admin-create-user">Tạo tài khoản</button>
       </div>
     </div>
   </dialog>
 
-  <!-- ================== MODAL ADMIN: CẤP GÓI ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-admin-plan">
+  <!-- ================== ADMIN: CẤP GÓI ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog dialog-center" id="modal-admin-plan">
     <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">🎫 Cấp gói</h2>
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
+      <h2 class="modal-title-main">Cấp gói</h2>
       <p class="modal-subtitle-text">Tài khoản: <b id="admin-plan-account"></b> · <span id="admin-plan-current"></span></p>
-
-      <div class="form-field-group" style="margin-top:16px">
+      <div class="form-field-group">
         <label for="admin-plan-months">Thời hạn gói</label>
         <select class="form-field-input" id="admin-plan-months">
           <option value="1">1 tháng (30 ngày)</option>
@@ -1770,61 +1147,61 @@
           <option value="6">6 tháng (180 ngày)</option>
           <option value="12">12 tháng (360 ngày)</option>
         </select>
+        <p class="form-hint">Gói còn hạn thì được cộng nối tiếp vào ngày hết hạn hiện tại.</p>
       </div>
-      <p class="modal-subtitle-text">Gói còn hạn thì được cộng nối tiếp vào ngày hết hạn hiện tại.</p>
-
-      <div style="display:flex;justify-content:flex-end;flex-wrap:wrap;gap:12px;margin-top:20px">
-        <button type="button" class="btn-admin-act del-btn" id="btn-revoke-admin-plan" style="display:none;height:auto;margin-right:auto">Thu hồi gói</button>
+      <div class="modal-actions">
+        <button type="button" class="btn-outline-pill btn-detail-del" id="btn-revoke-admin-plan" style="display:none;margin-right:auto">Thu hồi gói</button>
         <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
         <button type="button" class="btn-orange-pill" id="btn-submit-admin-plan">Cấp gói</button>
       </div>
     </div>
   </dialog>
 
-  <!-- ================== MODAL: HẾT DÙNG THỬ / HẾT GÓI ================== -->
-  <dialog class="app-modal-dialog" id="modal-access-expired">
+  <!-- ================== HẾT DÙNG THỬ / HẾT GÓI ================== -->
+  <dialog class="app-modal-dialog dialog-center" id="modal-access-expired">
     <div class="modal-content-card">
       <h2 class="modal-title-main">Không thể theo dõi live</h2>
       <p class="modal-subtitle-text" id="access-expired-message"></p>
-      <div style="display:flex;justify-content:flex-end;margin-top:20px">
+      <div class="modal-actions">
+        <button type="button" class="btn-outline-pill" id="btn-expired-help">Nhắn quản trị viên</button>
         <button type="button" class="btn-orange-pill" data-close-dialog>Đã hiểu</button>
       </div>
     </div>
   </dialog>
 
-  <!-- ================== MODAL CÁ NHÂN: TỰ ĐỔI MẬT KHẨU ĐANG ĐĂNG NHẬP ================== -->
-  <dialog class="app-modal-dialog bottom-sheet-dialog" id="modal-change-own-pass">
+  <!-- ================== TỰ ĐỔI MẬT KHẨU ================== -->
+  <dialog class="app-modal-dialog bottom-sheet-dialog dialog-center" id="modal-change-own-pass">
     <div class="modal-content-card">
-      <div class="sheet-drag-handle"></div>
-      <button class="btn-modal-close" data-close-dialog>×</button>
-      <h2 class="modal-title-main">🔑 Đổi mật khẩu của bạn</h2>
-      <p class="modal-subtitle-text">Nhập mật khẩu hiện tại và mật khẩu mới</p>
-
-      <div class="form-field-group" style="margin-top:16px">
-        <label>Mật khẩu hiện tại <span class="req">*</span></label>
-        <input type="password" class="form-field-input" id="own-pass-current" placeholder="Nhập mật khẩu đang dùng" />
-      </div>
-
-      <div class="form-field-group">
-        <label>Mật khẩu mới <span class="req">*</span></label>
-        <input type="password" class="form-field-input" id="own-pass-new" placeholder="Nhập mật khẩu mới (tối thiểu 6 ký tự)" />
-      </div>
-
-      <div class="form-field-group">
-        <label>Xác nhận mật khẩu mới <span class="req">*</span></label>
-        <input type="password" class="form-field-input" id="own-pass-confirm" placeholder="Nhập lại mật khẩu mới lần nữa" />
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px">
+      <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
+      <h2 class="modal-title-main">Đổi mật khẩu của bạn</h2>
+      <div class="form-field-group"><label for="own-pass-current">Mật khẩu hiện tại <span class="req">*</span></label><input type="password" class="form-field-input" id="own-pass-current" placeholder="Mật khẩu đang dùng" autocomplete="current-password" /></div>
+      <div class="form-field-group"><label for="own-pass-new">Mật khẩu mới <span class="req">*</span></label><input type="password" class="form-field-input" id="own-pass-new" placeholder="Tối thiểu 6 ký tự" autocomplete="new-password" /></div>
+      <div class="form-field-group"><label for="own-pass-confirm">Xác nhận mật khẩu mới <span class="req">*</span></label><input type="password" class="form-field-input" id="own-pass-confirm" placeholder="Nhập lại mật khẩu mới" autocomplete="new-password" /></div>
+      <div class="modal-actions">
         <button type="button" class="btn-ghost-pill" data-close-dialog>Huỷ</button>
         <button type="button" class="btn-orange-pill" id="btn-submit-own-pass">Cập nhật mật khẩu</button>
       </div>
     </div>
   </dialog>
 
-  <!-- Hộp Toast Thông Báo -->
-  <div class="toast-web-box" id="web-toast-box"></div>
+  <!-- ================== HỘP HỎI LẠI DÙNG CHUNG ================== -->
+  <dialog class="app-modal-dialog dialog-center" id="modal-confirm">
+    <div class="modal-content-card">
+      <h2 class="modal-title-main" id="confirm-title"></h2>
+      <p class="modal-subtitle-text" id="confirm-message"></p>
+      <div class="form-field-group" id="confirm-input-group" hidden>
+        <label for="confirm-input" id="confirm-input-label"></label>
+        <input type="text" class="form-field-input" id="confirm-input" />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost-pill" id="btn-confirm-cancel">Huỷ</button>
+        <button type="button" class="btn-orange-pill" id="btn-confirm-ok">Đồng ý</button>
+      </div>
+    </div>
+  </dialog>
 
-  <script type="module" src="/js/app.js?v=3"></script>
+  <div class="toast-web-box" id="web-toast-box" aria-live="polite"></div>
+
+  <script type="module" src="/js/app.js?v=6"></script>
 </body>
 </html>

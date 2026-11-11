@@ -119,12 +119,21 @@ function formatVNDHtml(amount) {
   return `${num} <span class="vnd-underline">đ</span>`;
 }
 
-function toast(msg, icon = '✓', ms = 2400) {
+const icon = (name, cls = '') => `<svg class="ic ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
+function toast(msg, mark = '✓', ms = 2400, action = null) {
   const box = $('#web-toast-box');
   if (!box) return;
+  const warn = mark === '⚠️';
   const el = document.createElement('div');
-  el.className = 'toast-item';
-  el.innerHTML = `<span>${icon}</span><span>${esc(msg)}</span>`;
+  el.className = `toast-item${warn ? ' warn' : ''}`;
+  el.innerHTML = `${icon(warn ? 'warn' : 'check')}<span>${esc(msg)}</span>${action ? `<button type="button" class="toast-action">${esc(action.label)}</button>` : ''}`;
+  if (action) {
+    el.querySelector('.toast-action').addEventListener('click', () => {
+      action.onClick();
+      el.remove();
+    });
+  }
   box.appendChild(el);
   setTimeout(() => {
     el.style.opacity = '0';
@@ -136,6 +145,147 @@ function toast(msg, icon = '✓', ms = 2400) {
 
 /** Chỉ nói "đồng bộ" khi đang nối server; mất mạng thì thay đổi mới nằm trên máy. */
 const syncedWord = () => (syncStatus.connected ? ' & đồng bộ' : '');
+
+/**
+ * Hộp hỏi lại của app, thay cho confirm() / prompt() của trình duyệt.
+ * Trả về true / false; khi có `input` thì trả về chuỗi đã nhập, hoặc false nếu huỷ.
+ */
+function askConfirm({ title, message = '', ok = 'Đồng ý', danger = false, input = null }) {
+  const dlg = $('#modal-confirm');
+  if (!dlg) return Promise.resolve(false);
+  $('#confirm-title').textContent = title;
+  $('#confirm-message').textContent = message;
+  const okBtn = $('#btn-confirm-ok');
+  const cancelBtn = $('#btn-confirm-cancel');
+  okBtn.textContent = ok;
+  okBtn.className = danger ? 'btn-outline-pill btn-detail-del' : 'btn-orange-pill';
+  $('#confirm-input-group').hidden = !input;
+  if (input) {
+    $('#confirm-input-label').textContent = input.label;
+    $('#confirm-input').value = '';
+    $('#confirm-input').placeholder = input.placeholder || '';
+  }
+  return new Promise((resolve) => {
+    let result = false;
+    const onOk = () => {
+      result = input ? $('#confirm-input').value.trim() : true;
+      dlg.close();
+    };
+    const onCancel = () => dlg.close();
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    dlg.addEventListener(
+      'close',
+      () => {
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        resolve(result);
+      },
+      { once: true }
+    );
+    dlg.showModal();
+  });
+}
+
+const askStopLive = (username) =>
+  askConfirm({
+    title: 'Dừng theo dõi live?',
+    message: `Ngừng đọc bình luận của @${username}. Bình luận và đơn đã ghi vẫn giữ nguyên.`,
+    ok: 'Dừng theo dõi',
+    danger: true
+  });
+
+/** Báo lỗi ngay dưới ô nhập bị sai; tự mất khi người dùng sửa ô đó. */
+function fieldError(sel, msg) {
+  const el = typeof sel === 'string' ? $(sel) : sel;
+  if (!el) return toast(msg, '⚠️');
+  const group = el.closest('.form-field-group') || el.parentElement;
+  group.querySelector('.field-error.auto')?.remove();
+  const p = document.createElement('p');
+  p.className = 'field-error auto';
+  p.setAttribute('role', 'alert');
+  p.textContent = msg;
+  group.appendChild(p);
+  el.setAttribute('aria-invalid', 'true');
+  el.focus?.();
+  const clear = () => {
+    p.remove();
+    el.removeAttribute('aria-invalid');
+  };
+  el.addEventListener('input', clear, { once: true });
+  el.addEventListener('change', clear, { once: true });
+}
+
+// Đóng hộp thoại thì xoá các dòng báo lỗi còn sót, lần mở sau không hiện lỗi cũ.
+document.addEventListener(
+  'close',
+  (e) => {
+    if (!(e.target instanceof HTMLDialogElement)) return;
+    $$('.field-error.auto', e.target).forEach((p) => p.remove());
+    $$('[aria-invalid]', e.target).forEach((x) => x.removeAttribute('aria-invalid'));
+  },
+  true
+);
+
+// Dòng và thẻ bấm được (role="button") dùng được bằng phím Enter / dấu cách.
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('[role="button"]')) {
+    e.preventDefault();
+    e.target.click();
+  }
+});
+
+// Nút Hiện / Ẩn cạnh ô mật khẩu.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-toggle-pass]');
+  if (!btn) return;
+  const input = document.getElementById(btn.dataset.togglePass);
+  if (!input) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  btn.textContent = show ? 'Ẩn' : 'Hiện';
+  btn.setAttribute('aria-pressed', String(show));
+});
+
+/** Trang con đang mở ở tab Tôi. */
+let settingsPane = 'account';
+function openSettingsPane(name) {
+  if (activeTab !== 'settings') switchTab('settings');
+  settingsPane = name;
+  $$('.settings-pane').forEach((p) => p.classList.toggle('active', p.dataset.paneId === name));
+  $$('#settings-menu [data-pane]').forEach((b) => b.classList.toggle('active', b.dataset.pane === name));
+  $('#settings-md')?.classList.add('has-pane');
+}
+
+/* Trang Giao diện: nền sáng/tối và màu chủ đạo (thanh bên đi theo nền). Việc áp màu nằm ở /js/theme.js. */
+const THEME_NAMES = { orange: 'Cam', red: 'Đỏ', pink: 'Hồng', purple: 'Tím', blue: 'Xanh dương', teal: 'Xanh ngọc', green: 'Xanh lá', mono: 'Đen trắng' };
+const THEME_MODES = { auto: 'Theo máy', light: 'Sáng', dark: 'Tối' };
+function renderThemeControls() {
+  const t = window.chotTheme?.get();
+  if (!t) return;
+  const mark = (attr, val) => $$(`[${attr}]`).forEach((b) => {
+    const on = b.getAttribute(attr) === val;
+    b.setAttribute('aria-pressed', String(on));
+    if (b.classList.contains('segment-pill-btn')) b.classList.toggle('active', on);
+  });
+  mark('data-theme-mode', t.mode);
+  mark('data-theme-accent', t.accent);
+  const lbl = $('#lbl-theme-summary');
+  if (lbl) lbl.textContent = `${THEME_MODES[t.mode]} · ${THEME_NAMES[t.accent]}`;
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest?.('[data-theme-mode], [data-theme-accent], #btn-theme-reset');
+  if (!b || !window.chotTheme) return;
+  if (b.id === 'btn-theme-reset') window.chotTheme.set({ mode: 'auto', accent: 'orange' });
+  else if (b.dataset.themeMode) window.chotTheme.set({ mode: b.dataset.themeMode });
+  else window.chotTheme.set({ accent: b.dataset.themeAccent });
+  renderThemeControls();
+});
+$('#menu-row-appearance')?.addEventListener('click', () => openSettingsPane('appearance'));
+renderThemeControls();
+
+/** Đơn vừa bấm xoá, còn trong 5 giây hoàn tác: ẩn khỏi danh sách, chưa xoá thật. */
+const hiddenOrderIds = new Set();
 
 /* ============================================================
    Micro-interaction helpers
@@ -256,7 +406,14 @@ function switchTab(tabName, broadcast = false) {
     renderOrdersView();
   }
   if (tabName === 'sales') renderSalesView();
-  if (tabName === 'settings') renderSettingsView();
+  if (tabName === 'settings') {
+    renderSettingsView();
+    $('#settings-md')?.classList.remove('has-pane');
+  }
+  if (tabName === 'admin') {
+    loadAdminUsers();
+    loadSupportList();
+  }
 
   updateSidebarShopUI();
 
@@ -290,8 +447,7 @@ function updatePrinterStatusUI() {
   if (isConnected) {
     if (lbl) {
       lbl.textContent = 'Đã kết nối';
-      lbl.style.color = '';
-      lbl.style.background = '';
+      lbl.className = 'badge-in-use';
     }
     if (quickName) quickName.textContent = printerState.deviceName || 'Xprinter 80mm';
     if (quickLed) quickLed.style.background = '#16a34a';
@@ -299,8 +455,7 @@ function updatePrinterStatusUI() {
   } else {
     if (lbl) {
       lbl.textContent = 'Chưa kết nối';
-      lbl.style.color = '#6b7280';
-      lbl.style.background = '#f3f4f6';
+      lbl.className = 'badge-off';
     }
     if (quickName) quickName.textContent = 'Chưa kết nối máy in';
     if (quickLed) quickLed.style.background = '#9ca3af';
@@ -366,6 +521,7 @@ function setSelectedCustomerUid(uid, shouldSync = true) {
 }
 
 function renderSessionsOverview() {
+  updateLiveDateLabel();
   const isDemo = isDemoAccount();
   const sessions = Array.isArray(state.sessions) ? state.sessions : [];
   const comments = getLiveComments();
@@ -384,7 +540,7 @@ function renderSessionsOverview() {
     const listBox = $('#sessions-list-container');
     if (listBox) {
       listBox.innerHTML = `
-        <div class="session-row-card" data-select-session="s_evening">
+        <div class="session-row-card" data-select-session="s_evening" role="button" tabindex="0">
           <div class="session-time-col">
             <span class="session-time-main">19:30</span>
             <span class="session-time-stem"></span>
@@ -415,7 +571,7 @@ function renderSessionsOverview() {
             <span class="session-chevron">›</span>
           </div>
         </div>
-        <div class="session-row-card" data-select-session="s_noon">
+        <div class="session-row-card" data-select-session="s_noon" role="button" tabindex="0">
           <div class="session-time-col">
             <span class="session-time-main">12:00</span>
             <span class="session-time-stem"></span>
@@ -453,7 +609,7 @@ function renderSessionsOverview() {
   const inDay = (ts) => isInSessionDayFilter(ts);
   const shownSessions = sessions
     // Phiên đang live chỉ hiện ở khoảng ngày có hôm nay, không lẫn sang "Hôm qua".
-    .filter((s) => inDay(s.startTs || 0) || (s.isLive && sessionDayFilter !== 'Hôm qua'))
+    .filter((s) => inDay(s.startTs || 0) || (s.isLive && inDay(Date.now())))
     .sort((a, b) => (b.startTs || 0) - (a.startTs || 0));
   const shownOrders = orders.filter((o) => inDay(Number(o.ts) || 0));
   const shownGuests = new Set(shownOrders.map((o) => (o.uniqueId || o.nickname || '').toLowerCase()));
@@ -464,19 +620,15 @@ function renderSessionsOverview() {
   if ($('#overview-cnt-guests')) $('#overview-cnt-guests').textContent = String(shownGuests.size);
   if ($('#overview-cnt-orders')) $('#overview-cnt-orders').textContent = String(shownOrders.length);
   if ($('#overview-sessions-sub')) $('#overview-sessions-sub').textContent = `${shownSessions.length} phiên`;
-  if ($('.sessions-section-heading h3')) $('.sessions-section-heading h3').textContent = `Các phiên · ${sessionDayFilter}`;
-  if (sessionDayFilter === 'Hôm nay' && $('#lbl-current-nav-date')) {
-    const now = new Date();
-    const wd = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][now.getDay()];
-    $('#lbl-current-nav-date').textContent = `Hôm nay · ${wd} ${pad2(now.getDate())}/${pad2(now.getMonth() + 1)}`;
-  }
+  if ($('.sessions-section-heading h3')) $('.sessions-section-heading h3').textContent = `Các phiên · ${liveRangeText()}`;
+
   renderTimelineChunks(sessions);
 
   const listBox = $('#sessions-list-container');
   if (listBox) {
     if (shownSessions.length === 0) {
       listBox.innerHTML = `
-        <div style="padding:32px 16px;text-align:center;color:var(--text-sub);background:#fff;border-radius:16px;border:1px solid var(--border-light)">
+        <div class="empty-box">
           <div style="font-weight:700;font-size:15px;color:var(--text-main);margin-bottom:6px">Chưa có phiên live nào</div>
           <div style="font-size:13px">Bấm nút <b>+ Live mới</b> ở góc trên bên phải để theo dõi TikTok Live.</div>
         </div>
@@ -487,7 +639,7 @@ function renderSessionsOverview() {
           const sessOrders = orders.filter((o) => (o.items || []).some((it) => it.sessionId === s.id));
           const sessGuests = new Set(sessOrders.map((o) => (o.uniqueId || o.nickname || '').toLowerCase()));
           return `
-          <div class="session-row-card" data-select-session="${esc(s.id)}">
+          <div class="session-row-card" data-select-session="${esc(s.id)}" role="button" tabindex="0">
             <div class="session-time-col">
               <span class="session-time-main">${esc(s.timeStr || 'Live')}</span>
               <span class="session-time-stem"></span>
@@ -526,7 +678,55 @@ function liveDuration(startTs) {
   return mins >= 60 ? `${Math.floor(mins / 60)}g ${mins % 60}p` : `${mins}p`;
 }
 
+/** Khoảng ngày tự chọn ở tab Bình luận, dùng khi sessionDayFilter === 'range'. */
+let liveDayFrom = null;
+let liveDayTo = null;
+
+/** Ngày đang xem nếu bộ lọc là đúng một ngày, không thì null. */
+function liveSingleDay() {
+  const today = dayStart();
+  if (sessionDayFilter === 'Hôm nay') return today;
+  if (sessionDayFilter === 'Hôm qua') return addDays(today, -1);
+  if (sessionDayFilter === 'range' && liveDayFrom === liveDayTo) return liveDayFrom;
+  return null;
+}
+
+function liveRangeText() {
+  if (sessionDayFilter !== 'range') return sessionDayFilter;
+  return liveDayFrom === liveDayTo ? dayText(liveDayFrom) : `${dayText(liveDayFrom)} → ${dayText(liveDayTo)}`;
+}
+
+function updateLiveDateLabel() {
+  const today = dayStart();
+  const single = liveSingleDay();
+  const prefix = single === today ? 'Hôm nay · ' : single === addDays(today, -1) ? 'Hôm qua · ' : '';
+  if ($('#lbl-current-nav-date')) $('#lbl-current-nav-date').textContent = single !== null ? prefix + dayText(single) : liveRangeText();
+  if ($('#live-header-date')) {
+    const text = new Date().toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
+    $('#live-header-date').textContent = text.charAt(0).toUpperCase() + text.slice(1);
+  }
+  if ($('#btn-next-day-nav')) $('#btn-next-day-nav').disabled = single === null || single >= today;
+  if ($('#btn-prev-day-nav')) $('#btn-prev-day-nav').disabled = single === null;
+  $$('[data-day-chip]').forEach((b) => b.classList.toggle('active', b.dataset.dayChip === sessionDayFilter));
+}
+
+function setLiveRange(from, to = from) {
+  const today = dayStart();
+  liveDayFrom = Math.min(from, to);
+  liveDayTo = Math.max(from, to);
+  const one = liveDayFrom === liveDayTo;
+  sessionDayFilter = one && liveDayFrom === today ? 'Hôm nay' : one && liveDayFrom === addDays(today, -1) ? 'Hôm qua' : 'range';
+  renderSessionsOverview();
+}
+
+function shiftLiveDay(n) {
+  const cur = liveSingleDay();
+  if (cur === null) return;
+  setLiveRange(Math.min(dayStart(addDays(cur, n)), dayStart()));
+}
+
 function isInSessionDayFilter(ts) {
+  if (sessionDayFilter === 'range') return ts >= liveDayFrom && ts < addDays(liveDayTo, 1);
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const t0 = startOfToday.getTime();
@@ -556,7 +756,7 @@ function renderTimelineChunks(sessions) {
     .map((s) => {
       const left = pct(s.startTs);
       const width = Math.max(pct(s.isLive ? now : s.endTs || s.startTs) - left, 0.6);
-      return `<div class="timeline-live-chunk ${s.isLive ? 'active-chunk' : ''}" style="left:${left}%;width:${width}%"></div>`;
+      return `<div class="timeline-live-chunk ${s.isLive ? 'active-chunk' : ''}" data-select-session="${esc(s.id)}" title="${esc(s.name || 'Phiên live')}" style="left:${left}%;width:${width}%"></div>`;
     })
     .join('');
   bar.innerHTML = `${chunks}<div class="timeline-cursor-line" style="left:${pct(now)}%"></div>`;
@@ -583,7 +783,7 @@ function renderCommentScopeHeader() {
       : null;
     stopBtn.hidden = !target;
     stopBtn.dataset.stopLive = target ? target.username : '';
-    stopBtn.textContent = target ? `■ Dừng live @${target.username}` : '■ Dừng live';
+    stopBtn.textContent = target ? `Dừng live @${target.username}` : 'Dừng live';
   }
   if ($('#session-subtitle-text')) {
     $('#session-subtitle-text').textContent = session
@@ -657,19 +857,19 @@ function setCommentScope(sessionId) {
   }
 }
 
-$('#btn-stop-live')?.addEventListener('click', (e) => {
+$('#btn-stop-live')?.addEventListener('click', async (e) => {
   const username = e.currentTarget.dataset.stopLive;
   if (!username) return;
-  if (!window.confirm(`Dừng theo dõi live @${username}?`)) return;
+  if (!(await askStopLive(username))) return;
   if (!sendLiveCommand('disconnect', username)) toast('Chưa nối được server, thử lại sau', '⚠️');
 });
 
-$('#active-lives-strip')?.addEventListener('click', (e) => {
+$('#active-lives-strip')?.addEventListener('click', async (e) => {
   const stop = e.target.closest('[data-stop-live]');
   if (stop) {
     e.stopPropagation();
     const username = stop.dataset.stopLive;
-    if (!window.confirm(`Dừng theo dõi live @${username}?`)) return;
+    if (!(await askStopLive(username))) return;
     if (!sendLiveCommand('disconnect', username)) toast('Chưa nối được server, thử lại sau', '⚠️');
     return;
   }
@@ -693,7 +893,11 @@ function formatCommentText(rawText) {
 }
 
 /** Từ khoá chốt đơn, giống mặc định của app iPhone và Android. */
-const CLOSING_KEYWORDS = ['chot', 'lay'];
+const closingKeywords = () =>
+  String(S().triggers || 'chot, lay')
+    .split(',')
+    .map((k) => stripAccents(k.trim().toLowerCase()))
+    .filter(Boolean);
 
 /**
  * Bình luận chốt đơn: đã in, có từ khoá chốt, hoặc chỉ ghi mã.
@@ -702,7 +906,7 @@ const CLOSING_KEYWORDS = ['chot', 'lay'];
 function isClosingComment(c) {
   if (c.printed) return true;
   const text = stripAccents(String(c.comment || '').toLowerCase());
-  if (CLOSING_KEYWORDS.some((k) => text.includes(k))) return true;
+  if (closingKeywords().some((k) => text.includes(k))) return true;
   return isOnlyCodes(c.comment, priceOpts());
 }
 
@@ -792,7 +996,7 @@ function renderCommentStream() {
   if (filtered.length === 0) {
     const scopeLive = commentScopeSessionId && activeLives.some((l) => l.sessionId === commentScopeSessionId);
     container.innerHTML = `
-      <div style="padding:32px 16px;text-align:center;color:var(--text-sub);font-size:13.5px">
+      <div class="empty-box">
         ${
           olderLoading
             ? 'Đang tải bình luận của phiên này...'
@@ -829,7 +1033,7 @@ function renderCommentStream() {
       // Bình luận nào cũng in được: không có giá thì vẫn lưu vào khách với giá 0.
       const printBtnHtml = `
         <button class="btn-cmt-quick-print ${isPrinted ? 'printed' : ''}" data-cmt-print-id="${esc(c.id)}" data-cmt-print-user="${esc(c.uniqueId)}">
-          <span>🖨</span>
+          ${icon('print', 'sm')}
           <span>${isPrinted ? 'Đã in' : 'In'}</span>
         </button>
       `;
@@ -841,7 +1045,7 @@ function renderCommentStream() {
       return `
         <div class="comment-row-item ${isNewRow ? 'is-new' : ''}" data-comment-user="${esc(c.uniqueId)}">
           <div class="comment-left">
-            <div class="user-circle-avatar ${warmClass}">${avatarInitial(c.nickname || c.uniqueId)}</div>
+            <button type="button" class="user-circle-avatar ${warmClass}" data-cmt-profile="${esc(c.uniqueId)}" aria-label="Xem hồ sơ của ${esc(c.nickname || c.uniqueId)}">${avatarInitial(c.nickname || c.uniqueId)}</button>
             <div class="comment-content-wrap">
               <div class="comment-user-row">
                 <span class="comment-user-name">${esc(c.nickname || c.uniqueId)}</span>
@@ -927,6 +1131,14 @@ $('#comment-stream-container')?.addEventListener('click', (e) => {
     const uid = btnPrint.dataset.cmtPrintUser;
     setSelectedCustomerUid(uid);
     printSingleComment(btnPrint.dataset.cmtPrintId);
+    return;
+  }
+  const who = e.target.closest('[data-cmt-profile]');
+  if (who) {
+    const uid = who.dataset.cmtProfile;
+    if (!findCustomerByUid(uid)) return toast('Khách này chưa có đơn nên chưa có hồ sơ', '⚠️');
+    switchTab('customers');
+    openCustomerProfileView(uid);
   }
 });
 
@@ -996,42 +1208,19 @@ $$('[data-day-chip]').forEach((btn) => {
   btn.addEventListener('click', () => {
     $$('[data-day-chip]').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
-    const lbl = btn.dataset.dayChip;
-    sessionDayFilter = lbl;
-    if ($('#lbl-current-nav-date')) {
-      $('#lbl-current-nav-date').textContent =
-        lbl === 'Hôm nay' ? 'Hôm nay · CN 25/10' : lbl === 'Hôm qua' ? 'Hôm qua · T7 24/10' : lbl;
-    }
+    sessionDayFilter = btn.dataset.dayChip;
     renderSessionsOverview();
   });
 });
 
-$('#btn-date-picker-trigger')?.addEventListener('click', () => {
-  $('#modal-filter-time')?.showModal();
-});
+$('#btn-date-picker-trigger')?.addEventListener('click', openLiveTimeFilter);
 
-let currentNavDateOffset = 0;
-const dateLabels = ['Hôm nay · CN 25/10', 'Hôm qua · T7 24/10', 'T6 23/10', 'T5 22/10'];
-
-$('#btn-prev-day-nav')?.addEventListener('click', () => {
-  if (currentNavDateOffset < dateLabels.length - 1) {
-    currentNavDateOffset++;
-    if ($('#lbl-current-nav-date')) $('#lbl-current-nav-date').textContent = dateLabels[currentNavDateOffset];
-    toast(`Xem lại phiên live: ${dateLabels[currentNavDateOffset]}`, '🗓');
-  }
-});
-
-$('#btn-next-day-nav')?.addEventListener('click', () => {
-  if (currentNavDateOffset > 0) {
-    currentNavDateOffset--;
-    if ($('#lbl-current-nav-date')) $('#lbl-current-nav-date').textContent = dateLabels[currentNavDateOffset];
-    toast(`Xem lại phiên live: ${dateLabels[currentNavDateOffset]}`, '🗓');
-  }
-});
+$('#btn-prev-day-nav')?.addEventListener('click', () => shiftLiveDay(-1));
+$('#btn-next-day-nav')?.addEventListener('click', () => shiftLiveDay(1));
 
 
 /* ---------- Bảng "Xem lại thời điểm" dùng để lọc đơn theo ngày / khoảng ngày ---------- */
-let timeFilterCtx = null; // 'orders' khi mở từ tab Đơn hàng
+let timeFilterCtx = null; // 'orders' khi mở từ tab Đơn hàng, 'live' khi mở từ tab Bình luận
 const calSel = { month: 0, from: null, to: null };
 const MONTHS = ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6', 'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'];
 const minText = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -1097,6 +1286,32 @@ function openOrderTimeFilter() {
   calSel.month = orderDayTo;
   $('#input-time-from').value = minText(orderMinFrom);
   $('#input-time-to').value = minText(orderMinTo);
+  $('#time-range-block').hidden = false;
+  renderOrderCalendar();
+  markTimeChip();
+  $('#modal-filter-time')?.showModal();
+}
+
+function openLiveTimeFilter() {
+  timeFilterCtx = 'live';
+  const today = dayStart();
+  const monthStart = new Date(today);
+  monthStart.setDate(1);
+  const [from, to] =
+    sessionDayFilter === 'range'
+      ? [liveDayFrom, liveDayTo]
+      : sessionDayFilter === 'Hôm qua'
+      ? [addDays(today, -1), addDays(today, -1)]
+      : sessionDayFilter === '7 ngày'
+      ? [addDays(today, -6), today]
+      : sessionDayFilter === 'Tháng này'
+      ? [monthStart.getTime(), today]
+      : [today, today];
+  calSel.from = from;
+  calSel.to = to;
+  calSel.month = to;
+  // Tab Bình luận chỉ lọc theo ngày, không theo khung giờ.
+  $('#time-range-block').hidden = true;
   renderOrderCalendar();
   markTimeChip();
   $('#modal-filter-time')?.showModal();
@@ -1107,7 +1322,7 @@ $('#modal-filter-time')?.addEventListener('close', () => {
 });
 
 $('#cal-grid-tbody')?.addEventListener('click', (e) => {
-  if (timeFilterCtx === 'orders') {
+  if (timeFilterCtx) {
     const cell = e.target.closest('td[data-cal-ts]');
     if (!cell || cell.classList.contains('future')) return;
     const t = Number(cell.dataset.calTs);
@@ -1150,7 +1365,7 @@ function renderSavedLiveIds() {
   const accounts = Array.isArray(state.accounts) ? state.accounts : [];
   if (accounts.length === 0) {
     container.innerHTML = `
-      <div style="padding:14px;text-align:center;color:var(--text-sub);font-size:13px;background:#fbf9f6;border-radius:10px;border:1px dashed var(--border-light)">
+      <div class="empty-box">
         Chưa có ID TikTok nào được lưu. Hãy nhập ID TikTok Live bên dưới.
       </div>
     `;
@@ -1203,7 +1418,7 @@ $('#saved-live-ids-container')?.addEventListener('click', (e) => {
 $('#btn-confirm-start-live')?.addEventListener('click', () => {
   const input = $('#input-new-live-id');
   const val = parseLiveId(input.value);
-  if (!val) return toast('Vui lòng nhập ID TikTok Live hoặc dán link phiên live', '⚠️');
+  if (!val) return fieldError(input, 'Nhập ID TikTok Live hoặc dán link phiên live');
 
   if ($('#chk-remember-live-id')?.checked) {
     addNewAccount({ name: val, handle: '@' + val, avatar: val.slice(0, 2).toUpperCase() });
@@ -1223,15 +1438,13 @@ $('#btn-paste-live-id')?.addEventListener('click', async () => {
   } catch {}
 });
 
-$('#btn-open-time-filter')?.addEventListener('click', () => {
-  $('#modal-filter-time')?.showModal();
-});
+
 
 $$('[data-time-chip]').forEach((btn) => {
   btn.addEventListener('click', () => {
     $$('[data-time-chip]').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
-    if (timeFilterCtx !== 'orders') return;
+    if (!timeFilterCtx) return;
     const r = markTimeChip()[btn.dataset.timeChip];
     if (!r) return;
     [calSel.from, calSel.to] = r;
@@ -1242,7 +1455,7 @@ $$('[data-time-chip]').forEach((btn) => {
 });
 
 $('#btn-cal-prev')?.addEventListener('click', () => {
-  if (timeFilterCtx !== 'orders') return;
+  if (!timeFilterCtx) return;
   const d = new Date(calSel.month);
   d.setDate(1);
   d.setMonth(d.getMonth() - 1);
@@ -1250,7 +1463,7 @@ $('#btn-cal-prev')?.addEventListener('click', () => {
   renderOrderCalendar();
 });
 $('#btn-cal-next')?.addEventListener('click', () => {
-  if (timeFilterCtx !== 'orders') return;
+  if (!timeFilterCtx) return;
   const d = new Date(calSel.month);
   d.setDate(1);
   d.setMonth(d.getMonth() + 1);
@@ -1269,8 +1482,14 @@ $('#btn-apply-time-filter')?.addEventListener('click', () => {
     toast(`Đang xem đơn ${orderRangeLabel()}`, '🗓');
     return;
   }
+  if (timeFilterCtx === 'live') {
+    const from = calSel.from ?? dayStart();
+    const to = calSel.to ?? from;
+    $('#modal-filter-time')?.close();
+    setLiveRange(from, to);
+    return;
+  }
   $('#modal-filter-time')?.close();
-  toast('Đã áp dụng bộ lọc thời điểm', '✓');
 });
 
 // Luồng Live thật từ Server hoặc mô phỏng đồng bộ giữa Web & App
@@ -1426,7 +1645,7 @@ function renderCustomersView() {
 
   if (filtered.length === 0) {
     container.innerHTML = `
-      <div style="padding:32px 16px;text-align:center;color:var(--text-sub);background:#fff;border-radius:16px;border:1px solid var(--border-light)">
+      <div class="empty-box">
         Chưa có khách hàng nào. Khách hàng sẽ tự động được lưu khi chốt đơn trên Live hoặc tạo đơn mới.
       </div>
     `;
@@ -1445,7 +1664,7 @@ function renderCustomersView() {
       const warmClass = isWarmAvatar(c) ? 'warm' : '';
 
       return `
-        <div class="customer-row-item" data-view-profile="${esc(c.uniqueId)}">
+        <div class="customer-row-item${c.uniqueId === currentProfileUniqueId ? ' active' : ''}" data-view-profile="${esc(c.uniqueId)}" role="button" tabindex="0">
           <div class="cust-row-left">
             <div class="user-circle-avatar ${warmClass}">${avatarInitial(c.name || c.uniqueId)}</div>
             <div class="cust-row-info">
@@ -1473,6 +1692,22 @@ $('#customers-list-container')?.addEventListener('click', (e) => {
   }
 });
 
+/** Nhãn trạng thái thật của đơn, dùng ở lịch sử mua hàng của khách. */
+function orderStateBadge(o) {
+  const st = shipStateOf(o);
+  const [text, cls] =
+    o.status === 'done'
+      ? ['Đã giao', 'status-done-badge']
+      : o.status === 'shipping' || st === 'exported' || st === 'gone'
+      ? ['Đang giao', 'ship-tag-ready']
+      : st === 'ready'
+      ? ['Chờ gửi', 'ship-tag-ready']
+      : st === 'hold'
+      ? ['Gom sau', 'ship-tag-old']
+      : ['Đơn mới', 'status-new-badge'];
+  return `<span class="badge-order-status ${cls}">${text}</span>`;
+}
+
 const findCustomerByUid = (uniqueId) =>
   state.customers.find((c) => (c.uniqueId || '').toLowerCase() === (uniqueId || '').toLowerCase());
 
@@ -1485,6 +1720,7 @@ function openCustomerProfileView(uniqueId) {
 
   $('#subview-customers-list').style.display = 'none';
   $('#subview-customer-profile').style.display = 'block';
+  $$('.customer-row-item').forEach((r) => r.classList.toggle('active', r.dataset.viewProfile === cust.uniqueId));
 
   if ($('#prof-cust-avatar')) {
     $('#prof-cust-avatar').textContent = avatarInitial(cust.name);
@@ -1522,10 +1758,9 @@ function openCustomerProfileView(uniqueId) {
   if (histContainer) {
     histContainer.innerHTML = custOrders
       .map((o) => {
-        const isDone = o.status === 'done';
         const itemCount = o.items?.reduce((s, it) => s + (Number(it.qty) || 1), 0) || o.items?.length || 1;
         return `
-          <div class="history-order-row" data-order-click="${o.id}" style="cursor:pointer">
+          <div class="history-order-row" data-order-click="${o.id}" role="button" tabindex="0">
             <div class="hist-order-date">
               <span class="hist-date-main">${esc(o.dateStr || '25/10')}</span>
               <span class="hist-time-sub">${esc(o.timeStr || '20:42')}</span>
@@ -1533,9 +1768,7 @@ function openCustomerProfileView(uniqueId) {
             <span class="hist-items-count">${itemCount} sản phẩm</span>
             <div class="hist-right-stack">
               <span class="hist-amount">${formatVNDHtml(o.total || 0)}</span>
-              <span class="badge-order-status ${isDone ? 'status-done-badge' : 'status-new-badge'}">
-                ${isDone ? 'Đã giao' : 'Đơn mới'}
-              </span>
+              ${orderStateBadge(o)}
             </div>
           </div>
         `;
@@ -1835,9 +2068,9 @@ $('#area-input-ward')?.addEventListener('change', updateAreaSummary);
 
 $('#btn-confirm-area')?.addEventListener('click', () => {
   const a = readAreaInputs();
-  if (!a.province) return toast('Chọn tỉnh / thành phố', '⚠️');
-  if (areaMode === 'old' && !a.district) return toast('Chọn quận / huyện', '⚠️');
-  if (!a.ward) return toast('Chọn phường / xã trong danh sách', '⚠️');
+  if (!a.province) return fieldError('#area-input-province', 'Chọn tỉnh / thành phố');
+  if (areaMode === 'old' && !a.district) return fieldError('#area-input-district', 'Chọn quận / huyện');
+  if (!a.ward) return fieldError('#area-input-ward', 'Chọn phường / xã trong danh sách');
   editingArea = a;
   showEditingArea();
   $('#modal-select-area')?.close();
@@ -1848,7 +2081,7 @@ $('#btn-save-address-changes')?.addEventListener('click', () => {
   const phone = $('#edit-addr-input-phone').value.trim();
   const street = $('#edit-addr-input-street').value.trim();
   const note = $('#edit-addr-input-note')?.value.trim() || '';
-  if (!name) return toast('Vui lòng nhập họ tên người nhận', '⚠️');
+  if (!name) return fieldError('#edit-addr-input-name', 'Nhập họ tên người nhận');
 
   if (currentProfileUniqueId) {
     updateCustomerInfo(currentProfileUniqueId, {
@@ -1932,9 +2165,9 @@ function renderOrdersView() {
   // Chỉ hiển thị các đơn hàng hiện tại (không hiển thị các đơn lịch sử cũ từ tuần trước trong danh sách hôm nay)
   // Tab "Tất cả" hiện đơn của mọi ngày; các tab còn lại theo ngày / khoảng ngày đang chọn.
   const everyOrders = (state.orders || [])
-    .filter((o) => !String(o.id).startsWith('o_linh_prev_'))
+    .filter((o) => !String(o.id).startsWith('o_linh_prev_') && !hiddenOrderIds.has(o.id))
     .sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0));
-  const allOrders = scopedOrders().filter((o) => !String(o.id).startsWith('o_linh_prev_'));
+  const allOrders = scopedOrders().filter((o) => !String(o.id).startsWith('o_linh_prev_') && !hiddenOrderIds.has(o.id));
   const q = orderSearchQuery.toLowerCase();
 
   // Đơn mới = chưa duyệt gửi; Chờ gửi = đã duyệt (sẵn sàng xuất); Gom sau = khách hẹn gom.
@@ -1960,6 +2193,22 @@ function renderOrdersView() {
   if ($('#chip-ord-hold')) $('#chip-ord-hold').textContent = `Gom sau · ${holdCnt}`;
   renderVtpReadyBanner();
   renderVtpAttention();
+  if ($('#order-range-label')) $('#order-range-label').textContent = orderRangeLabel();
+  const showsAllDays = orderFilter === 'all' || orderFilter === 'vtpattn';
+  $('#btn-order-filter-icon')?.classList.toggle('is-muted', showsAllDays);
+  if ($('#btn-order-filter-icon')) {
+    $('#btn-order-filter-icon').title = showsAllDays ? 'Bộ lọc này hiện đơn của mọi ngày. Khoảng ngày áp dụng cho các bộ lọc còn lại.' : 'Chọn ngày hoặc khoảng ngày';
+  }
+  const attnChip = $('#chip-ord-attn');
+  if (attnChip) {
+    attnChip.hidden = orderFilter !== 'vtpattn';
+    attnChip.classList.toggle('active', orderFilter === 'vtpattn');
+  }
+  const navBadge = $('#nav-orders-badge');
+  if (navBadge) {
+    navBadge.hidden = !displayNew;
+    navBadge.textContent = String(displayNew);
+  }
 
   const filtered = (orderFilter === 'all' || orderFilter === 'vtpattn' ? everyOrders : allOrders).filter((o) => {
     if (orderFilter === 'new' && shipStateOf(o) !== 'ask') return false;
@@ -1977,7 +2226,7 @@ function renderOrdersView() {
 
   if (filtered.length === 0) {
     container.innerHTML = `
-      <div style="padding:32px 16px;text-align:center;color:var(--text-sub);background:#fff;border-radius:16px;border:1px solid var(--border-light)">
+      <div class="empty-box">
         Chưa có đơn hàng nào. Bấm <b>+ Tạo đơn</b> hoặc kết nối Live để chốt đơn tự động.
       </div>
     `;
@@ -2005,7 +2254,7 @@ function renderOrdersView() {
       const shipLabel = shipButtonLabel(o);
 
       return `
-        <div class="order-card-item${hasOldGom ? ' has-old-gom' : ''}" data-order-row="${o.id}">
+        <div class="order-card-item${hasOldGom ? ' has-old-gom' : ''}${o.id === currentDetailOrderId ? ' active' : ''}" data-order-row="${o.id}" role="button" tabindex="0">
           <div class="order-card-top">
             <div class="order-card-user">
               <div class="user-circle-avatar ${warmClass}">${avatarInitial(o.nickname || o.uniqueId)}</div>
@@ -2030,7 +2279,7 @@ function renderOrdersView() {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
               <span>${shipLabel}</span>
             </button>
-            <button class="btn-ord-card-more" data-act-more="${o.id}" title="Thao tác khác">•••</button>
+            <button class="btn-ord-card-more" data-act-more="${o.id}" title="Thao tác khác" aria-label="Thao tác khác">${icon('more')}</button>
           </div>
         </div>
       `;
@@ -2139,15 +2388,45 @@ $('#btn-oc-detail')?.addEventListener('click', () => {
   if (ocOrderId) openOrderDetailView(ocOrderId);
 });
 
+/** Hỏi lại rồi xoá đơn; trong 5 giây đầu bấm Hoàn tác thì đơn trở lại như cũ. */
+async function confirmDeleteOrder(ord) {
+  if (!ord) return;
+  const yes = await askConfirm({
+    title: 'Xoá đơn này?',
+    message: `Xoá đơn ${ord.code || ''} của ${ord.nickname || ord.uniqueId}. Sau khi xoá có 5 giây để bấm Hoàn tác.`,
+    ok: 'Xoá đơn',
+    danger: true
+  });
+  if (!yes) return;
+  hiddenOrderIds.add(ord.id);
+  if (currentDetailOrderId === ord.id) {
+    currentDetailOrderId = null;
+    $('#subview-order-detail').style.display = 'none';
+    $('#subview-orders-list').style.display = 'block';
+  }
+  renderOrdersView();
+  const commit = () => {
+    if (!hiddenOrderIds.has(ord.id)) return;
+    hiddenOrderIds.delete(ord.id);
+    removeOrder(ord.id);
+    renderOrdersView();
+  };
+  const timer = setTimeout(commit, 5000);
+  // Đóng trang trong lúc chờ thì xoá luôn, không để đơn sống lại.
+  window.addEventListener('pagehide', commit, { once: true });
+  toast('Đã xoá đơn hàng', '✓', 5000, {
+    label: 'Hoàn tác',
+    onClick: () => {
+      clearTimeout(timer);
+      hiddenOrderIds.delete(ord.id);
+      renderOrdersView();
+    }
+  });
+}
+
 $('#sheet-act-delete')?.addEventListener('click', () => {
   $('#modal-order-menu')?.close();
-  if (currentSheetOrder) {
-    if (confirm(`Bạn có chắc muốn xoá đơn ${currentSheetOrder.code} của ${currentSheetOrder.nickname}?`)) {
-      removeOrder(currentSheetOrder.id);
-      renderOrdersView();
-      toast('Đã xoá đơn hàng!', '🗑');
-    }
-  }
+  confirmDeleteOrder(currentSheetOrder);
 });
 
 // View Chi tiết đơn hàng (Screen 8)
@@ -2158,6 +2437,7 @@ function openOrderDetailView(orderId) {
 
   $('#subview-orders-list').style.display = 'none';
   $('#subview-order-detail').style.display = 'block';
+  $$('.order-card-item').forEach((r) => r.classList.toggle('active', r.dataset.orderRow === orderId));
 
   const badgeEl = $('#detail-order-badge');
   if (badgeEl) {
@@ -2815,7 +3095,7 @@ function openVtpConnect() {
   $('#vtp-connect-error').hidden = true;
   $('#vtp-token-input').value = '';
   renderVtpConnect();
-  $('#modal-vtp-connect')?.showModal();
+  openSettingsPane('vtp');
   if (vtpConnected()) loadVtpSenders();
 }
 
@@ -2915,7 +3195,7 @@ $('#btn-vtp-hook-copy')?.addEventListener('click', async () => {
 });
 
 $('#btn-vtp-disconnect')?.addEventListener('click', async () => {
-  if (!confirm('Ngắt kết nối Viettel Post? App sẽ quay về xuất Excel như cũ. Vận đơn đã tạo vẫn giữ nguyên.')) return;
+  if (!(await askConfirm({ title: 'Ngắt kết nối Viettel Post?', message: 'App sẽ quay về xuất Excel như cũ. Vận đơn đã tạo vẫn giữ nguyên.', ok: 'Ngắt kết nối', danger: true }))) return;
   await apiFetch('/api/vtp/disconnect', jsonPost({})).catch(() => null);
   vtpConn = { connected: false };
   applyVtpConnUI();
@@ -3084,6 +3364,8 @@ function renderVtpAttention() {
     .join(' · ');
 }
 
+$('#chip-ord-attn')?.addEventListener('click', () => $('#chip-ord-all')?.click());
+
 $('#vtp-attention')?.addEventListener('click', () => {
   $$('[data-order-filter]').forEach((b) => b.classList.remove('active'));
   orderFilter = 'vtpattn';
@@ -3140,7 +3422,7 @@ $('#detail-vtp-box')?.addEventListener('click', async (e) => {
   }
   if (!vtpConnected()) return toast('Chưa kết nối Viettel Post', '⚠️');
   if (act === 'cancel') {
-    if (!confirm(`Huỷ vận đơn ${code}? Đơn sẽ về lại Chờ gửi.`)) return;
+    if (!(await askConfirm({ title: 'Huỷ vận đơn?', message: `Huỷ vận đơn ${code} trên Viettel Post. Đơn sẽ về lại Chờ gửi.`, ok: 'Huỷ vận đơn', danger: true }))) return;
     btn.disabled = true;
     const r = await apiFetch('/api/vtp/cancel', jsonPost({ code })).catch(() => null);
     btn.disabled = false;
@@ -3150,9 +3432,17 @@ $('#detail-vtp-box')?.addEventListener('click', async (e) => {
   }
   if (act === 'redeliver' || act === 'return') {
     const type = act === 'redeliver' ? 3 : 2;
-    const note = act === 'redeliver' ? prompt('Ghi chú cho bưu tá (ví dụ: gọi trước khi giao, giao giờ hành chính):', '') : '';
-    if (note === null) return;
-    if (act === 'return' && !confirm(`Đồng ý cho Viettel Post hoàn đơn ${code} về shop?`)) return;
+    const note =
+      act === 'redeliver'
+        ? await askConfirm({
+            title: 'Yêu cầu phát lại',
+            message: `Vận đơn ${code}`,
+            ok: 'Gửi yêu cầu',
+            input: { label: 'Ghi chú cho bưu tá', placeholder: 'Ví dụ: gọi trước khi giao, giao giờ hành chính' }
+          })
+        : '';
+    if (note === false) return;
+    if (act === 'return' && !(await askConfirm({ title: 'Đồng ý hoàn đơn?', message: `Viettel Post sẽ hoàn vận đơn ${code} về shop.`, ok: 'Đồng ý hoàn' }))) return;
     btn.disabled = true;
     const r = await apiFetch('/api/vtp/resolve', jsonPost({ code, type, note })).catch(() => null);
     btn.disabled = false;
@@ -3195,7 +3485,7 @@ function renderEditOrderItemsModal() {
             <input type="number" min="1" class="form-field-input item-edit-qty" value="${it.qty || 1}" style="width:65px;text-align:center" />
           </div>
           <div style="display:flex;align-items:center;gap:4px">
-            <input type="text" class="form-field-input item-edit-price" value="${formatVND(it.price || 0)}" placeholder="Giá tiền" />
+            <input type="text" class="form-field-input item-edit-price" value="${it.price ? formatVND(it.price) : ''}" placeholder="Giá tiền" inputmode="numeric" />
           </div>
           <button type="button" class="btn-remove-item-row" data-remove-item-idx="${idx}" title="Xoá món này">×</button>
         </div>
@@ -3213,11 +3503,12 @@ function renderEditOrderItemsModal() {
 $('#btn-add-item-to-order')?.addEventListener('click', () => {
   editingOrderItemsCopy.push({
     id: 'it_' + Date.now().toString(36),
-    name: 'Mã ' + (Math.floor(Math.random() * 80) + 100),
-    price: 150000,
+    name: '',
+    price: 0,
     qty: 1
   });
   renderEditOrderItemsModal();
+  $$('#edit-items-container .item-edit-name').pop()?.focus();
 });
 
 $('#edit-items-container')?.addEventListener('input', (e) => {
@@ -3254,7 +3545,10 @@ $('#edit-items-container')?.addEventListener('click', (e) => {
 $('#btn-save-order-items')?.addEventListener('click', () => {
   const ord = state.orders.find((o) => o.id === currentDetailOrderId);
   if (ord) {
-    ord.items = editingOrderItemsCopy;
+    // Dòng trống (chưa gõ tên, chưa gõ giá) thì bỏ; có giá mà quên tên thì gọi là "Sản phẩm".
+    ord.items = editingOrderItemsCopy
+      .filter((it) => String(it.name || '').trim() || it.price)
+      .map((it) => ({ ...it, name: String(it.name || '').trim() || 'Sản phẩm' }));
     ord.total = ord.items.reduce((s, x) => s + (x.price || 0) * (x.qty || 1), 0);
     save('order_items_edited');
     openOrderDetailView(currentDetailOrderId);
@@ -3264,14 +3558,11 @@ $('#btn-save-order-items')?.addEventListener('click', () => {
 });
 
 $('#btn-detail-delete-order')?.addEventListener('click', () => {
-  if (confirm('Bạn có chắc chắn muốn xoá đơn này không thể khôi phục?')) {
-    removeOrder(currentDetailOrderId);
-    currentDetailOrderId = null;
-    $('#subview-order-detail').style.display = 'none';
-    $('#subview-orders-list').style.display = 'block';
-    renderOrdersView();
-    toast('Đã xoá đơn hàng!', '🗑');
-  }
+  confirmDeleteOrder(state.orders.find((o) => o.id === currentDetailOrderId));
+});
+
+$('#btn-detail-comments')?.addEventListener('click', () => {
+  openOrderComments(state.orders.find((o) => o.id === currentDetailOrderId));
 });
 
 // TẠO ĐƠN HÀNG MỚI
@@ -3288,7 +3579,7 @@ $('#btn-create-order-pill')?.addEventListener('click', () => {
 
 $('#btn-submit-create-order')?.addEventListener('click', () => {
   const name = $('#new-ord-name')?.value.trim();
-  if (!name) return toast('Vui lòng nhập tên khách hàng', '⚠️');
+  if (!name) return fieldError('#new-ord-name', 'Nhập tên khách hàng');
 
   const handle = ($('#new-ord-handle')?.value.trim() || name.toLowerCase().replace(/\s+/g, '')).replace(/^@/, '');
   const phone = $('#new-ord-phone')?.value.trim() || '';
@@ -3297,7 +3588,7 @@ $('#btn-submit-create-order')?.addEventListener('click', () => {
   const priceRaw = $('#new-ord-price')?.value.trim() || '';
   const price = parsePriceInput(priceRaw, Number(S().multiplier || 1000));
   const note = $('#new-ord-note')?.value.trim() || '';
-  if (!price) return toast('Vui lòng nhập giá sản phẩm', '⚠️');
+  if (!price) return fieldError('#new-ord-price', 'Nhập giá sản phẩm, ví dụ 150 hoặc 150000');
 
   const { order } = addOrMergeOrder({
     uniqueId: handle,
@@ -3356,7 +3647,7 @@ function renderSettingsView() {
   const accounts = Array.isArray(state.accounts) ? state.accounts : [];
   if (accounts.length === 0) {
     accountsContainer.innerHTML = `
-      <div style="padding:18px 16px;text-align:center;color:var(--text-sub);font-size:13.5px;border-bottom:1px solid var(--border-light)">
+      <div class="empty-box">
         Chưa có tài khoản TikTok nào. Bấm <b>+ Thêm tài khoản</b> bên dưới để liên kết shop của bạn.
       </div>
     `;
@@ -3366,7 +3657,7 @@ function renderSettingsView() {
   accountsContainer.innerHTML = accounts
     .map(
       (acc, idx) => `
-      <div class="account-item-box" data-account-card="${acc.id}">
+      <div class="account-item-box" data-account-card="${acc.id}" role="button" tabindex="0">
         <div class="acc-box-left">
           <div class="user-circle-avatar ${idx === 0 ? 'warm' : ''}" style="width:42px;height:42px">${esc(acc.avatar || 'TT')}</div>
           <div class="acc-name-handle">
@@ -3406,7 +3697,8 @@ $('#btn-add-tiktok-account')?.addEventListener('click', () => {
 $('#btn-save-new-account')?.addEventListener('click', () => {
   const name = $('#input-new-acc-name')?.value.trim();
   const handle = $('#input-new-acc-handle')?.value.trim();
-  if (!name || !handle) return toast('Vui lòng nhập tên Shop và username TikTok', '⚠️');
+  if (!name) return fieldError('#input-new-acc-name', 'Nhập tên shop');
+  if (!handle) return fieldError('#input-new-acc-handle', 'Nhập username TikTok');
 
   addNewAccount({
     name,
@@ -3419,9 +3711,9 @@ $('#btn-save-new-account')?.addEventListener('click', () => {
   toast(`Đã thêm${syncedWord()} tài khoản TikTok mới!`, '✓');
 });
 
-$('#menu-row-printer')?.addEventListener('click', () => $('#modal-printer-setup')?.showModal());
-$('#btn-sidebar-printer')?.addEventListener('click', () => $('#modal-printer-setup')?.showModal());
-$('#btn-header-printer-status')?.addEventListener('click', () => $('#modal-printer-setup')?.showModal());
+$('#menu-row-printer')?.addEventListener('click', () => openSettingsPane('printer'));
+$('#btn-sidebar-printer')?.addEventListener('click', () => openSettingsPane('printer'));
+$('#btn-header-printer-status')?.addEventListener('click', () => openSettingsPane('printer'));
 
 // Đồng bộ Web & App IPA Modal
 function openSyncSetupModal() {
@@ -3430,7 +3722,7 @@ function openSyncSetupModal() {
   }
   updateSyncUI(syncStatus);
   renderSyncGuide();
-  $('#modal-sync-setup')?.showModal();
+  openSettingsPane('sync');
 }
 
 async function renderSyncGuide() {
@@ -3472,12 +3764,14 @@ $('#btn-sync-pull-now')?.addEventListener('click', async () => {
 $('#menu-row-keywords')?.addEventListener('click', () => {
   if ($('#cfg-kw-multiplier')) $('#cfg-kw-multiplier').value = S().multiplier || '1000';
   if ($('#cfg-kw-autoprint')) $('#cfg-kw-autoprint').checked = S().autoPrint !== false;
-  $('#modal-keyword-setup')?.showModal();
+  if ($('#cfg-kw-triggers')) $('#cfg-kw-triggers').value = S().triggers || 'chốt, lấy';
+  openSettingsPane('keywords');
 });
 
 $('#btn-save-keyword-setup')?.addEventListener('click', () => {
   S().multiplier = $('#cfg-kw-multiplier')?.value || '1000';
   S().autoPrint = $('#cfg-kw-autoprint')?.checked;
+  S().triggers = $('#cfg-kw-triggers')?.value.trim() || 'chốt, lấy';
   save('settings_keywords');
   $('#modal-keyword-setup')?.close();
   toast('Đã lưu cấu hình bắt giá tự động!', '✓');
@@ -3486,7 +3780,26 @@ $('#btn-save-keyword-setup')?.addEventListener('click', () => {
 $('#menu-row-notify')?.addEventListener('click', () => {
   if ($('#cfg-notify-sound')) $('#cfg-notify-sound').checked = S().sound !== false;
   if ($('#cfg-notify-voice')) $('#cfg-notify-voice').checked = S().voiceEnabled === true;
-  $('#modal-notify-setup')?.showModal();
+  openSettingsPane('notify');
+});
+
+// Công tắc thông báo: gạt là lưu ngay.
+['#cfg-notify-sound', '#cfg-notify-voice'].forEach((sel) =>
+  $(sel)?.addEventListener('change', () => {
+    S().sound = $('#cfg-notify-sound')?.checked;
+    S().voiceEnabled = $('#cfg-notify-voice')?.checked;
+    save('settings_notify');
+  })
+);
+
+$('#menu-row-account')?.addEventListener('click', () => openSettingsPane('account'));
+$('#menu-row-tiktok')?.addEventListener('click', () => openSettingsPane('tiktok'));
+$('#btn-sidebar-shop-profile')?.addEventListener('click', () => openSettingsPane('tiktok'));
+$('#menu-row-admin')?.addEventListener('click', () => switchTab('admin'));
+$('#btn-settings-back')?.addEventListener('click', () => $('#settings-md')?.classList.remove('has-pane'));
+$('#btn-expired-help')?.addEventListener('click', () => {
+  $('#modal-access-expired')?.close();
+  openSupportChat();
 });
 
 $('#btn-test-chime')?.addEventListener('click', () => {
@@ -3541,7 +3854,7 @@ async function refreshSupportUnread() {
   } catch {}
 }
 
-const supportChatIsOpen = () => Boolean($('#modal-support-chat')?.open);
+const supportChatIsOpen = () => activeTab === 'settings' && settingsPane === 'help';
 let supportView = null; // null = danh sách, 'new' = phiên mới chưa gửi, còn lại = id phiên
 let supportThreads = [];
 
@@ -3645,7 +3958,7 @@ async function sendSupportMessage() {
 
 function openSupportChat() {
   supportView = null;
-  $('#modal-support-chat')?.showModal();
+  openSettingsPane('help');
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
   loadSupportChat();
 }
@@ -3726,6 +4039,8 @@ function switchAuthTab(mode = 'login') {
   if ($('#form-auth-login')) $('#form-auth-login').style.display = isLogin ? 'block' : 'none';
   if ($('#form-auth-register')) $('#form-auth-register').style.display = isLogin ? 'none' : 'block';
   showAuthBanner('');
+  $$('#auth-screen-overlay .field-error.auto').forEach((p) => p.remove());
+  $$('#auth-screen-overlay [aria-invalid]').forEach((x) => x.removeAttribute('aria-invalid'));
 }
 
 $('#tab-auth-login')?.addEventListener('click', () => switchAuthTab('login'));
@@ -3739,12 +4054,14 @@ $('#btn-auth-server-config')?.addEventListener('click', () => {
   openSyncSetupModal();
 });
 
-$('#nav-btn-admin-shortcut')?.addEventListener('click', () => {
-  switchTab('settings', false);
-  setTimeout(() => {
-    $('#admin-accounts-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, 80);
-});
+$$('[data-admin-tab]').forEach((btn) =>
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.adminTab;
+    $$('[data-admin-tab]').forEach((b) => b.classList.toggle('active', b === btn));
+    $('#admin-tab-users').hidden = tab !== 'users';
+    $('#admin-tab-support').hidden = tab !== 'support';
+  })
+);
 
 const timeLeft = (access) => remainingText(access.endsAt - Date.now());
 const accessDate = (ms) => new Date(ms).toLocaleDateString('vi-VN');
@@ -3853,7 +4170,7 @@ function applyAuthUserToUI(user) {
     $('#current-auth-username').textContent = user.username;
   }
   if ($('#current-auth-role-badge')) {
-    $('#current-auth-role-badge').textContent = isAdmin ? '🛡 Quản trị viên (Admin)' : 'Thành viên';
+    $('#current-auth-role-badge').textContent = isAdmin ? 'Quản trị viên' : 'Thành viên';
     $('#current-auth-role-badge').className = `role-pill-badge ${isAdmin ? 'admin' : 'user'}`;
   }
   if ($('#current-auth-desc')) {
@@ -3870,6 +4187,8 @@ function applyAuthUserToUI(user) {
   }
 
   if ($('#admin-support-panel')) $('#admin-support-panel').style.display = isAdmin ? 'block' : 'none';
+  if ($('#menu-row-admin')) $('#menu-row-admin').hidden = !isAdmin;
+  if (!isAdmin && activeTab === 'admin') switchTab('live');
   if (isAdmin) {
     loadAdminUsers();
     loadSupportList();
@@ -4000,7 +4319,7 @@ $('#form-auth-login')?.addEventListener('submit', async (e) => {
   const username = $('#auth-login-username')?.value.trim();
   const password = $('#auth-login-password')?.value || '';
   if (!username || !password) {
-    return showAuthBanner('Vui lòng nhập tên tài khoản và mật khẩu');
+    return fieldError(!username ? '#auth-login-username' : '#auth-login-password', !username ? 'Nhập tên tài khoản' : 'Nhập mật khẩu');
   }
 
   const btn = $('#btn-submit-login');
@@ -4047,13 +4366,13 @@ $('#form-auth-register')?.addEventListener('submit', async (e) => {
   const confirmPassword = $('#auth-reg-confirm')?.value || '';
 
   if (!username) {
-    return showAuthBanner('Vui lòng nhập tên tài khoản');
+    return fieldError('#auth-reg-username', 'Nhập tên tài khoản');
   }
   if (password.length < 6) {
-    return showAuthBanner('Mật khẩu phải có ít nhất 6 ký tự');
+    return fieldError('#auth-reg-password', 'Mật khẩu phải có ít nhất 6 ký tự');
   }
   if (password !== confirmPassword) {
-    return showAuthBanner('Xác nhận mật khẩu không khớp!');
+    return fieldError('#auth-reg-confirm', 'Hai ô mật khẩu không giống nhau');
   }
 
   const btn = $('#btn-submit-register');
@@ -4109,10 +4428,10 @@ $('#btn-submit-own-pass')?.addEventListener('click', async () => {
   const confirmPassword = $('#own-pass-confirm')?.value || '';
 
   if (!currentPassword || !newPassword) {
-    return toast('Vui lòng nhập đầy đủ mật khẩu hiện tại và mật khẩu mới', '⚠️');
+    return fieldError(!currentPassword ? '#own-pass-current' : '#own-pass-new', !currentPassword ? 'Nhập mật khẩu hiện tại' : 'Nhập mật khẩu mới');
   }
   if (newPassword !== confirmPassword) {
-    return toast('Xác nhận mật khẩu mới không khớp!', '⚠️');
+    return fieldError('#own-pass-confirm', 'Hai ô mật khẩu mới không giống nhau');
   }
 
   try {
@@ -4122,7 +4441,7 @@ $('#btn-submit-own-pass')?.addEventListener('click', async () => {
     });
     const data = await res.json();
     if (!res.ok || !data.ok) {
-      return toast(data.error || 'Không thể đổi mật khẩu', '⚠️');
+      return fieldError('#own-pass-current', data.error || 'Không thể đổi mật khẩu');
     }
     if (data.token) {
       setAuthSession(data.token, getCurrentUser());
@@ -4157,9 +4476,8 @@ function adminAccessText(access) {
 
 function adminAccessBadge(access) {
   if (!access || access.status === 'admin') return '';
-  const icon = { plan: '🎫', trial: '⏳', expired: '⛔' }[access.status];
   const short = access.status === 'plan' ? `Gói đến ${accessDate(access.endsAt)}` : adminAccessText(access);
-  return `<span class="status-pill-badge ${access.status === 'expired' ? 'locked' : access.status}">${icon} ${esc(short)}</span>`;
+  return `<span class="status-pill-badge ${access.status === 'expired' ? 'locked' : access.status}">${esc(short)}</span>`;
 }
 
 let targetPlanUserId = null;
@@ -4189,9 +4507,10 @@ $('#btn-submit-admin-plan')?.addEventListener('click', () => {
   });
 });
 
-$('#btn-revoke-admin-plan')?.addEventListener('click', () => {
+$('#btn-revoke-admin-plan')?.addEventListener('click', async () => {
   const user = adminUsersList.find((u) => u.id === targetPlanUserId);
-  if (!user || !confirm(`Thu hồi gói của tài khoản "${user.username}"?`)) return;
+  if (!user) return;
+  if (!(await askConfirm({ title: 'Thu hồi gói?', message: `Thu hồi gói của tài khoản "${user.username}". Tài khoản quay về trạng thái hết hạn.`, ok: 'Thu hồi gói', danger: true }))) return;
   submitPlanChange({ method: 'DELETE' }, (u) => `Đã thu hồi gói của "${u.username}"`);
 });
 
@@ -4199,6 +4518,7 @@ function renderAdminUsersTable() {
   const container = $('#admin-users-list');
   if (!container) return;
 
+  if ($('#admin-tab-users-count')) $('#admin-tab-users-count').textContent = String(adminUsersList.length);
   if ($('#admin-users-count-badge')) {
     const lockedCount = adminUsersList.filter((u) => u.locked).length;
     $('#admin-users-count-badge').textContent =
@@ -4227,7 +4547,7 @@ function renderAdminUsersTable() {
         : 'Hôm nay';
       const onlineBadge =
         u.onlineCount > 0
-          ? `<span style="color:#15803d;font-weight:700">● Online (${u.onlineCount} thiết bị)</span>`
+          ? `<span class="online-on">Online (${u.onlineCount} thiết bị)</span>`
           : `<span>Offline</span>`;
 
       return `
@@ -4240,10 +4560,10 @@ function renderAdminUsersTable() {
               <div class="auth-user-name-row">
                 <span style="font-weight:800;font-size:15.5px;color:var(--text-main)">${esc(u.username)}</span>
                 <span class="role-pill-badge ${u.role === 'admin' ? 'admin' : 'user'}">
-                  ${u.role === 'admin' ? '🛡 Admin' : 'Thành viên'}
+                  ${u.role === 'admin' ? 'Admin' : 'Thành viên'}
                 </span>
                 <span class="status-pill-badge ${u.locked ? 'locked' : 'active'}">
-                  ${u.locked ? '🔒 Đã khoá' : '✓ Hoạt động'}
+                  ${u.locked ? 'Đã khoá' : 'Hoạt động'}
                 </span>
                 ${adminAccessBadge(u.access)}
               </div>
@@ -4260,24 +4580,24 @@ function renderAdminUsersTable() {
             ${
               u.role !== 'admin'
                 ? `<button type="button" class="btn-admin-act plan-btn" data-admin-plan-id="${esc(u.id)}">
-                    🎫 Cấp gói
+                    Cấp gói
                   </button>`
                 : ''
             }
             ${
               !isPrimaryAdmin && !isSelf
                 ? `<button type="button" class="btn-admin-act ${u.locked ? 'unlock-btn' : 'lock-btn'}" data-admin-lock-id="${esc(u.id)}" data-admin-locked="${u.locked ? '1' : '0'}">
-                    ${u.locked ? '🔓 Mở khoá' : '🔒 Khoá TK'}
+                    ${u.locked ? 'Mở khoá' : 'Khoá'}
                   </button>`
                 : ''
             }
             <button type="button" class="btn-admin-act pass-btn" data-admin-pass-id="${esc(u.id)}" data-admin-pass-name="${esc(u.username)}">
-              🔑 Đổi pass
+              Đổi mật khẩu
             </button>
             ${
               !isPrimaryAdmin && !isSelf
                 ? `<button type="button" class="btn-admin-act del-btn" data-admin-delete-id="${esc(u.id)}" data-admin-delete-name="${esc(u.username)}">
-                    🗑 Xoá
+                    Xoá
                   </button>`
                 : ''
             }
@@ -4301,6 +4621,16 @@ $('#admin-users-list')?.addEventListener('click', async (e) => {
     const userId = lockBtn.dataset.adminLockId;
     const currentlyLocked = lockBtn.dataset.adminLocked === '1';
     const nextLocked = !currentlyLocked;
+    if (nextLocked) {
+      const target = adminUsersList.find((u) => u.id === userId);
+      const yes = await askConfirm({
+        title: `Khoá tài khoản ${target?.username || ''}?`,
+        message: 'Tài khoản bị thoát khỏi mọi thiết bị ngay lập tức và không đăng nhập lại được cho tới khi mở khoá.',
+        ok: 'Khoá tài khoản',
+        danger: true
+      });
+      if (!yes) return;
+    }
     try {
       const res = await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/lock`, {
         method: 'POST',
@@ -4357,7 +4687,7 @@ $('#admin-users-list')?.addEventListener('click', async (e) => {
   if (delBtn) {
     const userId = delBtn.dataset.adminDeleteId;
     const uname = delBtn.dataset.adminDeleteName || '';
-    if (!confirm(`Bạn có chắc chắn muốn xoá vĩnh viễn tài khoản "${uname}"?`)) return;
+    if (!(await askConfirm({ title: `Xoá tài khoản ${uname}?`, message: 'Xoá vĩnh viễn tài khoản và dữ liệu của tài khoản này. Không khôi phục được.', ok: 'Xoá tài khoản', danger: true }))) return;
     try {
       const res = await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
         method: 'DELETE'
@@ -4381,10 +4711,10 @@ $('#btn-confirm-admin-reset-pass')?.addEventListener('click', async () => {
   const confirmPassword = $('#admin-input-confirm-pass')?.value || '';
 
   if (newPassword.length < 6) {
-    return toast('Mật khẩu mới phải có ít nhất 6 ký tự', '⚠️');
+    return fieldError('#admin-input-new-pass', 'Mật khẩu mới phải có ít nhất 6 ký tự');
   }
   if (newPassword !== confirmPassword) {
-    return toast('Xác nhận mật khẩu mới không khớp!', '⚠️');
+    return fieldError('#admin-input-confirm-pass', 'Hai ô mật khẩu mới không giống nhau');
   }
 
   try {
@@ -4419,9 +4749,9 @@ $('#btn-submit-admin-create-user')?.addEventListener('click', async () => {
   const confirmPassword = $('#admin-create-confirm')?.value || '';
   const role = $('#admin-create-role')?.value || 'user';
 
-  if (!username) return toast('Vui lòng nhập tên tài khoản', '⚠️');
-  if (password.length < 6) return toast('Mật khẩu phải có ít nhất 6 ký tự', '⚠️');
-  if (password !== confirmPassword) return toast('Xác nhận mật khẩu không khớp!', '⚠️');
+  if (!username) return fieldError('#admin-create-username', 'Nhập tên tài khoản');
+  if (password.length < 6) return fieldError('#admin-create-password', 'Mật khẩu phải có ít nhất 6 ký tự');
+  if (password !== confirmPassword) return fieldError('#admin-create-confirm', 'Hai ô mật khẩu không giống nhau');
 
   try {
     const res = await apiFetch('/api/admin/users/create', {
@@ -4430,7 +4760,7 @@ $('#btn-submit-admin-create-user')?.addEventListener('click', async () => {
     });
     const data = await res.json();
     if (!res.ok || !data.ok) {
-      return toast(data.error || 'Không thể tạo tài khoản', '⚠️');
+      return fieldError('#admin-create-username', data.error || 'Không thể tạo tài khoản');
     }
     $('#modal-admin-create-user')?.close();
     toast(`Đã tạo tài khoản "${data.user.username}" thành công!`, '✓');
@@ -4457,7 +4787,7 @@ onForceLogout((reason) => {
 
 // Đăng xuất
 $('#btn-logout-app')?.addEventListener('click', async () => {
-  if (confirm('Bạn có chắc muốn đăng xuất khỏi tài khoản này?')) {
+  if (await askConfirm({ title: 'Đăng xuất?', message: 'Bạn sẽ thoát khỏi tài khoản này trên máy đang dùng. Dữ liệu vẫn nằm trên máy chủ.', ok: 'Đăng xuất', danger: true })) {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch (_e) {}
@@ -4487,6 +4817,13 @@ $('#chip-chart-30days')?.addEventListener('click', () => {
   renderSalesView();
 });
 
+$$('[data-goto-orders]').forEach((row) =>
+  row.addEventListener('click', () => {
+    switchTab('orders');
+    $(`[data-order-filter="${row.dataset.gotoOrders}"]`)?.click();
+  })
+);
+
 $('#btn-export-sales-report')?.addEventListener('click', () => {
   try {
     exportOrdersToCSV(state.orders);
@@ -4495,6 +4832,13 @@ $('#btn-export-sales-report')?.addEventListener('click', () => {
     toast(err.message || 'Lỗi khi xuất file', '⚠️');
   }
 });
+
+/** Số tiền viết gọn để ghi trên đầu cột biểu đồ: 4,9tr, 850k. */
+function shortMoney(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace('.', ',').replace(/,0$/, '')}tr`;
+  if (n >= 1000) return `${Math.round(n / 1000)}k`;
+  return String(Math.round(n));
+}
 
 function renderSalesView() {
   const isDemo = isDemoAccount();
@@ -4563,7 +4907,7 @@ function renderSalesView() {
           const amountText = formatVND(b.amount);
           return `
             <div class="barchart-col ${b.isCurrent ? 'highlight' : ''}"${colStyle} title="${esc(b.label)}: ${esc(amountText)}">
-              ${b.isCurrent ? `<span class="barchart-tooltip-val">${esc(amountText)}</span>` : ''}
+              ${b.amount > 0 ? `<span class="barchart-tooltip-val">${esc(shortMoney(b.amount))}</span>` : ''}
               <div class="barchart-pill-bar" style="height:${height}%"></div>
             </div>
           `;
@@ -4756,7 +5100,7 @@ async function handlePrintOrder(order, isRemoteTrigger = false, onlyItem = null)
       ticketEl.innerHTML = `
         <img src="${imgUrl}" alt="Tem in ${order.code}" style="max-width:280px" />
         <div style="display:flex;gap:6px;justify-content:center;margin:6px 0 10px">
-          <button class="btn-outline-pill btn-print-sys-sm" style="font-size:11.5px;padding:3px 10px;cursor:pointer">🖨 In qua hệ thống</button>
+          <button class="btn-outline-pill btn-print-sys-sm">In qua máy tính</button>
         </div>
       `;
       ticketEl.querySelector('.btn-print-sys-sm')?.addEventListener('click', () => {
@@ -4817,7 +5161,7 @@ $('#btn-clear-tray')?.addEventListener('click', () => {
   const tray = $('#printer-paper-tray');
   if (tray) {
     tray.innerHTML =
-      '<p style="color:var(--text-muted);font-size:12.5px" id="tray-empty-hint">Tem in sẽ hiện ở đây khi in</p>';
+      '<p class="form-hint" id="tray-empty-hint">Tem in sẽ hiện ở đây khi in</p>';
   }
 });
 
@@ -4909,7 +5253,7 @@ function updateSyncUI(st) {
   }
   if ($('#sidebar-sync-text')) {
     $('#sidebar-sync-text').textContent = connected
-      ? `Đồng bộ Live (${count} thiết bị)`
+      ? `Đồng bộ · ${count} thiết bị`
       : `Đang kết nối lại...${waitingText}`;
   }
   if ($('#lbl-sync-conn-state')) {
@@ -4919,8 +5263,8 @@ function updateSyncUI(st) {
   }
   if ($('#modal-sync-status-title')) {
     $('#modal-sync-status-title').textContent = connected
-      ? '● Đã kết nối máy chủ đồng bộ thời gian thực'
-      : '○ Đang kết nối tới máy chủ...';
+      ? 'Đã kết nối máy chủ'
+      : 'Đang kết nối tới máy chủ...';
   }
   if ($('#modal-sync-devices-sub')) {
     $('#modal-sync-devices-sub').textContent =
