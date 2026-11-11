@@ -548,6 +548,8 @@ struct VtpExportSheet: View {
     /// Nháp đã hỏi cước, theo chữ ký nháp (VtpQuote.signature). Đang hỏi thì nằm trong `quoting`.
     @State private var quotes: [String: VtpQuote] = [:]
     @State private var quoting: Set<String> = []
+    /// Nháp đang mở để soát chi tiết (mã khách); nil là đang ở danh sách nháp.
+    @State private var detailId: String?
 
     /// Đơn ở Chờ gửi là nháp sẵn. Viettel Post hiểu địa chỉ sang phường/tỉnh khác thì nháp đó chưa cho tạo.
     private var groups: [Vtp.Group] {
@@ -571,6 +573,8 @@ struct VtpExportSheet: View {
         Group {
             if let result {
                 VtpResultView(groups: result.groups, results: result.results)
+            } else if let id = detailId, let g = groups.first(where: { $0.id == id }) {
+                detailView(g)
             } else {
                 picker
             }
@@ -610,20 +614,144 @@ struct VtpExportSheet: View {
     private func quote(_ g: Vtp.Group) -> VtpQuote? { quotes[VtpQuote.signature(g, service: service)] }
     private func isQuoting(_ g: Vtp.Group) -> Bool { quoting.contains(VtpQuote.signature(g, service: service)) }
 
+    /// Ô "Viettel Post hiểu": phường/tỉnh họ đọc ra từ dòng địa chỉ, hỏi trước khi tạo đơn.
     @ViewBuilder private func quoteLine(_ g: Vtp.Group) -> some View {
         if isQuoting(g) {
             T("Đang tính cước và kiểm địa chỉ với Viettel Post…", 12, .medium, Theme.muted)
         } else if let q = quote(g) {
-            VStack(alignment: .leading, spacing: 2) {
-                if q.ok {
-                    T("Cước dự tính \(money(q.fee))", 12, .bold, Theme.ink)
-                } else {
-                    T(q.error, 12, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
+            if !q.parsed.isEmpty && q.addrOk != false {
+                T("✓ Viettel Post hiểu: \(q.parsed) · đúng", 12, .semibold, Theme.green)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.greenSoft))
+            }
+            if !q.ok {
+                T(q.error, 12, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func feeText(_ g: Vtp.Group) -> String {
+        if isQuoting(g) { return "Đang tính cước…" }
+        guard let q = quote(g), q.ok else { return "Cước chưa tính" }
+        return "Cước dự tính \(money(q.fee))"
+    }
+
+    // MARK: Soát một nháp
+
+    private func detailBox<V: View>(_ title: String, @ViewBuilder _ content: () -> V) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            T(title, 11.5, .bold, Theme.muted, track: 0.4)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .cardStyle(16)
+    }
+
+    private func kv(_ k: String, _ v: String, strong: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            T(k, 13, .medium, Theme.muted).fixedSize()
+            Spacer(minLength: 8)
+            T(v, strong ? 15 : 13, strong ? .heavy : .semibold, Theme.ink)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func detailView(_ g: Vtp.Group) -> some View {
+        let s = g.summary
+        let q = quote(g)
+        let name = s.receiver.isEmpty ? g.customer.nickname : s.receiver
+        let codes = g.orders.compactMap(\.code).filter { !$0.isEmpty }.joined(separator: " + ")
+        let busy = isQuoting(g)
+        let parsed = q?.parsed ?? ""
+        let mismatch = q?.addrOk == false
+        let feeOk = q?.ok == true
+        return VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    T("Nháp · \(name)", 20, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.8)
+                    if !codes.isEmpty { T(codes, 12.5, .medium, Theme.muted).lineLimit(2) }
                 }
-                if !q.parsed.isEmpty && q.addrOk != false {
-                    T("✓ VTP hiểu: \(q.parsed)", 12, .semibold, Theme.green).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                SheetClose()
+            }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.bottom, 12)
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 10) {
+                    detailBox("NGƯỜI NHẬN") {
+                        HStack(alignment: .firstTextBaseline) {
+                            T(name, 16, .bold).lineLimit(1)
+                            Spacer(minLength: 8)
+                            Button {
+                                ui.dismissSheet()
+                                ui.push(.addressEdit(g.customer.id))
+                            } label: { T("Sửa", 13, .bold, Theme.accent) }
+                            .buttonStyle(.plain)
+                        }
+                        T(s.phone.isEmpty ? "Chưa có số điện thoại" : s.phone, 13.5, .semibold, s.phone.isEmpty ? Theme.red : Theme.ink)
+                        kv("App ghi", s.address.line.isEmpty ? "Chưa có địa chỉ" : s.address.line)
+                        if busy {
+                            kv("VTP hiểu", "Đang kiểm…")
+                        } else if !parsed.isEmpty {
+                            kv("VTP hiểu", parsed)
+                            T(mismatch ? "Khác phường hoặc tỉnh. Sửa địa chỉ trước khi tạo." : "✓ Khớp phường và tỉnh",
+                              12.5, .bold, mismatch ? Theme.red : Theme.green)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else if !g.isBad {
+                            T("Chưa đối chiếu được địa chỉ với Viettel Post.", 12.5, .semibold, Theme.muted)
+                        }
+                        if g.isBad {
+                            T(s.problems.joined(separator: " · "), 12.5, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    detailBox("HÀNG & TIỀN") {
+                        kv("Tên hàng", "\(Vtp.goodsName) · \(max(s.qty, 1)) món")
+                        kv("Giá trị hàng", money(s.goods))
+                        kv("Người trả cước", s.senderPays ? "Shop (người gửi)" : "Người nhận")
+                        kv("Trọng lượng", weightText(s.weightG))
+                        if let z = s.size { kv("Kích thước", "\(z.0) × \(z.1) × \(z.2) cm") }
+                        HairLine()
+                        kv("Thu hộ (COD)", money(s.cod), strong: true)
+                    }
+                    detailBox("CƯỚC DỰ TÍNH · \(service)") {
+                        if busy {
+                            T("Đang tính cước…", 13, .medium, Theme.muted)
+                        } else if feeOk {
+                            kv("Tổng cước", money(q?.fee ?? 0), strong: true)
+                            T("Chưa tạo đơn. Cước thật do Viettel Post chốt khi nhận hàng.", 12, .medium, Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            T(q?.error ?? "Cước chưa tính", 13, .semibold, q == nil ? Theme.muted : Theme.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    detailBox("GHI CHÚ CHO BƯU TÁ") {
+                        T(s.note.isEmpty ? "Trống" : s.note, 13.5, .medium, s.note.isEmpty ? Theme.muted : Theme.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.bottom, 12)
+            }
+            .frame(maxHeight: .infinity)
+
+            HStack(spacing: 10) {
+                OutlineButton(title: "Để nháp", height: 52) { detailId = nil }
+                    .frame(width: (Metrics.screenWidth - 50) / 3)
+                PrimaryButton(title: sending ? "Đang tạo vận đơn…" : busy ? "Đang tính cước…" : "Tạo vận đơn này",
+                              icon: .truck, fontSize: 15, enabled: !g.isBad && !sending && !busy) {
+                    create([g])
                 }
             }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.top, 14)
+            .background(Theme.card.overlay(alignment: .top) { HairLine() })
         }
     }
 
@@ -635,7 +763,7 @@ struct VtpExportSheet: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     T(api ? "Nháp vận đơn" : "Xuất Viettel Post", 20, .heavy, Theme.ink, track: -0.3)
-                    T(api ? "\(list.count) nháp\(bad > 0 ? " · \(bad) cần sửa" : "") · Viettel Post chưa nhận đơn nào"
+                    T(api ? "\(list.count) nháp · \(list.count - bad) sẵn sàng\(bad > 0 ? " · \(bad) cần sửa" : "")"
                           : "\(list.count - bad) khách sẵn sàng gửi\(bad > 0 ? " · \(bad) khách cần sửa" : "")", 13, .medium, Theme.muted)
                         .lineLimit(1).minimumScaleFactor(0.85)
                 }
@@ -662,17 +790,22 @@ struct VtpExportSheet: View {
             .padding(.bottom, 8)
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
+                VStack(spacing: 10) {
                     if list.isEmpty {
                         T("Chưa có đơn nào đã duyệt.", 14, .medium, Theme.muted).padding(.vertical, 30)
                     }
-                    ForEach(Array(list.enumerated()), id: \.element.id) { i, g in
-                        if i > 0 { Rectangle().fill(Theme.line.opacity(0.7)).frame(height: 1) }
+                    if api && !list.isEmpty {
+                        T("Viettel Post chưa nhận đơn nào. Soát xong rồi mới bấm Tạo.", 12.5, .medium, Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                    }
+                    ForEach(list) { g in
                         row(g, on: pick.contains(g.id))
+                            .cardStyle(16, fill: g.isBad ? Theme.badRow : Theme.card)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
                 }
-                .cardStyle(18)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .padding(.horizontal, Metrics.gutter)
                 .padding(.bottom, 12)
             }
@@ -705,6 +838,10 @@ struct VtpExportSheet: View {
                     if !tags.isEmpty {
                         HStack(spacing: 6) { ForEach(tags.indices, id: \.self) { i in tag(tags[i].0, tags[i].1, tags[i].2) } }
                     }
+                    let contact = [s.phone, s.address.line].filter { !$0.isEmpty }.joined(separator: " · ")
+                    if !contact.isEmpty {
+                        T(contact, 12.5, .medium, Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    }
                     if g.isBad {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             T(s.problems.joined(separator: " · "), 12.5, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
@@ -715,8 +852,18 @@ struct VtpExportSheet: View {
                             .buttonStyle(.plain)
                         }
                     } else {
-                        T(detail(s), 12, .medium, Theme.muted).fixedSize(horizontal: false, vertical: true)
                         if api { quoteLine(g) }
+                        T(detail(s), 12, .medium, Theme.muted).fixedSize(horizontal: false, vertical: true)
+                        if api {
+                            HStack(alignment: .firstTextBaseline) {
+                                T(feeText(g), 12.5, .bold, Theme.ink).lineLimit(1).minimumScaleFactor(0.8)
+                                Spacer(minLength: 8)
+                                Button { detailId = g.id } label: {
+                                    T("Soát chi tiết ›", 12.5, .bold, Theme.accent).fixedSize()
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                     }
                     if !g.isBad, let e = g.orders.compactMap(VtpTrack.lastError).first {
                         T("Lần trước ViettelPost báo: \(e)", 12, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
@@ -728,7 +875,6 @@ struct VtpExportSheet: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(g.isBad ? Theme.badRow : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -736,6 +882,7 @@ struct VtpExportSheet: View {
 
     private func tagList(_ g: Vtp.Group, olderDay: String?) -> [(String, Color, Color)] {
         var tags: [(String, Color, Color)] = []
+        if g.isBad { tags.append(("cần sửa", Theme.red, Theme.redSoft)) }
         if g.orders.count > 1 { tags.append(("gộp \(g.orders.count) đơn", Theme.gomInk, Theme.gomTag)) }
         if let olderDay { tags.append(("duyệt \(olderDay)", Theme.muted, Theme.grayBadge)) }
         if g.summary.allPaid { tags.append(("bank đủ", Theme.green, Theme.greenSoft)) }
