@@ -364,7 +364,7 @@ struct VtpResultView: View {
                     }
                     .cardStyle(18)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    T("Đơn lỗi vẫn nằm ở “Chờ gửi”, sửa xong ấn Gửi VTP lại. Không tạo trùng vận đơn cho đơn đã thành công.",
+                    T("Đơn lỗi vẫn nằm ở “Chờ gửi”, sửa xong bấm Soát & tạo lại. Không tạo trùng vận đơn cho đơn đã thành công.",
                       12.5, .medium, Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 4)
@@ -446,7 +446,7 @@ struct VtpOrderBox: View {
         } else if let old = VtpTrack.cancelledCode(order) {
             VStack(alignment: .leading, spacing: 6) {
                 T("Vận đơn \(VtpTrack.pretty(old)) đã huỷ", 14, .bold, Theme.red)
-                T("Đơn đã về Chờ gửi. Bấm Gửi VTP ở tab Đơn hàng để tạo vận đơn mới.", 12.5, .medium, Theme.muted)
+                T("Đơn đã về Chờ gửi. Bấm Soát & tạo ở tab Đơn hàng để tạo vận đơn mới.", 12.5, .medium, Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(15)

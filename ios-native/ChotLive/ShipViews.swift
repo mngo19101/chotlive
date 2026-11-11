@@ -137,7 +137,7 @@ func weightText(_ g: Int) -> String {
 
 struct ReadyExportBanner: View {
     let groups: [Vtp.Group]
-    /// Đã kết nối Viettel Post: gửi thẳng vận đơn ("Gửi VTP") thay cho xuất Excel ("Xuất VTP").
+    /// Đã kết nối Viettel Post: soát nháp rồi tạo vận đơn ("Soát & tạo") thay cho xuất Excel ("Xuất VTP").
     var connected = false
     let onExport: () -> Void
 
@@ -160,14 +160,15 @@ struct ReadyExportBanner: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                T("\(groups.count) khách sẵn sàng \(connected ? "gửi" : "xuất")", 14, .bold)
+                // Đã kết nối Viettel Post: đơn ở Chờ gửi là nháp sẵn, bấm Soát & tạo mở bảng nháp.
+                T(connected ? "\(groups.count) nháp chờ tạo vận đơn" : "\(groups.count) khách sẵn sàng xuất", 14, .bold)
                 T(subtitle, 12, .medium, Theme.muted).lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
             Button(action: onExport) {
                 HStack(spacing: 6) {
                     Icon(name: connected ? .truck : .download, size: 15, weight: 2.4)
-                    T(connected ? "Gửi VTP" : "Xuất VTP", 14, .bold).fixedSize()
+                    T(connected ? "Soát & tạo" : "Xuất VTP", 14, .bold).fixedSize()
                 }
                 .padding(.horizontal, 15)
                 .frame(height: 40)
@@ -544,8 +545,19 @@ struct VtpExportSheet: View {
     @State private var touched = false
     @State private var service = UserDefaults.standard.string(forKey: Vtp.serviceKey) ?? Vtp.defaultService
     @State private var picking = false
+    /// Nháp đã hỏi cước, theo chữ ký nháp (VtpQuote.signature). Đang hỏi thì nằm trong `quoting`.
+    @State private var quotes: [String: VtpQuote] = [:]
+    @State private var quoting: Set<String> = []
 
-    private var groups: [Vtp.Group] { Vtp.readyGroups(store.allOrders()) }
+    /// Đơn ở Chờ gửi là nháp sẵn. Viettel Post hiểu địa chỉ sang phường/tỉnh khác thì nháp đó chưa cho tạo.
+    private var groups: [Vtp.Group] {
+        Vtp.readyGroups(store.allOrders()).map { g in
+            guard api, let q = quotes[VtpQuote.signature(g, service: service)], q.addrOk == false else { return g }
+            var bad = g
+            bad.summary.problems.append("Viettel Post hiểu \"\(q.parsed)\", khác địa chỉ trong app")
+            return bad
+        }
+    }
     private var okIds: Set<String> { Set(groups.filter { !$0.isBad }.map(\.id)) }
     private var chosen: Set<String> { touched ? selected.intersection(okIds) : okIds }
     private var serviceName: String {
@@ -564,6 +576,55 @@ struct VtpExportSheet: View {
             }
         }
         .frame(height: Metrics.sheetHeight(top: UIScreen.main.bounds.height * 0.12))
+        // Khoá theo mọi nháp đủ địa chỉ (không theo cái đang hỏi), để lượt hỏi đang chạy không bị huỷ giữa chừng.
+        .task(id: quoteKey) { await loadQuotes() }
+    }
+
+    private var quoteKey: String {
+        guard api, client.vtp?.sender != nil else { return "" }
+        return Vtp.readyGroups(store.allOrders()).filter { !$0.isBad }
+            .map { VtpQuote.signature($0, service: service) }.sorted().joined(separator: ",")
+    }
+
+    /// Nháp đủ địa chỉ chưa có cước cho gói đang chọn.
+    private var quoteNeeds: [(String, Vtp.Group)] {
+        guard api, client.vtp?.sender != nil else { return [] }
+        return Vtp.readyGroups(store.allOrders())
+            .filter { !$0.isBad }
+            .map { (VtpQuote.signature($0, service: service), $0) }
+            .filter { quotes[$0.0] == nil && !quoting.contains($0.0) }
+    }
+
+    private func loadQuotes() async {
+        let need = quoteNeeds
+        guard !need.isEmpty else { return }
+        let sigs = Dictionary(need.map { ($0.1.id, $0.0) }, uniquingKeysWith: { a, _ in a })
+        quoting.formUnion(sigs.values)
+        let r = await client.vtpQuote(service: service, groups: need.map { VtpTrack.payload($0.1) })
+        for (key, sig) in sigs {
+            quotes[sig] = r.quotes[key] ?? VtpQuote(error: r.error ?? "Không tính được cước")
+        }
+        quoting.subtract(sigs.values)
+    }
+
+    private func quote(_ g: Vtp.Group) -> VtpQuote? { quotes[VtpQuote.signature(g, service: service)] }
+    private func isQuoting(_ g: Vtp.Group) -> Bool { quoting.contains(VtpQuote.signature(g, service: service)) }
+
+    @ViewBuilder private func quoteLine(_ g: Vtp.Group) -> some View {
+        if isQuoting(g) {
+            T("Đang tính cước và kiểm địa chỉ với Viettel Post…", 12, .medium, Theme.muted)
+        } else if let q = quote(g) {
+            VStack(alignment: .leading, spacing: 2) {
+                if q.ok {
+                    T("Cước dự tính \(money(q.fee))", 12, .bold, Theme.ink)
+                } else {
+                    T(q.error, 12, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
+                }
+                if !q.parsed.isEmpty && q.addrOk != false {
+                    T("✓ VTP hiểu: \(q.parsed)", 12, .semibold, Theme.green).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     private var picker: some View {
@@ -573,8 +634,9 @@ struct VtpExportSheet: View {
         return VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
-                    T(api ? "Gửi Viettel Post" : "Xuất Viettel Post", 20, .heavy, Theme.ink, track: -0.3)
-                    T("\(list.count - bad) khách sẵn sàng gửi\(bad > 0 ? " · \(bad) khách cần sửa" : "")", 13, .medium, Theme.muted)
+                    T(api ? "Nháp vận đơn" : "Xuất Viettel Post", 20, .heavy, Theme.ink, track: -0.3)
+                    T(api ? "\(list.count) nháp\(bad > 0 ? " · \(bad) cần sửa" : "") · Viettel Post chưa nhận đơn nào"
+                          : "\(list.count - bad) khách sẵn sàng gửi\(bad > 0 ? " · \(bad) khách cần sửa" : "")", 13, .medium, Theme.muted)
                         .lineLimit(1).minimumScaleFactor(0.85)
                 }
                 Spacer()
@@ -654,6 +716,7 @@ struct VtpExportSheet: View {
                         }
                     } else {
                         T(detail(s), 12, .medium, Theme.muted).fixedSize(horizontal: false, vertical: true)
+                        if api { quoteLine(g) }
                     }
                     if !g.isBad, let e = g.orders.compactMap(VtpTrack.lastError).first {
                         T("Lần trước ViettelPost báo: \(e)", 12, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
@@ -696,7 +759,10 @@ struct VtpExportSheet: View {
     // MARK: Chân bảng
 
     private func footer(_ list: [Vtp.Group], _ pick: Set<String>) -> some View {
-        let total = list.filter { pick.contains($0.id) }.reduce(0) { $0 + $1.summary.cod }
+        let picked = list.filter { pick.contains($0.id) }
+        let total = picked.reduce(0) { $0 + $1.summary.cod }
+        let busy = api && picked.contains { isQuoting($0) }
+        let feeTotal = picked.reduce(0) { $0 + (quote($1).flatMap { $0.ok ? $0.fee : nil } ?? 0) }
         return VStack(spacing: 14) {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 5) {
@@ -720,6 +786,9 @@ struct VtpExportSheet: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     T(api ? "Tổng thu hộ · \(pick.count) khách" : "Tổng thu hộ", 12, .semibold, Theme.muted)
                     T(money(total), 22, .heavy, Theme.ink, track: -0.4).lineLimit(1).minimumScaleFactor(0.7)
+                    if api && feeTotal > 0 {
+                        T("Cước dự tính \(money(feeTotal))", 12, .semibold, Theme.muted).lineLimit(1)
+                    }
                 }
             }
             .zIndex(1)
@@ -727,8 +796,8 @@ struct VtpExportSheet: View {
                 OutlineButton(title: "Huỷ", height: 52) { ui.dismissSheet() }
                     .frame(width: (Metrics.screenWidth - 50) / 3)
                 if api {
-                    PrimaryButton(title: sending ? "Đang tạo \(pick.count) vận đơn…" : "Tạo \(pick.count) vận đơn", icon: .truck,
-                                  fontSize: 15, enabled: !pick.isEmpty && !sending) {
+                    PrimaryButton(title: sending ? "Đang tạo \(pick.count) vận đơn…" : busy ? "Đang tính cước…" : "Tạo \(pick.count) vận đơn",
+                                  icon: .truck, fontSize: 15, enabled: !pick.isEmpty && !sending && !busy) {
                         create(list.filter { pick.contains($0.id) })
                     }
                 } else {

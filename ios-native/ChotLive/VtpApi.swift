@@ -83,6 +83,40 @@ struct VtpCreateResult: Identifiable, Equatable {
     }
 }
 
+/// Cước dự tính và địa chỉ Viettel Post hiểu cho một nháp (máy chủ hỏi giá, không tạo đơn).
+struct VtpQuote: Equatable {
+    var ok: Bool
+    var fee: Int
+    /// "Phường Thuỷ Xuân, Thành phố Huế": phường/tỉnh Viettel Post đọc ra từ dòng địa chỉ.
+    var parsed: String
+    /// false khi phường/tỉnh Viettel Post hiểu khác app; nil khi chưa đối chiếu được.
+    var addrOk: Bool?
+    var error: String
+
+    init(_ d: [String: Any]) {
+        ok = (d["ok"] as? Bool) ?? false
+        fee = (d["fee"] as? NSNumber)?.intValue ?? 0
+        parsed = VtpConnection.string(d["parsed"]) ?? ""
+        addrOk = d["addrOk"] as? Bool
+        error = VtpConnection.string(d["error"]) ?? (ok ? "" : "Không tính được cước")
+    }
+
+    init(error: String) {
+        ok = false
+        fee = 0
+        parsed = ""
+        addrOk = nil
+        self.error = error
+    }
+
+    /// Chữ ký của nháp: đổi địa chỉ, tiền, cân nặng hay gói thì hỏi lại cước.
+    static func signature(_ g: Vtp.Group, service: String) -> String {
+        let s = g.summary
+        let size = s.size.map { "\($0.0)x\($0.1)x\($0.2)" } ?? ""
+        return [g.id, s.address.line, "\(s.cod)", "\(s.goods)", "\(s.weightG)", size, service].joined(separator: "|")
+    }
+}
+
 /// Trạng thái vận đơn Viettel Post trên một đơn, dùng chung cho thẻ đơn, chi tiết đơn và tab Đang giao.
 enum VtpTrack {
     /// Khổ tem in: A6 (mặc định, giống web), A5, giấy nhiệt 100mm.
@@ -231,6 +265,18 @@ extension LiveClient {
         let r = await apiCall("/api/vtp/create", method: "POST", body: ["service": service, "groups": groups], timeout: timeout)
         guard let r, r.0 == 200 else { return (Self.errorText(r, "Không tạo được vận đơn"), []) }
         return (nil, (r.1["results"] as? [[String: Any]] ?? []).map { VtpCreateResult($0) })
+    }
+
+    /// Nháp: cước dự tính và địa chỉ Viettel Post hiểu cho từng khách, theo `key` của khách. Chưa tạo đơn nào.
+    func vtpQuote(service: String, groups: [[String: Any]]) async -> (error: String?, quotes: [String: VtpQuote]) {
+        let timeout = TimeInterval(20 + groups.count * 5)
+        let r = await apiCall("/api/vtp/quote", method: "POST", body: ["service": service, "groups": groups], timeout: timeout)
+        guard let r, r.0 == 200 else { return (Self.errorText(r, "Không tính được cước"), [:]) }
+        var out: [String: VtpQuote] = [:]
+        for d in r.1["results"] as? [[String: Any]] ?? [] {
+            if let key = VtpConnection.string(d["key"]) { out[key] = VtpQuote(d) }
+        }
+        return (nil, out)
     }
 
     /// Link in tem của các vận đơn theo khổ giấy đã chọn.
