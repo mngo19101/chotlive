@@ -328,7 +328,19 @@ struct Customer: Identifiable, Codable, Equatable {
     var itemsToday: [OrderItem] { items.filter { Clock.isToday($0.ts) } }
     var isNewToday: Bool { !items.isEmpty && Clock.isToday(firstTs) }
     var isBigSpender: Bool { total >= Customer.bigSpender }
-    var initials: String { initialsOf(nickname) }
+    var initials: String { initialsOf(displayName) }
+
+    /// Tên hiện trên đơn và hồ sơ khách: họ tên người nhận đã sửa trong "Sửa địa chỉ", chưa có thì lấy tên TikTok.
+    /// Cùng một tên với bảng Nháp vận đơn, để đổi tên xong thì mọi ngày, mọi tab đều hiện tên mới.
+    var displayName: String {
+        let r = (address?.receiver ?? "").trimmingCharacters(in: .whitespaces)
+        return r.isEmpty ? nickname : r
+    }
+
+    /// Tìm theo cả tên người nhận lẫn tên TikTok cũ.
+    func matchesName(_ q: String) -> Bool {
+        displayName.lowercased().contains(q) || nickname.lowercased().contains(q) || uniqueId.lowercased().contains(q)
+    }
 
     /// Mức chi tiêu được gắn nhãn "Mua nhiều".
     static let bigSpender = 3_000_000

@@ -133,7 +133,7 @@ func printOrder(_ o: Order, store: Store, printer: PrinterManager) async -> Stri
     var done = 0
     for it in o.items {
         let c = LiveComment(id: it.id, uniqueId: o.customer.uniqueId, userId: o.customer.userId,
-                            nickname: o.customer.nickname, text: it.ticketText, ts: it.ts, price: it.lineTotal)
+                            nickname: o.customer.displayName, text: it.ticketText, ts: it.ts, price: it.lineTotal)
         if let error = await printer.sendAndWait(TicketRenderer.ticketBytes(comment: c)) {
             return "Mới gửi được \(done)/\(o.items.count) tem. \(error)"
         }

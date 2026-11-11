@@ -723,7 +723,7 @@ struct OrderCommentsView: View {
     var body: some View {
         let order = store.order(id: orderId)
         SubPage(title: "Bình luận chốt đơn",
-                subtitle: order.map { "Đơn của \($0.customer.nickname) · \(timeText($0.lastTs))" },
+                subtitle: order.map { "Đơn của \($0.customer.displayName) · \(timeText($0.lastTs))" },
                 headerBottom: 20) {
             if let o = order {
                 let list = groups(o)
@@ -761,7 +761,7 @@ struct OrderCommentsView: View {
             HStack(spacing: 11) {
                 Avatar(text: o.customer.initials, size: 48, fontSize: 17, seed: o.customer.id)
                 VStack(alignment: .leading, spacing: 0.5) {
-                    T(o.customer.nickname, 17.5, .bold).lineLimit(1).minimumScaleFactor(0.8)
+                    T(o.customer.displayName, 17.5, .bold).lineLimit(1).minimumScaleFactor(0.8)
                     T("@" + o.customer.uniqueId, 13.5, .medium, Theme.muted).lineLimit(1)
                 }
                 Spacer(minLength: 4)

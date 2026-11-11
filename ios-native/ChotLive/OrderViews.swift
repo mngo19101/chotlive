@@ -90,7 +90,7 @@ struct OrdersView: View {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         if !q.isEmpty {
             l = l.filter {
-                $0.customer.nickname.lowercased().contains(q) || $0.customer.uniqueId.lowercased().contains(q)
+                $0.customer.matchesName(q)
                     || ($0.code ?? "").lowercased().contains(q) || ($0.customer.address?.phone ?? "").contains(q)
                     || ($0.ship?.vtpCode ?? "").lowercased().contains(q.replacingOccurrences(of: " ", with: ""))
             }
@@ -124,7 +124,7 @@ struct OrdersView: View {
                     .offset(y: 1)
                 VStack(spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        T(o.customer.nickname, 15, .bold).lineLimit(1).offset(y: 2)
+                        T(o.customer.displayName, 15, .bold).lineLimit(1).offset(y: 2)
                         Spacer(minLength: 0)
                         T(money(o.total), 17, .heavy, Theme.ink, track: -0.4).lineLimit(1).fixedSize()
                     }
@@ -255,7 +255,7 @@ private struct StatusTab: View {
 
 @MainActor
 func confirmDelete(_ o: Order, store: Store, ui: AppUI, then: @escaping () -> Void = {}) {
-    ui.confirm = ConfirmItem(title: "Xoá đơn của \(o.customer.nickname)?",
+    ui.confirm = ConfirmItem(title: "Xoá đơn của \(o.customer.displayName)?",
                              message: "Không thể khôi phục sau khi xoá.", action: "Xoá đơn") {
         store.deleteOrder(o)
         then()
@@ -275,7 +275,7 @@ struct OrderActionSheet: View {
                 HStack(spacing: 12) {
                     Avatar(text: o.customer.initials, size: 40, fontSize: 14, seed: o.customer.id)
                     VStack(alignment: .leading, spacing: 2) {
-                        T(o.customer.nickname, 16, .bold).lineLimit(1)
+                        T(o.customer.displayName, 16, .bold).lineLimit(1)
                         T("\(o.productCount) sản phẩm · \(timeText(o.lastTs))", 12, .medium, Theme.muted)
                     }
                     Spacer(minLength: 4)
@@ -377,7 +377,7 @@ struct OrderDetailView: View {
                     Avatar(text: o.customer.initials, size: 52, fontSize: 18, seed: o.customer.id)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 10) {
-                            T(o.customer.nickname, 17, .bold).lineLimit(1).minimumScaleFactor(0.8)
+                            T(o.customer.displayName, 17, .bold).lineLimit(1).minimumScaleFactor(0.8)
                             if o.customer.isBigSpender { Badge(text: "Mua nhiều") }
                         }
                         T("@\(o.customer.uniqueId) · \(store.orders(of: o.customer).count) đơn", 13, .medium, Theme.muted).lineLimit(1)

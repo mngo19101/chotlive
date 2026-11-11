@@ -602,7 +602,7 @@ struct CustomersView: View {
         default: break
         }
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        if !q.isEmpty { l = l.filter { $0.nickname.lowercased().contains(q) || $0.uniqueId.lowercased().contains(q) } }
+        if !q.isEmpty { l = l.filter { $0.matchesName(q) } }
         return l
     }
 
@@ -645,7 +645,7 @@ struct CustomersView: View {
             // Hai dòng tách riêng: dòng @tài khoản được chạy dài xuống dưới cột tiền như trong mẫu.
             VStack(spacing: 4) {
                 HStack(spacing: 0) {
-                    T(c.nickname, 15, .bold).lineLimit(1).minimumScaleFactor(0.85).offset(y: 1)
+                    T(c.displayName, 15, .bold).lineLimit(1).minimumScaleFactor(0.85).offset(y: 1)
                     if c.isBigSpender {
                         Badge(text: "Mua nhiều").padding(.leading, 7)
                     } else if c.isNewToday {
@@ -700,7 +700,7 @@ struct CustomerDetailView: View {
                 Avatar(text: c.initials, size: 56, fontSize: 19, seed: c.id)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 10) {
-                        T(c.nickname, 18, .bold).lineLimit(1).minimumScaleFactor(0.8)
+                        T(c.displayName, 18, .bold).lineLimit(1).minimumScaleFactor(0.8)
                         if c.isBigSpender { Badge(text: "Mua nhiều") }
                     }
                     T("@" + c.uniqueId, 13, .medium, Theme.muted).lineLimit(1)

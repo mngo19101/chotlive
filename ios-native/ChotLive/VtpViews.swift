@@ -721,7 +721,7 @@ struct VtpAttentionBanner: View {
         let codes = Set(orders.compactMap(VtpTrack.code))
         VStack(alignment: .leading, spacing: 3) {
             T("\(codes.count) đơn cần xử lý · xếp lên đầu", 14, .bold, Theme.red)
-            T(orders.prefix(3).map { "\($0.customer.nickname): \(VtpTrack.statusName($0))" }.joined(separator: " · "),
+            T(orders.prefix(3).map { "\($0.customer.displayName): \(VtpTrack.statusName($0))" }.joined(separator: " · "),
               12, .medium, Theme.muted)
                 .lineLimit(2)
         }
