@@ -78,6 +78,10 @@ data class OrderItem(
     val code: String? = null,
     /** Bình luận sinh ra món này (1 bình luận có thể chốt nhiều mã). */
     val commentId: String? = null,
+    /** Thông tin giao Viettel Post của đơn chứa món này (giống `order.ship` của web); các món cùng đơn giữ cùng giá trị. */
+    val ship: ShipInfo? = null,
+    /** Mã đơn do server cấp ("HD26110901"), ghi vào cột mã đơn của file Viettel Post. */
+    val orderCode: String? = null,
 ) {
     val lineTotal: Int get() = price * maxOf(qty, 1)
 
@@ -96,6 +100,44 @@ data class OrderItem(
         get() = if (comment.isEmpty() || PriceParser.orderTokens(comment).size > 1) productLabel else comment
 }
 
+/**
+ * Thông tin giao của đơn, cùng JSON với `order.ship` trên web (public/js/vtp-export.js):
+ * state ask | hold | ready | exported; pay cod | paid; payer receiver | sender;
+ * deposit, shipFee, codOverride (đồng), weightG (gram), exportedAt (mili giây).
+ * Trường rỗng không gửi lên; máy chủ coi trường thiếu là đã bỏ (ví dụ COD nhập tay).
+ */
+@Serializable
+data class ShipInfo(
+    val state: String? = null,
+    val pay: String? = null,
+    val payer: String? = null,
+    val deposit: Int? = null,
+    val shipFee: Int? = null,
+    val codOverride: Int? = null,
+    val weightG: Int? = null,
+    val exportedAt: Long? = null,
+    val batchId: String? = null,
+    /** Kích thước kiện (cm), bắt buộc khi nặng từ 10kg. */
+    val lengthCm: Int? = null,
+    val widthCm: Int? = null,
+    val heightCm: Int? = null,
+    // Vận đơn Viettel Post tạo qua API: máy chủ ghi, app chỉ đọc (gửi lên máy chủ cũng bỏ qua).
+    val vtpCode: String? = null,
+    /** Mã vận đơn đã huỷ, để tra lại; đơn về Chờ gửi. */
+    val vtpOldCode: String? = null,
+    val vtpFee: Int? = null,
+    val vtpService: String? = null,
+    val vtpStatus: Int? = null,
+    val vtpStatusName: String? = null,
+    val vtpStatusAt: Long? = null,
+    /** created | moving | delivered | cancelled | returned | attention */
+    val vtpKind: String? = null,
+    val vtpNote: String? = null,
+    /** Lý do Viettel Post từ chối lần tạo vận đơn gần nhất. */
+    val vtpError: String? = null,
+    val vtpErrorAt: Long? = null,
+)
+
 enum class OrderStatus(val label: String) {
     NEW("Đơn mới"), PRINTED("Đã in"), SHIPPING("Đang giao"), DELIVERED("Đã giao")
 }
@@ -108,6 +150,9 @@ data class Order(val key: String, val customer: Customer, val items: List<OrderI
     val lastTs: Long get() = items.maxOfOrNull { it.ts } ?: 0
     val firstTs: Long get() = items.minOfOrNull { it.ts } ?: 0
     val isPrinted: Boolean get() = items.isNotEmpty() && items.all { it.printed }
+    /** Món thêm sau khi duyệt chưa có `ship`: lấy theo món đã có. */
+    val ship: ShipInfo? get() = items.firstOrNull { it.ship != null }?.ship
+    val code: String? get() = items.firstNotNullOfOrNull { it.orderCode }
 
     val status: OrderStatus
         get() {
@@ -163,7 +208,17 @@ data class Customer(
     val itemsToday: List<OrderItem> get() = items.filter { Clock.isToday(it.ts) }
     val isNewToday: Boolean get() = items.isNotEmpty() && Clock.isToday(firstTs)
     val isBigSpender: Boolean get() = total >= BIG_SPENDER
-    val initials: String get() = initialsOf(nickname)
+    val initials: String get() = initialsOf(displayName)
+
+    /**
+     * Tên hiện trên đơn và hồ sơ khách: họ tên người nhận đã sửa trong "Sửa địa chỉ", chưa có thì lấy tên TikTok.
+     * Cùng một tên với bảng Nháp vận đơn, để đổi tên xong thì mọi ngày, mọi tab đều hiện tên mới.
+     */
+    val displayName: String get() = address?.receiver?.trim().orEmpty().ifEmpty { nickname }
+
+    /** Tìm theo cả tên người nhận lẫn tên TikTok cũ (`q` đã viết thường). */
+    fun matchesName(q: String): Boolean =
+        displayName.lowercase().contains(q) || nickname.lowercase().contains(q) || uniqueId.lowercase().contains(q)
 
     companion object {
         /** Mức chi tiêu được gắn nhãn "Mua nhiều". */

@@ -2,7 +2,6 @@
 
 package com.chotlive.app.ui
 
-import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,68 +31,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.chotlive.app.data.AppJson
+import com.chotlive.app.model.AddressBook
 import com.chotlive.app.model.DeliveryAddress
 import com.chotlive.app.model.PriceParser
-import kotlinx.serialization.Serializable
-import java.text.Collator
-import java.util.Locale
-
-// MARK: - Dữ liệu địa giới hành chính
-
-/**
- * AddressData.json nhúng trong app, để chọn khu vực không cần mạng.
- * - "new" (34 tỉnh): thanglequoc/vietnamese-provinces-database (MIT), sau sáp nhập.
- * - "old" (63 tỉnh, 3 cấp): kenzouno1/DiaGioiHanhChinhVN, trước khi bỏ cấp huyện ngày 1/7/2025.
- */
-@Serializable
-data class AreaUnit(val n: String, val d: List<AreaUnit>? = null, val w: List<String>? = null)
-
-object AddressBook {
-    @Serializable
-    private data class Payload(val new: List<AreaUnit> = emptyList(), val old: List<AreaUnit> = emptyList())
-
-    @Volatile private var payload: Payload? = null
-
-    private fun load(context: Context): Payload = payload ?: synchronized(this) {
-        payload ?: try {
-            val text = context.assets.open("AddressData.json").bufferedReader().use { it.readText() }
-            AppJson.decodeFromString(Payload.serializer(), text)
-        } catch (e: Exception) {
-            Payload()
-        }.also { payload = it }
-    }
-
-    fun new(context: Context) = load(context).new
-    fun old(context: Context) = load(context).old
-
-    private val collator: Collator = Collator.getInstance(Locale("vi", "VN"))
-
-    /** So chữ tiếng Việt, số trong tên so theo giá trị: "Phường 2" đứng trước "Phường 10". */
-    private fun compareNatural(a: String, b: String): Int {
-        val re = Regex("\\d+|\\D+")
-        val pa = re.findAll(a).map { it.value }.toList()
-        val pb = re.findAll(b).map { it.value }.toList()
-        for (i in 0 until minOf(pa.size, pb.size)) {
-            val x = pa[i]
-            val y = pb[i]
-            val c = if (x[0].isDigit() && y[0].isDigit()) (x.toBigInteger().compareTo(y.toBigInteger())) else collator.compare(x, y)
-            if (c != 0) return c
-        }
-        return pa.size - pb.size
-    }
-
-    fun sorted(names: List<String>): List<String> = names.sortedWith { a, b -> compareNatural(a, b) }
-
-    /** Tỉnh xếp theo tên riêng, không theo chữ "TP." / "Tỉnh". */
-    fun sortedProvinces(names: List<String>): List<String> {
-        fun key(s: String): String {
-            for (prefix in listOf("TP. ", "Tỉnh ")) if (s.startsWith(prefix)) return s.drop(prefix.length)
-            return s
-        }
-        return names.sortedWith { a, b -> compareNatural(key(a), key(b)) }
-    }
-}
+import com.chotlive.app.model.VtpAddress
 
 // MARK: - Sửa địa chỉ
 
@@ -141,6 +82,15 @@ fun AddressEditScreen(customerId: String) {
                         }
                         T(text, 16f, BV.SEMIBOLD, modifier = Modifier.weight(1f), lineHeight = 22f)
                         Icon(IconName.CHEVRON_DOWN, 16f, color = C.muted)
+                    }
+                    // Khu vực đã lưu không khớp danh mục Viettel Post (dữ liệu cũ, gõ tay trên web): báo để chọn lại trước khi xuất.
+                    val region = address.region
+                    val regionBad = remember(region) {
+                        region.isNotBlank() && !VtpAddress.resolve(DeliveryAddress(street = "-", region = region)).ok
+                    }
+                    if (regionBad) {
+                        T("Khu vực này chưa đúng danh mục Viettel Post, bấm để chọn lại.", 12.5f, BV.MEDIUM, C.red,
+                            Modifier.padding(start = 2.dp, end = 2.dp, top = 2.dp))
                     }
                 }
             }
@@ -210,26 +160,27 @@ private fun AddressField(title: String, value: String, keyboard: KeyboardType = 
 
 @Composable
 fun AreaPickerSheet(region: String, onConfirm: (String) -> Unit) {
-    val context = LocalApp.current
     val ui = LocalAppUI.current
-    val newData = remember { AddressBook.new(context) }
-    val oldData = remember { AddressBook.old(context) }
+    val newData = remember { AddressBook.new }
+    val oldData = remember { AddressBook.old }
 
     data class Start(val old: Boolean, val province: String?, val district: String?, val ward: String?)
-    /** Đọc lại khu vực đang lưu; không khớp dữ liệu thì bắt đầu từ đầu. */
+    /**
+     * Đọc lại khu vực đang lưu, kể cả cách viết cũ ("Phường Tân Định, Quận 1, TP. Hồ Chí Minh"):
+     * khớp danh mục Viettel Post thì chọn sẵn đúng tên, không khớp thì giữ tỉnh nếu nhận ra, còn lại chọn từ đầu.
+     */
     val start = remember {
-        val parts = region.split(", ").map { it.trim() }
-        val provinceName = parts.lastOrNull()
-        when {
-            provinceName == null || region.isEmpty() -> Start(false, null, null, null)
-            parts.size == 3 && oldData.firstOrNull { it.n == provinceName }?.d?.firstOrNull { it.n == parts[1] }?.w?.contains(parts[0]) == true ->
-                Start(true, provinceName, parts[1], parts[0])
-            parts.size == 2 && newData.firstOrNull { it.n == provinceName }?.w?.contains(parts[0]) == true ->
-                Start(false, provinceName, null, parts[0])
-            // Huyện đảo không có cấp xã.
-            parts.size == 2 && oldData.firstOrNull { it.n == provinceName }?.d?.any { it.n == parts[0] } == true ->
-                Start(true, provinceName, parts[0], null)
-            else -> Start(false, null, null, null)
+        val parts = VtpAddress.split(region)
+        if (parts.province.isEmpty()) {
+            Start(false, null, null, null)
+        } else if (parts.district.isNotEmpty()) {
+            val r = VtpAddress.findOld(parts.province, parts.district, parts.ward)
+            if (r != null) Start(true, r.province, r.district, r.ward)
+            else Start(true, oldData.firstOrNull { VtpAddress.sameUnit(it.n, parts.province, listOf("t", "tp")) }?.n, null, null)
+        } else {
+            val r = VtpAddress.findNew(parts.province, parts.ward)
+            if (r != null) Start(false, r.first, null, r.second)
+            else Start(false, newData.firstOrNull { VtpAddress.normalize(it.n) == VtpAddress.normalize(parts.province) }?.n, null, null)
         }
     }
     var old by remember { mutableStateOf(start.old) }
@@ -238,7 +189,7 @@ fun AreaPickerSheet(region: String, onConfirm: (String) -> Unit) {
     var ward by remember { mutableStateOf(start.ward) }
     // 0 tỉnh, 1 huyện, 2 xã
     var level by remember {
-        mutableStateOf(if (start.province == null) 0 else if (start.old && start.ward == null) 1 else 2)
+        mutableStateOf(if (start.province == null) 0 else if (start.old && start.district == null) 1 else 2)
     }
     var query by remember { mutableStateOf("") }
 
@@ -255,6 +206,10 @@ fun AreaPickerSheet(region: String, onConfirm: (String) -> Unit) {
     val selectedName = when (level) { 0 -> province; 1 -> district; else -> ward }
     val isComplete = ward != null || (old && district != null && districtUnit?.w?.isEmpty() == true)
     val summary = listOfNotNull(ward, district, province).joinToString(", ")
+    /** Địa chỉ cũ: phường mới mà Viettel Post gộp phường đang chọn vào, để đối chiếu với khách. */
+    val equivalent = if (old && ward != null) {
+        districtUnit?.w?.indexOf(ward)?.takeIf { it >= 0 }?.let { districtUnit.e?.getOrNull(it) }?.takeIf { it.isNotEmpty() }
+    } else null
 
     fun select(name: String) {
         query = ""
@@ -289,8 +244,8 @@ fun AreaPickerSheet(region: String, onConfirm: (String) -> Unit) {
                     }
                 }
             }
-            T(if (old) "Theo đơn vị hành chính cũ: Tỉnh / Thành phố → Quận / Huyện → Phường / Xã"
-            else "Theo đơn vị hành chính mới: Tỉnh / Thành phố → Phường / Xã", 12.5f, BV.MEDIUM, C.muted,
+            T(if (old) "Danh mục cũ của Viettel Post: Tỉnh / Thành phố → Quận / Huyện → Phường / Xã"
+            else "Danh mục mới của Viettel Post: Tỉnh / Thành phố → Phường / Xã", 12.5f, BV.MEDIUM, C.muted,
                 Modifier.padding(start = 2.dp, end = 2.dp, top = 8.dp), lineHeight = 17f)
             FlowRow(Modifier.padding(top = 15.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Step(level == 0, province, "Tỉnh / Thành phố") { level = 0; query = "" }
@@ -321,7 +276,8 @@ fun AreaPickerSheet(region: String, onConfirm: (String) -> Unit) {
         HairLine()
         Column(Modifier.padding(start = Metrics.GUTTER.dp, end = Metrics.GUTTER.dp, top = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             T("Địa chỉ đã chọn", 12.5f, BV.MEDIUM, C.muted)
-            T(summary.ifEmpty { " " }, 15f, BV.BOLD, shrink = true)
+            T(summary.ifEmpty { " " }, 15f, BV.BOLD, shrink = true, minScale = 0.75f)
+            if (equivalent != null) T("Theo địa chỉ mới: $equivalent", 12.5f, BV.MEDIUM, C.muted, shrink = true, minScale = 0.75f)
             Box(Modifier.padding(top = 6.5.dp)) {
                 PrimaryButton("Xác nhận", fontSize = 18f, height = 55.5f, enabled = isComplete) {
                     onConfirm(summary)

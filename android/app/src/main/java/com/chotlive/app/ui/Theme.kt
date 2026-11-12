@@ -90,6 +90,18 @@ data class Palette(val dark: Boolean, val accentChoice: AccentChoice) {
     val grayBadge = d(0xEBEEF3, 0x2A2E36)
     val grabber = d(0xD6D9DF, 0x3A3F48)
 
+    /** Thẻ đơn mới của khách còn đơn gom ngày trước. */
+    val gomFill = d(0xFFF8E6, 0x2A2413)
+    val gomLine = d(0xF5C96A, 0x6E5622)
+    /** Nhãn "Có N đơn gom…", "gộp 2 đơn". */
+    val gomTag = d(0xFFF1D6, 0x3A2F15)
+    val gomInk = d(0x8A5300, 0xF5C96A)
+    /** Dòng khách thiếu thông tin trong bảng xuất. */
+    val badRow = d(0xFDF6F6, 0x2A191A)
+    /** Nút chọn 2 lựa chọn. */
+    val segTrack = d(0xE9EBF0, 0x262A31)
+    val segOn = d(0xFFFFFF, 0x3A3F48)
+
     // Nền nút màu chủ đạo sáng ở cả hai chế độ, chữ trên nút luôn tối (xem OnAccent).
     val orange = hex(p.fill)
     val orangeDeep = hex(p.deep)

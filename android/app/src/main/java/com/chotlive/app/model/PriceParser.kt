@@ -122,7 +122,8 @@ object PriceParser {
     }
 }
 
-private fun groupedNumber(n: Int): String {
+/** "419.000": số tiền không kèm đơn vị (dùng trong ô nhập). */
+fun groupedNumber(n: Int): String {
     val neg = n < 0
     val digits = kotlin.math.abs(n.toLong()).toString()
     val sb = StringBuilder()

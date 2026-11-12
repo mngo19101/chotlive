@@ -78,6 +78,8 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
     var lastSupportMessage by mutableStateOf<SupportMessage?>(null); private set
     /** Màn chat đang mở: tin Admin tới lúc này không cần báo. */
     var supportChatOpen = false
+    /** Kết nối Viettel Post của tài khoản (token lưu ở máy chủ ChốtLive). null = chưa hỏi xong máy chủ. */
+    var vtp by mutableStateOf<VtpConnection?>(null)
 
     var onChat: ((LiveComment) -> Unit)? = null
     /** Báo đổi tài khoản trước khi nhận bình luận, để dữ liệu không rơi vào vùng của người khác. */
@@ -124,12 +126,36 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
 
     private val currentAccountKey: String get() = AuthStorage.accountKey(baseURL, username)
 
+    /**
+     * Hạn dùng đã biết của từng tài khoản trên máy: đổi tài khoản thì hiện ngay thẻ đúng của tài khoản đó,
+     * không để thẻ của tài khoản cũ nhấp nháy rồi mới đổi khi server trả lời.
+     * Lưu cả xuống máy, để lần đầu đổi sang tài khoản sau khi mở lại app cũng không chờ server.
+     */
+    private val accessByAccount = HashMap<String, AccountAccess>()
+
+    private fun saveAccessCache() {
+        auth.accessCache = JsonObject(accessByAccount.mapValues { it.value.toJson() }).toString()
+    }
+
+    private fun forgetAccess(key: String) {
+        if (accessByAccount.remove(key) != null) saveAccessCache()
+    }
+
     init {
         val tk = auth.currentToken()
         baseURL = auth.server ?: ""
         username = auth.user ?: ""
         token = tk
         savedAccounts = auth.savedAccounts()
+        try {
+            auth.accessCache?.let { raw ->
+                AppJson.parseToJsonElement(raw).asObj()?.forEach { (k, v) ->
+                    AccountAccess.from(v.asObj())?.let { accessByAccount[k] = it }
+                }
+            }
+        } catch (e: Exception) {
+        }
+        accessByAccount[currentAccountKey]?.let { access = it }
         if (tk.isNotEmpty() && baseURL.isNotEmpty()) {
             loggedIn = true
             openSocket()
@@ -177,6 +203,7 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
     fun logout() {
         if (token.isNotEmpty()) fireAndForget(baseURL, token, "/api/auth/logout")
         closeSocket()
+        forgetAccess(currentAccountKey)
         token = ""
         auth.clearCurrentSession()
         savedAccounts = auth.savedAccounts()
@@ -201,6 +228,7 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
         accessNotice = null
         supportUnread = 0
         lastSupportMessage = null
+        vtp = null
     }
 
     /** Chuyển sang một tài khoản đã lưu khác, không cần nhập lại mật khẩu. */
@@ -220,6 +248,9 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
         liveUsername = ""
         viewers = 0
         resetLiveInfo()
+        // Sau resetLiveInfo (nó xoá access về null): hiện ngay thẻ hạn dùng đã biết của tài khoản mới,
+        // không để thẻ biến mất rồi hiện lại làm cả trang Tôi nhảy lên xuống.
+        accessByAccount[key]?.let { updateAccess(it) }
         openSocket()
     }
 
@@ -230,6 +261,7 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
         val account = savedAccounts.firstOrNull { it.key == key }
         if (t != null && account != null) fireAndForget(account.server, t, "/api/auth/logout")
         auth.forgetAccount(key)
+        forgetAccess(key)
         savedAccounts = auth.savedAccounts()
     }
 
@@ -268,6 +300,16 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
         syncJob = scope.launch {
             delay(afterMs)
             flushSync(store)
+        }
+    }
+
+    /** Gửi nốt thay đổi trên máy trước khi tạo vận đơn, để máy chủ thấy đủ đơn vừa duyệt. */
+    suspend fun vtpFlush(store: Store) {
+        flushSync(store)
+        repeat(20) {
+            if (!store.isAwaitingAck && !store.syncState.hasChanges) return
+            delay(150)
+            if (!store.isAwaitingAck && store.syncState.hasChanges) flushSync(store)
         }
     }
 
@@ -332,6 +374,19 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
         return page.copy(comments = page.comments.map { it.copy(price = PriceParser.parse(it.text)) })
     }
 
+    /** Gọi API của máy chủ ChốtLive bằng phiên đăng nhập hiện tại. null = không tới được máy chủ. */
+    suspend fun apiCall(path: String, method: String = "GET", body: JsonObject? = null, timeoutSec: Long = 20): Pair<Int, JsonObject>? {
+        if (!loggedIn || token.isEmpty()) return null
+        val url = (baseURL + path).toHttpUrlOrNull() ?: return null
+        val b = Request.Builder().url(url).header("Authorization", "Bearer $token")
+        if (method == "POST") b.post((body ?: JsonObject(emptyMap())).toString().toRequestBody(JSON))
+        val client = http.newBuilder().callTimeout(timeoutSec, TimeUnit.SECONDS).readTimeout(timeoutSec, TimeUnit.SECONDS).build()
+        return call(b.build(), client)
+    }
+
+    /** Tài khoản đang dùng lúc gọi; kết quả về sau khi đã đổi tài khoản thì bỏ. */
+    val accountKey: String get() = currentAccountKey
+
     // MARK: - Chat với Admin
 
     private suspend fun supportCall(path: String, method: String = "GET", body: JsonObject? = null): Pair<Int, JsonObject>? {
@@ -395,6 +450,10 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
 
     private fun updateAccess(a: AccountAccess?) {
         access = a
+        if (a != null && accessByAccount[currentAccountKey] != a) {
+            accessByAccount[currentAccountKey] = a
+            saveAccessCache()
+        }
         scheduleAccessCheck()
     }
 
@@ -540,6 +599,7 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
                     }
                 }
                 refreshSupportUnread()
+                refreshVtp()
             }
             "lives" -> m.arr("lives")?.let { applyLives(it.mapNotNull { e -> e.asObj() }) }
             "native_state" -> decodeSnapshot(m)?.let { onSnapshot?.invoke(it) }
@@ -597,9 +657,9 @@ class LiveClient(private val auth: AuthStorage, private val notifySupport: (Stri
         }
     }
 
-    private suspend fun call(req: Request): Pair<Int, JsonObject>? = withContext(Dispatchers.IO) {
+    private suspend fun call(req: Request, client: OkHttpClient = http): Pair<Int, JsonObject>? = withContext(Dispatchers.IO) {
         try {
-            http.newCall(req).execute().use { r ->
+            client.newCall(req).execute().use { r ->
                 val text = r.body?.string() ?: ""
                 val json = try {
                     AppJson.parseToJsonElement(text).asObj()

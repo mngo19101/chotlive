@@ -339,7 +339,7 @@ fun CustomersScreen() {
             2 -> l = l.filter { it.isBigSpender }.sortedByDescending { it.total }
         }
         val q = search.trim().lowercase()
-        if (q.isNotEmpty()) l = l.filter { it.nickname.lowercase().contains(q) || it.uniqueId.lowercase().contains(q) }
+        if (q.isNotEmpty()) l = l.filter { it.matchesName(q) }
         l
     }
 
@@ -377,7 +377,7 @@ private fun CustomerRow(c: Customer, orderCount: Int, onClick: () -> Unit) {
                 // Tên + nhãn chiếm hết phần còn lại sau số tiền. Không đặt hai ô weight ngang hàng:
                 // Row chia đều chỗ cho các ô weight nên tên chỉ còn nửa hàng và bị co nhỏ.
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f, fill = false)) { T(c.nickname, 15f, BV.BOLD, shrink = true, minScale = 0.85f) }
+                    Box(Modifier.weight(1f, fill = false)) { T(c.displayName, 15f, BV.BOLD, shrink = true, minScale = 0.85f) }
                     if (c.isBigSpender) {
                         Box(Modifier.padding(start = 7.dp)) { Badge("Mua nhiều") }
                     } else if (c.isNewToday) {
@@ -417,7 +417,7 @@ fun CustomerDetailScreen(customerId: String) {
                     Avatar(c.initials, c.id, 56f, 19f)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Box(Modifier.weight(1f, fill = false)) { T(c.nickname, 18f, BV.BOLD, shrink = true, minScale = 0.85f) }
+                            Box(Modifier.weight(1f, fill = false)) { T(c.displayName, 18f, BV.BOLD, shrink = true, minScale = 0.85f) }
                             if (c.isBigSpender) Badge("Mua nhiều")
                         }
                         T("@" + c.uniqueId, 13f, BV.MEDIUM, C.muted, maxLines = 1)
@@ -495,7 +495,7 @@ private fun HistoryRow(o: Order, onClick: () -> Unit) {
         T("${o.productCount} sản phẩm", 13f, BV.MEDIUM, C.muted, Modifier.weight(1f), maxLines = 1)
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
             T(money(o.total), 14f, BV.HEAVY, maxLines = 1)
-            StatusBadge(o.status)
+            if (com.chotlive.app.model.VtpTrack.isReturned(o)) Badge("Hoàn về", C.red, C.redSoft) else StatusBadge(o.status)
         }
     }
 }

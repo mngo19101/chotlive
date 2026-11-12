@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import com.chotlive.app.data.AuthStorage
 import com.chotlive.app.data.Settings
 import com.chotlive.app.data.Store
+import com.chotlive.app.model.AddressBook
 import com.chotlive.app.model.LiveComment
 import com.chotlive.app.model.Order
 import com.chotlive.app.net.LiveClient
@@ -31,7 +32,8 @@ class ChotLiveApp : Application() {
     lateinit var printer: PrinterManager; private set
     lateinit var tickets: TicketRenderer; private set
     lateinit var notifier: SupportNotifier; private set
-    private val scope = MainScope()
+    /** Việc chạy nền của cả app (gọi máy chủ, in tem): không bị huỷ khi màn hình hay bảng dưới đóng lại. */
+    val scope = MainScope()
     private var lastAlert = 0L
     /** Tăng mỗi lần bấm thông báo Admin trả lời: màn hình chính mở chat hỗ trợ. */
     var openSupportRequest by mutableIntStateOf(0)
@@ -39,6 +41,9 @@ class ChotLiveApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // Danh mục địa chỉ Viettel Post: đọc sẵn ở luồng nền để lần đầu mở Đơn hàng không bị khựng.
+        AddressBook.source = { assets.open("AddressData.json").bufferedReader().use { it.readText() } }
+        Thread { AddressBook.new }.start()
         settings = Settings(this)
         auth = AuthStorage(this)
         notifier = SupportNotifier(this)
@@ -97,14 +102,17 @@ class ChotLiveApp : Application() {
      *  Chỉ đánh dấu đã in sau khi gửi hết dữ liệu tem. Trả về thông báo (null nếu thành công). */
     suspend fun printComment(c: LiveComment): String? {
         val items = store.saveToCustomer(c)
+        // Đơn có tiền thu hộ nhập tay vừa nhận thêm món: báo để người bán biết số đó đã được tính lại.
+        val codNotice = store.takeCodResetNotice()
+        val also = codNotice?.let { "\n\n" + it } ?: ""
         if (!printer.hasPrinter) {
-            return "Đã lưu đơn của ${c.nickname}. Chưa kết nối máy in nên chưa in tem — vào Tôi › Máy in để kết nối."
+            return "Đã lưu đơn của ${c.nickname}. Chưa kết nối máy in nên chưa in tem — vào Tôi › Máy in để kết nối." + also
         }
         printer.sendAndWait(tickets.liveTicketBytes(c))?.let {
-            return "Đã lưu đơn của ${c.nickname} nhưng chưa in được tem. $it"
+            return "Đã lưu đơn của ${c.nickname} nhưng chưa in được tem. $it" + also
         }
         items.forEach { store.markPrinted(it.id) }
-        return null
+        return codNotice
     }
 
     /** In tem cho tất cả sản phẩm của đơn, dừng ở tem lỗi đầu tiên. Trả về thông báo (null nếu thành công). */
@@ -113,7 +121,7 @@ class ChotLiveApp : Application() {
         var done = 0
         for (it in o.items) {
             val c = LiveComment(id = it.id, uniqueId = o.customer.uniqueId, userId = o.customer.userId,
-                nickname = o.customer.nickname, text = it.ticketText, ts = it.ts, price = it.lineTotal)
+                nickname = o.customer.displayName, text = it.ticketText, ts = it.ts, price = it.lineTotal)
             printer.sendAndWait(tickets.ticketBytes(c))?.let { err ->
                 return "Mới gửi được $done/${o.items.size} tem. $err"
             }

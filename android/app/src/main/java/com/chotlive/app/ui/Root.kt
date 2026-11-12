@@ -89,6 +89,7 @@ sealed interface Route {
     data object Notifications : Route
     data object Help : Route
     data object Appearance : Route
+    data object Vtp : Route
 }
 
 class PathEntry(val key: Long, val route: Route)
@@ -262,6 +263,7 @@ private fun Destination(route: Route) {
         Route.Notifications -> NotificationsScreen()
         Route.Help -> SupportChatScreen()
         Route.Appearance -> AppearanceScreen()
+        Route.Vtp -> VtpConnectScreen()
     }
 }
 

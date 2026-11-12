@@ -119,6 +119,15 @@ data class AccountAccess(
     val code: String = "",  // TRIAL_EXPIRED | PLAN_EXPIRED khi đã hết hạn
     val message: String = "",
 ) {
+    /** Dạng lưu được xuống máy, đọc lại bằng `from`. */
+    fun toJson(): JsonObject = JsonObject(buildMap {
+        put("status", JsonPrimitive(status))
+        put("canFollowLive", JsonPrimitive(canFollowLive))
+        if (endsAt != null) put("endsAt", JsonPrimitive(endsAt))
+        put("code", JsonPrimitive(code))
+        put("message", JsonPrimitive(message))
+    })
+
     companion object {
         fun from(o: JsonObject?): AccountAccess? {
             o ?: return null

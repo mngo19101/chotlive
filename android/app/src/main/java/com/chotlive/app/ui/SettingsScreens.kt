@@ -47,6 +47,7 @@ import com.chotlive.app.data.AppearanceMode
 import com.chotlive.app.data.AuthStorage
 import com.chotlive.app.model.LiveComment
 import com.chotlive.app.model.initialsOf
+import com.chotlive.app.net.vtpConnected
 import com.chotlive.app.print.NearbyDevice
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -84,7 +85,7 @@ fun SettingsScreen() {
                             } else client.switchAccount(a.key)
                         },
                         onLongClick = {
-                            if (!active) ui.confirm = ConfirmItem("Xoá tài khoản ${a.user}?", "Tài khoản này sẽ bị đăng xuất khỏi máy.", "Xoá tài khoản") {
+                            if (!active) ui.confirm = ConfirmItem("Xoá tài khoản ${a.user}?", "Tài khoản sẽ bị xoá khỏi máy này. Muốn dùng lại thì đăng nhập lại.", "Xoá tài khoản") {
                                 client.forgetSavedAccount(a.key)
                             }
                         },
@@ -120,6 +121,9 @@ fun SettingsScreen() {
 
         SectionLabel("Cài đặt")
         Column(Modifier.fillMaxWidth().padding(bottom = 15.dp).cardStyle(22f)) {
+            SettingRow(IconName.TRUCK, "ViettelPost", if (client.vtpConnected) "Đã kết nối" else "Chưa kết nối",
+                if (client.vtpConnected) C.green else C.muted) { ui.push(Route.Vtp) }
+            HairLine()
             SettingRow(IconName.PRINTER, "Máy in", if (printer.isConnected) "Đã kết nối" else "Chưa kết nối",
                 if (printer.isConnected) C.green else C.muted) { ui.push(Route.Printer) }
             HairLine()

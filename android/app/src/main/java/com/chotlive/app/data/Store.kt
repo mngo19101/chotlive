@@ -15,7 +15,10 @@ import com.chotlive.app.model.Order
 import com.chotlive.app.model.OrderItem
 import com.chotlive.app.model.OrderStatus
 import com.chotlive.app.model.PriceParser
+import com.chotlive.app.model.ShipInfo
+import com.chotlive.app.model.ShipState
 import com.chotlive.app.model.TikTokAccount
+import com.chotlive.app.model.Vtp
 import java.io.File
 import java.time.LocalDate
 import java.util.UUID
@@ -219,7 +222,7 @@ class Store(private val directory: File, account: String?) {
     fun saveToCustomer(c: LiveComment): List<OrderItem> {
         val key = key(c.uniqueId, c.userId)
         val tokens = if (c.price > 0) PriceParser.orderTokens(c.text) else emptyList()
-        val items: List<OrderItem> = if (tokens.size > 1) {
+        var items: List<OrderItem> = if (tokens.size > 1) {
             tokens.mapIndexed { i, t ->
                 OrderItem(
                     id = if (i == 0) c.id else "${c.id}#${i + 1}", comment = c.text, price = t.price, ts = c.ts,
@@ -243,20 +246,71 @@ class Store(private val directory: File, account: String?) {
         if (idx >= 0) {
             val existing = customers[idx].items.filter { (it.commentId ?: it.id) == c.id }
             if (existing.isNotEmpty()) return existing
+            // Đơn của phiên này đã gửi đi thì món mới phải sang đơn khác (xem `openGroupId`).
+            val group = openGroupId(customers[idx], c.sessionId)
+            if (group != c.sessionId) items = items.map { it.copy(groupId = group) }
+            val added = items
             editCustomers { list ->
                 val cur = list[idx]
                 list[idx] = cur.copy(
-                    items = cur.items + items,
+                    items = cur.items + added,
                     userId = cur.userId.ifEmpty { c.userId },
                     nickname = c.nickname.ifEmpty { cur.nickname },
                 )
             }
+            clearManualCod(customers[idx].id)
         } else {
             editCustomers { it.add(Customer(id = key, uniqueId = c.uniqueId, userId = c.userId, nickname = c.nickname, items = items)) }
         }
         touchCustomer(customers.firstOrNull { cu -> cu.items.any { it.commentId == c.id || it.id == c.id } }?.id ?: key)
         save()
         return items
+    }
+
+    /**
+     * Nhóm (đơn) nhận món mới của một phiên live. Bình thường là đơn của chính phiên đó. Đơn ấy đã gửi đi
+     * (đang giao, đã giao, đã xuất, đã có vận đơn) thì gói hàng và tiền thu hộ đã chốt: món chốt thêm
+     * vào đơn còn mở khác của phiên, chưa có thì mở đơn mới, để món đó vẫn được duyệt, gửi và thu tiền.
+     */
+    private fun openGroupId(customer: Customer, sessionId: String?): String? {
+        sessionId ?: return null
+        val mine = orders(customer).filter { o -> o.items.any { it.sessionId == sessionId && it.groupId != null } }
+        if (mine.isEmpty()) return sessionId
+        val open = mine.filter { Vtp.state(it).isPending && it.ship?.vtpCode.isNullOrEmpty() }
+        if (open.any { it.key == sessionId }) return sessionId
+        open.firstOrNull()?.items?.firstNotNullOfOrNull { it.groupId }?.let { return it }
+        return sessionId + "~" + UUID.randomUUID().toString().take(8).lowercase()
+    }
+
+    /** Tên khách vừa bị bỏ số thu hộ nhập tay vì đơn đổi món; màn hình đọc một lần để báo. */
+    private var codResetName: String? = null
+
+    fun takeCodResetNotice(): String? {
+        val name = codResetName ?: return null
+        codResetName = null
+        return "Đơn của $name vừa đổi món: đã bỏ tiền thu hộ nhập tay, tính lại theo hàng mới."
+    }
+
+    /**
+     * Tiền thu hộ nhập tay là cho gói hàng cũ. Đơn chưa gửi của khách đổi món (thêm, sửa giá, bớt) thì bỏ số đó
+     * ở mọi đơn chưa gửi của khách, để thu hộ tính lại theo hàng mới, giống web.
+     */
+    private fun clearManualCod(customerId: String) {
+        val idx = customers.indexOfFirst { it.id == customerId }
+        if (idx < 0) return
+        val c = customers[idx]
+        val pending = orders(c).filter { Vtp.state(it).isPending }.flatMap { o -> o.items.map { it.id } }.toSet()
+        var cleared = false
+        val items = c.items.map {
+            val ship = it.ship
+            if (ship?.codOverride != null && pending.contains(it.id)) {
+                cleared = true
+                it.copy(ship = ship.copy(codOverride = null))
+            } else it
+        }
+        if (!cleared) return
+        editCustomers { it[idx] = c.copy(items = items) }
+        codResetName = c.displayName
     }
 
     fun deleteItem(customerId: String, itemId: String) {
@@ -266,6 +320,7 @@ class Store(private val directory: File, account: String?) {
             val rest = list[idx].items.filter { it.id != itemId }
             if (rest.isEmpty()) list.removeAt(idx) else list[idx] = list[idx].copy(items = rest)
         }
+        clearManualCod(customerId)
         touchCustomer(customerId, setOf(itemId))
         save()
     }
@@ -291,6 +346,7 @@ class Store(private val directory: File, account: String?) {
             val rest = list[idx].items.filter { !ids.contains(it.id) } + edited
             if (rest.isEmpty()) list.removeAt(idx) else list[idx] = list[idx].copy(items = rest)
         }
+        if (edited.sumOf { it.lineTotal } != o.total) clearManualCod(o.customer.id)
         touchCustomer(o.customer.id, ids - edited.map { it.id }.toSet())
         save()
     }
@@ -358,6 +414,126 @@ class Store(private val directory: File, account: String?) {
         }
         touchCustomer(o.customer.id)
         save()
+    }
+
+    // MARK: - Duyệt đơn & Viettel Post
+
+    /**
+     * Ghi thông tin giao vào mọi món của từng đơn (id đơn → ship). `shipping`: true chuyển Đang giao,
+     * false đưa về chưa giao, null giữ nguyên. Server đọc `ship` để web thấy đúng trạng thái.
+     */
+    fun setShip(changes: Map<String, ShipInfo>, shipping: Boolean? = null) {
+        val touched = mutableSetOf<String>()
+        for ((orderId, ship) in changes) {
+            val o = order(orderId) ?: continue
+            val ci = customers.indexOfFirst { it.id == o.customer.id }
+            if (ci < 0) continue
+            val ids = o.items.map { it.id }.toSet()
+            editCustomers { list ->
+                list[ci] = list[ci].copy(items = list[ci].items.map {
+                    if (!ids.contains(it.id)) it
+                    else if (shipping != null) it.copy(ship = ship, shipping = shipping, delivered = false)
+                    else it.copy(ship = ship)
+                })
+            }
+            touched.add(o.customer.id)
+        }
+        if (touched.isEmpty()) return
+        touched.forEach { touchCustomer(it) }
+        save()
+    }
+
+    /**
+     * Bảng Duyệt đơn: chuyển các đơn được tick sang Chờ gửi (`ready`) hoặc Gom sau (`hold`).
+     * Tiền cọc ghi ở đơn đầu tiên, các cài đặt khác ghi ở mọi đơn, giống web.
+     * `dropped`: đơn đã duyệt nhưng bị bỏ tick, đưa về chưa duyệt để không còn gộp chung vận đơn.
+     */
+    fun approve(orderIds: List<String>, state: ShipState, base: ShipInfo, dropped: List<String> = emptyList()) {
+        val changes = LinkedHashMap<String, ShipInfo>()
+        for (id in dropped) {
+            val s = order(id)?.ship ?: continue
+            changes[id] = s.copy(state = ShipState.ASK.raw, deposit = 0, codOverride = null)
+        }
+        orderIds.forEachIndexed { i, id ->
+            // Giữ mã vận đơn đã huỷ và lỗi lần gửi trước: lần gửi sau cần biết để không trùng mã đơn.
+            val old = order(id)?.ship
+            changes[id] = base.copy(
+                state = state.raw,
+                deposit = if (i > 0) 0 else base.deposit,
+                vtpOldCode = old?.vtpOldCode, vtpKind = old?.vtpKind, vtpError = old?.vtpError, vtpErrorAt = old?.vtpErrorAt,
+                exportedAt = null, batchId = null,
+            )
+        }
+        setShip(changes)
+    }
+
+    /** Đã xuất file Viettel Post: các đơn chuyển Đang giao và rời khỏi thanh Sẵn sàng xuất. */
+    fun markExported(orders: List<Order>, now: Long = Clock.now) {
+        val batch = "vtp_" + now.toString(36)
+        setShip(orders.associate { o ->
+            o.id to (o.ship ?: ShipInfo()).copy(state = ShipState.EXPORTED.raw, exportedAt = now, batchId = batch)
+        }, shipping = true)
+    }
+
+    /** Hoàn tác xuất: đơn cùng lần xuất của khách về lại Chờ gửi. */
+    fun undoExport(o: Order) {
+        val batch = o.ship?.batchId
+        val list = orders(o.customer).filter { it.id == o.id || (batch != null && it.ship?.batchId == batch) }
+        setShip(list.associate { x ->
+            x.id to (x.ship ?: ShipInfo()).copy(state = ShipState.READY.raw, exportedAt = null, batchId = null)
+        }, shipping = false)
+    }
+
+    /** Đang giao ↔ Đã giao. */
+    fun setDelivered(o: Order, delivered: Boolean) {
+        val ids = o.items.map { it.id }.toSet()
+        val ci = customers.indexOfFirst { it.id == o.customer.id }
+        if (ci < 0) return
+        editCustomers { list ->
+            list[ci] = list[ci].copy(items = list[ci].items.map {
+                if (ids.contains(it.id)) it.copy(delivered = delivered, shipping = !delivered) else it
+            })
+        }
+        touchCustomer(o.customer.id)
+        save()
+    }
+
+    // Ghi kết quả Viettel Post lên máy ngay, không chờ máy chủ đồng bộ về.
+
+    fun applyVtpCreated(orders: List<Order>, code: String, fee: Int, service: String, now: Long = Clock.now) {
+        val batch = "vtp_" + now.toString(36)
+        setShip(orders.associate { o ->
+            o.id to (o.ship ?: ShipInfo()).copy(
+                state = ShipState.EXPORTED.raw, exportedAt = now, batchId = batch,
+                vtpCode = code, vtpFee = fee, vtpService = service, vtpStatus = 0, vtpStatusName = "Chờ lấy hàng",
+                vtpStatusAt = now, vtpKind = "created", vtpNote = null, vtpError = null, vtpErrorAt = null,
+            )
+        }, shipping = true)
+    }
+
+    fun applyVtpError(orders: List<Order>, error: String, now: Long = Clock.now) {
+        setShip(orders.associate { o -> o.id to (o.ship ?: ShipInfo()).copy(vtpError = error, vtpErrorAt = now) })
+    }
+
+    /** Huỷ vận đơn xong: đơn về Chờ gửi, giữ mã cũ để tra (giống máy chủ). */
+    fun applyVtpCancelled(code: String) {
+        val now = Clock.now
+        setShip(allOrders().filter { it.ship?.vtpCode == code }.associate { o ->
+            o.id to (o.ship ?: ShipInfo()).copy(
+                state = ShipState.READY.raw, vtpOldCode = code, vtpCode = null, vtpKind = "cancelled", vtpStatus = 107,
+                vtpStatusName = "Shop đã huỷ vận đơn", vtpStatusAt = now, exportedAt = null, batchId = null,
+            )
+        }, shipping = false)
+    }
+
+    /** type 3: đã yêu cầu phát lại, type 2: đã đồng ý hoàn về shop. */
+    fun applyVtpResolved(code: String, type: Int) {
+        val now = Clock.now
+        setShip(allOrders().filter { it.ship?.vtpCode == code }.associate { o ->
+            o.id to (o.ship ?: ShipInfo()).copy(
+                vtpKind = "moving", vtpStatusName = if (type == 3) "Đã yêu cầu phát lại" else "Đã đồng ý hoàn", vtpStatusAt = now,
+            )
+        })
     }
 
     /** Mọi đơn, mới nhất trước. */

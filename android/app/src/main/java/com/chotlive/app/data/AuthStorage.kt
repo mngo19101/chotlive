@@ -127,10 +127,18 @@ class AuthStorage(context: Context) {
         tokens.edit().remove(tokenAccount(key)).apply()
     }
 
+    // MARK: - Hạn dùng đã biết của từng tài khoản
+
+    /** JSON {mã tài khoản: {status, canFollowLive, endsAt, code, message}} lưu lần trước; null nếu chưa có. */
+    var accessCache: String?
+        get() = prefs.getString(ACCESS_KEY, null)
+        set(value) { prefs.edit().putString(ACCESS_KEY, value).apply() }
+
     companion object {
         private const val SERVER_KEY = "serverURL"
         private const val USER_KEY = "authUser"
         private const val SAVED_KEY = "savedAppAccounts"
+        private const val ACCESS_KEY = "accessByAccount"
 
         /** Mỗi tài khoản trên mỗi server có một vùng dữ liệu riêng. */
         fun accountKey(server: String, user: String): String =

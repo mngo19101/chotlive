@@ -377,7 +377,7 @@ fun OutlineButton(
         val tint = color ?: C.ink
         Row(
             modifier.height(height.dp).alpha(if (enabled) 1f else 0.5f)
-                .capsule(if (filled) C.orange else C.card, if (filled) null else C.line).tap(enabled, onClick).padding(horizontal = 6.dp),
+                .capsule(if (filled) C.orange else C.card, if (filled) null else C.line).tap(enabled, onClick).padding(horizontal = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {

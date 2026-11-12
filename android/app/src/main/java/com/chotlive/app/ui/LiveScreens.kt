@@ -873,7 +873,7 @@ fun OrderCommentsScreen(orderId: String) {
     val store = app.store
     val ui = LocalAppUI.current
     val order = store.order(orderId)
-    SubPage("Bình luận chốt đơn", order?.let { "Đơn của ${it.customer.nickname} · ${timeText(it.lastTs)}" }, headerBottom = 20f) {
+    SubPage("Bình luận chốt đơn", order?.let { "Đơn của ${it.customer.displayName} · ${timeText(it.lastTs)}" }, headerBottom = 20f) {
         if (order == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { T("Đơn không còn tồn tại", 14f, BV.MEDIUM, C.muted) }
         } else {
@@ -888,7 +888,7 @@ fun OrderCommentsScreen(orderId: String) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
                         Avatar(order.customer.initials, order.customer.id, 48f, 17f)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(0.5.dp)) {
-                            T(order.customer.nickname, 17.5f, BV.BOLD, shrink = true, minScale = 0.85f)
+                            T(order.customer.displayName, 17.5f, BV.BOLD, shrink = true, minScale = 0.85f)
                             T("@" + order.customer.uniqueId, 13.5f, BV.MEDIUM, C.muted, maxLines = 1)
                         }
                         Badge("${groups.size} bình luận", C.accentDeep, C.peachTint, 12.5f, 28f, 10f)

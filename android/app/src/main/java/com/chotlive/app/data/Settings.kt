@@ -33,6 +33,10 @@ class Settings(context: Context) {
     var shopName by mutableStateOf(prefs.getString("shopName", null) ?: "ChốtLive"); private set
     var notifySound by mutableStateOf(prefs.getBoolean("notifySound", false)); private set
     var notifyHaptic by mutableStateOf(prefs.getBoolean("notifyHaptic", false)); private set
+    /** Gói dịch vụ Viettel Post mặc định khi gửi (VSL9, STK, SCN). */
+    var vtpService by mutableStateOf(prefs.getString("vtpServiceCode", null) ?: "VSL9"); private set
+    /** Khổ tem in vận đơn: a6, a5, k100. */
+    var vtpLabelSize by mutableStateOf(prefs.getString("vtpLabelSize", null) ?: "a6"); private set
 
     val appearanceSummary: String get() = "${mode.label} · ${accent.label}"
 
@@ -43,4 +47,6 @@ class Settings(context: Context) {
     fun updateShopName(s: String) { shopName = s; prefs.edit().putString("shopName", s).apply() }
     fun updateNotifySound(on: Boolean) { notifySound = on; prefs.edit().putBoolean("notifySound", on).apply() }
     fun updateNotifyHaptic(on: Boolean) { notifyHaptic = on; prefs.edit().putBoolean("notifyHaptic", on).apply() }
+    fun updateVtpService(code: String) { vtpService = code; prefs.edit().putString("vtpServiceCode", code).apply() }
+    fun updateVtpLabelSize(code: String) { vtpLabelSize = code; prefs.edit().putString("vtpLabelSize", code).apply() }
 }
