@@ -43,7 +43,7 @@ struct OrdersView: View {
                     // Cả 5 tab nằm gọn một hàng, không phải kéo ngang. Hàng chip cuộn ngang cũ (lề âm)
                     // làm trang rộng hơn màn hình nên kéo qua lại bị lộ khoảng trắng.
                     HStack(spacing: 4) {
-                        StatusTab(title: "Tất cả", count: every.count, selected: filter == 0) { filter = 0 }
+                        StatusTab(title: "Tất cả", count: VtpTrack.oneCardPerWaybill(every).count, selected: filter == 0) { filter = 0 }
                         statusTab("Đơn mới", 1, scoped)
                         statusTab("Chờ gửi", 2, scoped)
                         statusTab("Gom sau", 3, scoped)
@@ -102,11 +102,13 @@ struct OrdersView: View {
                 return x != y ? x : a.lastTs > b.lastTs
             }
         }
-        return l
+        // Nhiều đơn của khách gộp chung một vận đơn: một thẻ, tiền là tiền thu hộ của vận đơn.
+        return VtpTrack.oneCardPerWaybill(l)
     }
 
     private func statusTab(_ title: String, _ tab: Int, _ scoped: [Order]) -> some View {
-        StatusTab(title: title, count: scoped.filter { matches($0, tab) }.count, selected: filter == tab) { filter = tab }
+        StatusTab(title: title, count: VtpTrack.oneCardPerWaybill(scoped.filter { matches($0, tab) }).count,
+                  selected: filter == tab) { filter = tab }
     }
 
     private func openReview(_ o: Order) {
@@ -118,6 +120,12 @@ struct OrdersView: View {
         let older = st.isPending ? Vtp.olderPending(o, in: every) : []
         let hasOldGom = st == .ask && !older.isEmpty
         let day = Clock.isToday(o.lastTs) ? "" : " · \(dayMonth(o.lastTs))"
+        // Đã có vận đơn: tiền trên thẻ là tiền Viettel Post thu hộ (gồm COD nhập tay, cọc, các đơn gộp chung).
+        let mates = VtpTrack.sameWaybill(o, in: every)
+        let hasWaybill = VtpTrack.code(o) != nil
+        let amount = hasWaybill ? VtpTrack.waybillCod(mates) : o.total
+        let products = mates.reduce(0) { $0 + $1.productCount }
+        let merged = mates.count > 1 ? " · gộp \(mates.count) đơn" : ""
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Avatar(text: o.customer.initials, size: 40, fontSize: 14, seed: o.customer.id)
@@ -126,15 +134,16 @@ struct OrdersView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         T(o.customer.displayName, 15, .bold).lineLimit(1).offset(y: 2)
                         Spacer(minLength: 0)
-                        T(money(o.total), 17, .heavy, Theme.ink, track: -0.4).lineLimit(1).fixedSize()
+                        T(money(amount), 17, .heavy, Theme.ink, track: -0.4).lineLimit(1).fixedSize()
                     }
                     HStack(spacing: 6) {
-                        T("@\(o.customer.uniqueId) · \(o.productCount) sản phẩm · \(timeText(o.lastTs))\(day)", 12, .medium, Theme.muted)
+                        T("@\(o.customer.uniqueId) · \(products) sản phẩm\(merged) · \(timeText(o.lastTs))\(day)", 12, .medium, Theme.muted)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                             .offset(y: 1)
                         Spacer(minLength: 0)
                         if st == .ask { Badge(text: "Đơn mới").offset(y: 2) }
+                        if hasWaybill { T("thu hộ", 11.5, .semibold, Theme.muted).fixedSize().offset(y: 1) }
                     }
                 }
             }

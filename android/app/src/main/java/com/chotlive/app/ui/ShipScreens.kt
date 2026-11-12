@@ -289,7 +289,7 @@ fun ShipReviewSheet(orderId: String, draftIds: Set<String>? = null) {
             pending.filter { !checked.contains(it.id) && Vtp.state(it) == ShipState.READY }.map { it.id }
         } else emptyList()
         store.approve(ids, state, patch(true, codValue), dropped)
-        // Gom sau thì nháp không còn: về danh sách nháp. Lưu thì mở lại nháp để soát tiếp.
+        // Lưu thì mở lại nháp để soát tiếp.
         if (draftIds != null) backToDraft(state == ShipState.READY) else ui.dismissSheet()
     }
 
@@ -422,7 +422,12 @@ fun ShipReviewSheet(orderId: String, draftIds: Set<String>? = null) {
                     }
                 }
             } else {
-                OutlineButton("Gom sau", Modifier.weight(2f), height = 52f) { apply(ShipState.HOLD) }
+                if (draftIds != null) {
+                    // Mở từ nháp vận đơn: không để "Gom sau" ở đây (bấm nhầm là nháp biến mất), chỉ quay lại danh sách nháp.
+                    OutlineButton("Quay lại", Modifier.weight(2f), height = 52f) { backToDraft(false) }
+                } else {
+                    OutlineButton("Gom sau", Modifier.weight(2f), height = 52f) { apply(ShipState.HOLD) }
+                }
                 PrimaryButton(if (draftIds == null) "Xác nhận gửi" else "Lưu thay đổi", Modifier.weight(3f), fontSize = 15f) {
                     apply(ShipState.READY)
                 }

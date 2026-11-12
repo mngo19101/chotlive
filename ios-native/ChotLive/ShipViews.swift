@@ -543,8 +543,14 @@ struct ShipReviewSheet: View {
                     PrimaryButton(title: "Đã giao", fontSize: 15) { store.setDelivered(focus, true); ui.dismissSheet() }
                 }
             } else {
-                OutlineButton(title: "Gom sau", height: 52) { apply(.hold) }
-                    .frame(maxWidth: .infinity)
+                if draftIds != nil {
+                    // Mở từ nháp vận đơn: không để "Gom sau" ở đây (bấm nhầm là nháp biến mất), chỉ quay lại danh sách nháp.
+                    OutlineButton(title: "Quay lại", height: 52) { backToDraft(open: false) }
+                        .frame(maxWidth: .infinity)
+                } else {
+                    OutlineButton(title: "Gom sau", height: 52) { apply(.hold) }
+                        .frame(maxWidth: .infinity)
+                }
                 PrimaryButton(title: draftIds == nil ? "Xác nhận gửi" : "Lưu thay đổi", fontSize: 15) { apply(.ready) }
                     .frame(maxWidth: .infinity)
                     .layoutPriority(1)
@@ -569,7 +575,7 @@ struct ShipReviewSheet: View {
         let dropped = state == .ready ? pending.filter { !checked.contains($0.id) && Vtp.state($0) == .ready }.map(\.id) : []
         store.approve(ids, state: state, base: patch(first: true, cod: codValue), dropped: dropped)
         if draftIds != nil {
-            // Gom sau thì nháp không còn: về danh sách nháp. Lưu thì mở lại nháp để soát tiếp.
+            // Lưu thì mở lại nháp để soát tiếp.
             backToDraft(open: state == .ready)
         } else {
             ui.dismissSheet()

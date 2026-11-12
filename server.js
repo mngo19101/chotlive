@@ -1357,12 +1357,16 @@ app.post('/api/vtp/print', requireAuth, async (req, res) => {
 app.post('/api/vtp/cancel', requireAuth, async (req, res) => {
   const code = String(req.body?.code || '');
   if (!vtpCodeOk(code)) return res.status(400).json({ error: 'Mã vận đơn không hợp lệ' });
-  const r = await vtp.vtpCancel(vtpStore, req.user.id, code);
+  // force: shop đã kiểm trên viettelpost.vn, chỉ gỡ mã vận đơn khỏi đơn trong app, không gọi Viettel Post.
+  const force = req.body?.force === true;
+  const r = force ? { ok: true } : await vtp.vtpCancel(vtpStore, req.user.id, code);
   if (!r.ok) return res.status(400).json({ error: r.error });
+  const statusName = force ? 'Shop gỡ vận đơn khỏi app' : r.already ? 'Viettel Post báo đã huỷ' : 'Shop đã huỷ vận đơn';
+  if (force || r.already) console.log(`[vtp] ${statusName}: ${code}`);
   mutateState(req.user.id, 'vtp_cancelled', '', null, (s) =>
-    vtp.applyVtpStatus(s, { code, status: 107, statusName: 'Shop đã huỷ vận đơn', note: '', location: '' })
+    vtp.applyVtpStatus(s, { code, status: 107, statusName, note: '', location: '' })
   );
-  res.json({ ok: true });
+  res.json({ ok: true, already: !!r.already, forced: force });
 });
 
 app.post('/api/vtp/resolve', requireAuth, async (req, res) => {

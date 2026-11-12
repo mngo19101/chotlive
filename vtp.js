@@ -394,8 +394,15 @@ export async function vtpCancel(store, userId, code, note = 'Shop huỷ đơn') 
     await new Promise((res) => setTimeout(res, 4000));
     r = await vtpCall(store, userId, 'POST', '/v2/order/UpdateOrder', body);
   }
-  return ok(r) ? { ok: true } : { ok: false, error: why(r) };
+  if (ok(r)) return { ok: true };
+  console.warn(`[vtp] Huỷ vận đơn ${code} lỗi: HTTP ${r.http} ${r.json ? JSON.stringify(r.json).slice(0, 400) : r.text}`);
+  // Viettel Post trả lỗi "Đơn hàng đã hủy!" khi vận đơn đã huỷ từ trước (vd. huỷ trên web Viettel Post lúc
+  // chưa nối webhook): coi như huỷ xong để đơn trong app không kẹt ở Đang giao.
+  if (VTP_ALREADY_CANCELLED.test(String(r.json?.message || ''))) return { ok: true, already: true };
+  return { ok: false, error: why(r) };
 }
+
+export const VTP_ALREADY_CANCELLED = /^\s*(đơn hàng\s+)?(đã|da)\s+(hủy|huỷ|huy)\s*!?\s*$|already\s+cancel/i;
 
 /** Phát tiếp (3) hoặc duyệt hoàn (2) đơn đang tồn. */
 export async function vtpResolve(store, userId, code, type, note = '') {

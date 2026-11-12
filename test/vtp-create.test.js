@@ -28,7 +28,11 @@ const server = http.createServer((req, res) => {
       const ward = /Hà Nội/.test(addr) ? 1 : /Sài Gòn|Bến Nghé/.test(addr) ? 8001 : 7969;
       return send({ status: 200, error: false, message: 'OK', data: { ORDER_NUMBER: '15' + calls.length, MONEY_TOTAL: 18480, RECEIVER_PROVINCE: 0, RECEIVER_DISTRICT: 0, RECEIVER_WARDS: ward, SORT_CODE: 'X' } });
     }
-    if (req.url === '/v2/order/UpdateOrder') return send({ status: 200, error: false, message: 'OK', data: null });
+    if (req.url === '/v2/order/UpdateOrder') {
+      if (json.ORDER_NUMBER === '999') return send({ status: 200, error: true, message: 'Đơn hàng đã hủy!' });
+      if (json.ORDER_NUMBER === '998') return send({ status: 200, error: true, message: 'Trạng thái đơn hàng không hợp lệ' });
+      return send({ status: 200, error: false, message: 'OK', data: null });
+    }
     if (req.url === '/v2/order/getPriceNlp') return send({ status: 200, error: false, message: 'OK', data: { MONEY_TOTAL: json.ORDER_SERVICE === 'STK' ? 20000 : 18480 } });
     if (req.url === '/v2/order/getPriceAllNlp') {
       const addr = String(json.RECEIVER_ADDRESS);
@@ -123,6 +127,16 @@ test('app iOS không gửi expect, số nhà có dấu phẩy: không huỷ nh�
   assert.equal(r.ok, false);
   assert.equal(r.cancelled, true);
   assert.match(r.error, /Phường An Cựu/);
+});
+
+test('huỷ vận đơn: Viettel Post báo "Đơn hàng đã hủy!" thì coi như đã huỷ, lỗi khác vẫn báo lỗi', async () => {
+  assert.deepEqual(await vtp.vtpCancel(store, 'u1', '777'), { ok: true });
+  assert.deepEqual(await vtp.vtpCancel(store, 'u1', '999'), { ok: true, already: true });
+  const bad = await vtp.vtpCancel(store, 'u1', '998');
+  assert.equal(bad.ok, false);
+  assert.equal(bad.error, 'Trạng thái đơn hàng không hợp lệ');
+  assert.match('Đơn hàng đã huỷ', vtp.VTP_ALREADY_CANCELLED);
+  assert.doesNotMatch('Đơn hàng đã hủy không thể cập nhật', vtp.VTP_ALREADY_CANCELLED);
 });
 
 test('không có danh mục thì vẫn tạo đơn, không đối chiếu', async () => {

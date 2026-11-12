@@ -423,10 +423,15 @@ fun VtpOrderBox(order: Order) {
     CardBox(if (bad) C.badRow else C.card, if (bad) C.red.copy(alpha = 0.35f) else C.line, 12f, 15f) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(IconName.TRUCK, 16f, 2.3f, C.accent)
-            T("ViettelPost", 15f, BV.BOLD, modifier = Modifier.weight(1f))
-            Badge(if (bad) "Cần xử lý" else VtpTrack.statusName(order),
-                if (bad) C.red else if (delivered) C.green else C.accent,
-                if (bad) C.redSoft else if (delivered) C.greenSoft else C.peachSoft, 12f, 24f, 10f)
+            // Chữ "ViettelPost" luôn một dòng; trạng thái dài ("Tiếp nhận đơn hàng từ đối tác") tự thu nhỏ/cắt.
+            T("ViettelPost", 15f, BV.BOLD, maxLines = 1)
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                Box(Modifier.height(24.dp).capsule(if (bad) C.redSoft else if (delivered) C.greenSoft else C.peachSoft)
+                    .padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                    T(if (bad) "Cần xử lý" else VtpTrack.statusName(order), 12f, BV.SEMIBOLD,
+                        if (bad) C.red else if (delivered) C.green else C.accent, shrink = true, minScale = 0.75f)
+                }
+            }
         }
         if (bad) {
             Column(Modifier.fillMaxWidth().clip(rounded(14f)).background(C.redSoft).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -444,6 +449,9 @@ fun VtpOrderBox(order: Order) {
             Icon(IconName.COPY, 17f, color = C.muted)
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val mates = VtpTrack.sameWaybill(order, store.allOrders())
+            InfoLine("Thu hộ (COD)", money(VtpTrack.waybillCod(mates)))
+            if (mates.size > 1) InfoLine("Gộp", "${mates.size} đơn · ${money(mates.sumOf { it.total })} tiền hàng")
             s?.vtpFee?.takeIf { it > 0 }?.let { InfoLine("Cước", money(it)) }
             s?.vtpService?.takeIf { it.isNotEmpty() }?.let { InfoLine("Gói", it) }
             if (!bad) InfoLine("Trạng thái", VtpTrack.statusName(order) + (at?.let { " · ${dayMonth(it)} ${timeText(it)}" } ?: ""))
@@ -484,11 +492,27 @@ fun VtpOrderBox(order: Order) {
                     "Chỉ huỷ được khi bưu tá chưa lấy hàng. Đơn sẽ về lại Chờ gửi.", "Huỷ vận đơn") {
                     busy = true
                     app.scope.launch {
-                        val error = client.vtpCancel(code)
+                        val (error, already) = client.vtpCancel(code)
                         busy = false
-                        if (error != null) return@launch ui.notify(error)
-                        store.applyVtpCancelled(code)
-                        ui.notify("Đã huỷ vận đơn, đơn về Chờ gửi.")
+                        if (error != null) {
+                            // Viettel Post không huỷ được: cho gỡ mã khỏi đơn sau khi shop tự kiểm trên viettelpost.vn.
+                            ui.confirm = ConfirmItem("Viettel Post không huỷ được",
+                                "Viettel Post báo: $error\n\nVào viettelpost.vn kiểm vận đơn ${VtpTrack.pretty(code)}. Nếu đơn đã huỷ ở đó " +
+                                    "(hoặc bạn vừa huỷ tay), bấm Gỡ khỏi app để đơn về Chờ gửi.", "Gỡ khỏi app") {
+                                busy = true
+                                app.scope.launch {
+                                    val (e2, _) = client.vtpCancel(code, force = true)
+                                    busy = false
+                                    if (e2 != null) return@launch ui.notify(e2)
+                                    store.applyVtpCancelled(code, "Shop gỡ vận đơn khỏi app")
+                                    ui.notify("Đã gỡ vận đơn khỏi đơn, đơn về Chờ gửi.")
+                                }
+                            }
+                            return@launch
+                        }
+                        store.applyVtpCancelled(code, if (already) "Viettel Post báo đã huỷ" else "Shop đã huỷ vận đơn")
+                        ui.notify(if (already) "Viettel Post báo vận đơn này đã huỷ từ trước. Đơn về Chờ gửi."
+                        else "Đã huỷ vận đơn, đơn về Chờ gửi.")
                     }
                 }
             }

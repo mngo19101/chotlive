@@ -33,6 +33,11 @@ const fakeVtp = http.createServer((req, res) => {
       await sleep(400);
       return okData({ ORDER_NUMBER: code, MONEY_TOTAL: 18480, RECEIVER_WARDS: 7969 });
     }
+    if (req.url === '/v2/order/UpdateOrder') {
+      const n = JSON.parse(body || '{}').ORDER_NUMBER;
+      if (n === 'GONE12345') return send({ status: 200, error: true, message: 'Đơn hàng đã hủy!' });
+      return send({ status: 200, error: true, message: 'Trạng thái đơn hàng không hợp lệ' });
+    }
     send({ status: 404, error: true, message: 'no' });
   });
 });
@@ -146,6 +151,38 @@ test('web gửi lại danh sách đơn cũ: không làm mất mã vận đơn v�
   o = await serverOrder();
   assert.equal(o.ship.vtpStatus, 103);
   assert.equal(o.ship.vtpStatusName, 'Giao cho bưu cục');
+});
+
+test('huỷ vận đơn: Viettel Post báo đã huỷ thì đơn về Chờ gửi; huỷ lỗi thì gỡ được mã khỏi app (force)', async () => {
+  const base = { uniqueId: 'lan.nguyen', nickname: 'Lan', status: 'shipping', ts: Date.now(), total: 90000,
+    items: [{ id: 'x', name: 'Mã 90', price: 90000, qty: 1 }] };
+  const ship = (code) => ({ state: 'exported', pay: 'cod', vtpCode: code, vtpStatus: 0, vtpStatusName: 'Chờ lấy hàng', vtpKind: 'created' });
+  const prev = (await api('/api/state')).body;
+  const orders = [...(prev.state || prev).orders,
+    { ...base, id: 'o2', code: 'HD2', ship: ship('GONE12345') },
+    { ...base, id: 'o3', code: 'HD3', ship: ship('STUCK12345') }];
+  assert.equal((await api('/api/sync', { state: { orders, customers: [] } })).status, 200);
+  const find = async (id) => { const s = (await api('/api/state')).body; return (s.state || s).orders.find((o) => o.id === id); };
+
+  const gone = await api('/api/vtp/cancel', { code: 'GONE12345' });
+  assert.equal(gone.status, 200);
+  assert.equal(gone.body.already, true);
+  let o = await find('o2');
+  assert.equal(o.ship.vtpCode, undefined);
+  assert.equal(o.ship.vtpOldCode, 'GONE12345');
+  assert.equal(o.ship.state, 'ready');
+  assert.notEqual(o.status, 'shipping');
+
+  const stuck = await api('/api/vtp/cancel', { code: 'STUCK12345' });
+  assert.equal(stuck.status, 400);
+  assert.equal(stuck.body.error, 'Trạng thái đơn hàng không hợp lệ');
+  assert.equal((await find('o3')).ship.vtpCode, 'STUCK12345', 'lỗi thì chưa gỡ');
+  const forced = await api('/api/vtp/cancel', { code: 'STUCK12345', force: true });
+  assert.equal(forced.status, 200);
+  o = await find('o3');
+  assert.equal(o.ship.vtpCode, undefined);
+  assert.equal(o.ship.vtpOldCode, 'STUCK12345');
+  assert.equal(o.ship.vtpStatusName, 'Shop gỡ vận đơn khỏi app');
 });
 
 test('xoá tài khoản thì xoá luôn kết nối Viettel Post, webhook cũ không dựng lại dữ liệu', async () => {

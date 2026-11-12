@@ -92,7 +92,7 @@ fun OrdersScreen() {
     val every = remember(store.customers) { store.allOrders() }
     val scoped = remember(every, dateFilter) { every.filter { dateFilter.contains(it.lastTs) } }
     val groups = remember(every) { Vtp.readyGroups(every) }
-    val counts = remember(scoped) { (1..4).map { tab -> scoped.count { matchesTab(it, tab) } } }
+    val counts = remember(scoped) { (1..4).map { tab -> VtpTrack.oneCardPerWaybill(scoped.filter { matchesTab(it, tab) }).size } }
     // Tab Tất cả: đơn mọi ngày, tìm cả đơn ngày cũ. Các tab khác: theo ngày đang chọn.
     val shown = remember(every, scoped, filter, search) {
         var l = (if (filter == 0) every else scoped).filter { matchesTab(it, filter) }
@@ -106,7 +106,8 @@ fun OrdersScreen() {
         }
         // Đơn Viettel Post báo giao hỏng / hoàn lên đầu.
         if (filter == 4) l = l.sortedWith(compareByDescending<Order> { VtpTrack.needsAction(it) }.thenByDescending { it.lastTs })
-        l
+        // Nhiều đơn của khách gộp chung một vận đơn: một thẻ, tiền là tiền thu hộ của vận đơn.
+        VtpTrack.oneCardPerWaybill(l)
     }
 
     LazyColumn(
@@ -126,7 +127,7 @@ fun OrdersScreen() {
                 }
                 // Cả 5 tab nằm gọn một hàng, không phải kéo ngang.
                 Row(Modifier.fillMaxWidth().cardStyle(18f).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    StatusTab("Tất cả", every.size, filter == 0, Modifier.weight(1f)) { filter = 0 }
+                    StatusTab("Tất cả", VtpTrack.oneCardPerWaybill(every).size, filter == 0, Modifier.weight(1f)) { filter = 0 }
                     listOf("Đơn mới", "Chờ gửi", "Gom sau", "Đang giao").forEachIndexed { i, t ->
                         StatusTab(t, counts[i], filter == i + 1, Modifier.weight(1f)) { filter = i + 1 }
                     }
@@ -172,6 +173,11 @@ private fun OrderCard(o: Order, every: List<Order>, onPrint: () -> Unit) {
     val hasOldGom = st == ShipState.ASK && older.isNotEmpty()
     val day = if (Clock.isToday(o.lastTs)) "" else " · ${dayMonth(o.lastTs)}"
     val code = VtpTrack.code(o)
+    // Đã có vận đơn: tiền trên thẻ là tiền Viettel Post thu hộ (gồm COD nhập tay, cọc, các đơn gộp chung).
+    val mates = remember(every, o.id) { VtpTrack.sameWaybill(o, every) }
+    val amount = if (code != null) VtpTrack.waybillCod(mates) else o.total
+    val products = mates.sumOf { it.productCount }
+    val merged = if (mates.size > 1) " · gộp ${mates.size} đơn" else ""
     val openReview = { ui.present(0.42f) { ShipReviewSheet(o.id) } }
     Column(
         Modifier.fillMaxWidth().cardStyle(20f, if (hasOldGom) C.gomFill else C.card, if (hasOldGom) C.gomLine else C.line)
@@ -184,12 +190,13 @@ private fun OrderCard(o: Order, every: List<Order>, onPrint: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     T(o.customer.displayName, 15f, BV.BOLD, modifier = Modifier.weight(1f), maxLines = 1)
-                    T(money(o.total), 17f, BV.HEAVY, C.ink, track = -0.4f, maxLines = 1)
+                    T(money(amount), 17f, BV.HEAVY, C.ink, track = -0.4f, maxLines = 1)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    T("@${o.customer.uniqueId} · ${o.productCount} sản phẩm · ${timeText(o.lastTs)}$day", 12f, BV.MEDIUM, C.muted,
+                    T("@${o.customer.uniqueId} · $products sản phẩm$merged · ${timeText(o.lastTs)}$day", 12f, BV.MEDIUM, C.muted,
                         Modifier.weight(1f), shrink = true, minScale = 0.8f)
                     if (st == ShipState.ASK) Badge("Đơn mới")
+                    if (code != null) T("thu hộ", 11.5f, BV.SEMIBOLD, C.muted, maxLines = 1)
                 }
             }
         }

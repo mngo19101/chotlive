@@ -58,6 +58,25 @@ class VtpTest {
     }
 
     @Test
+    fun ordersSharingAWaybillShowOneCardWithTheWaybillCod() {
+        // Gộp 2 đơn 220.000 + 210.000 thành một vận đơn, shop sửa thu hộ còn 40.000.
+        val sent = { cod: Int? -> ShipInfo(state = "exported", pay = "cod", codOverride = cod, vtpCode = "157166042039", vtpFee = 18_480) }
+        val a = order("a", 220_000, ts = 1_000, ship = sent(null), shipping = true)
+        val b = order("b", 210_000, ts = 2_000, ship = sent(40_000), shipping = true)
+        val other = order("c", 99_000, ts = 3_000, ship = ShipInfo(state = "ready"))
+        val all = listOf(b, other, a)
+        val key = { o: Order -> o.id.substringAfterLast('|') }
+        assertEquals(listOf("a", "b"), VtpTrack.sameWaybill(b, all).map(key))
+        assertEquals(40_000, VtpTrack.waybillCod(VtpTrack.sameWaybill(a, all)))
+        assertEquals(listOf("b", "c"), VtpTrack.oneCardPerWaybill(all).map(key))
+        assertEquals(listOf("c"), VtpTrack.sameWaybill(other, all).map(key))
+        // Không sửa thu hộ: thu đủ tiền hàng hai đơn.
+        val a2 = order("a", 220_000, ts = 1_000, ship = sent(null), shipping = true)
+        val b2 = order("b", 210_000, ts = 2_000, ship = sent(null), shipping = true)
+        assertEquals(430_000, VtpTrack.waybillCod(listOf(a2, b2)))
+    }
+
+    @Test
     fun codRules() {
         // Gộp 2 đơn thu tiền hàng.
         assertEquals(419_000, cod(listOf(line(120_000, ShipInfo(pay = "cod")), line(299_000, ShipInfo(pay = "cod")))).cod)
@@ -280,7 +299,8 @@ class VtpTest {
 
         // Gửi lên máy chủ: món mang theo `ship` của đơn.
         val update = store.makeSyncUpdate()!!
-        assertEquals("ready", update.customers[0].items.first { it.ship != null }.ship?.state)
+        // Thứ tự món tuỳ giờ tạo bình luận: so cả hai trạng thái (đơn còn tick "ready", đơn bỏ tick "ask").
+        assertEquals(setOf("ready", "ask"), update.customers[0].items.mapNotNull { it.ship?.state }.toSet())
     }
 
     @Test

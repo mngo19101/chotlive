@@ -469,15 +469,20 @@ struct VtpOrderBox: View {
         let bad = VtpTrack.needsAction(order)
         let s = order.ship
         let at = s?.vtpStatusAt.map { Date(timeIntervalSince1970: $0 / 1000) }
+        let mates = VtpTrack.sameWaybill(order, in: store.allOrders())
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Icon(name: .truck, size: 16, weight: 2.3, color: Theme.accent)
-                T("ViettelPost", 15, .bold)
+                // Chữ "ViettelPost" luôn một dòng; trạng thái dài ("Tiếp nhận đơn hàng từ đối tác") tự thu nhỏ/cắt.
+                T("ViettelPost", 15, .bold).lineLimit(1).fixedSize()
                 Spacer(minLength: 4)
-                Badge(text: bad ? "Cần xử lý" : VtpTrack.statusName(order),
-                      color: bad ? Theme.red : (order.status == .delivered ? Theme.green : Theme.accent),
-                      fill: bad ? Theme.redSoft : (order.status == .delivered ? Theme.greenSoft : Theme.peachSoft),
-                      fontSize: 12, height: 24, hPad: 10)
+                T(bad ? "Cần xử lý" : VtpTrack.statusName(order), 12, .semibold,
+                  bad ? Theme.red : (order.status == .delivered ? Theme.green : Theme.accent))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .padding(.horizontal, 10)
+                    .frame(height: 24)
+                    .background(Capsule().fill(bad ? Theme.redSoft : (order.status == .delivered ? Theme.greenSoft : Theme.peachSoft)))
             }
 
             if bad {
@@ -510,6 +515,10 @@ struct VtpOrderBox: View {
             .buttonStyle(.plain)
 
             VStack(spacing: 8) {
+                line("Thu hộ (COD)", money(VtpTrack.waybillCod(mates)))
+                if mates.count > 1 {
+                    line("Gộp", "\(mates.count) đơn · \(money(mates.reduce(0) { $0 + $1.total })) tiền hàng")
+                }
                 if let fee = s?.vtpFee, fee > 0 { line("Cước", money(fee)) }
                 if let sv = s?.vtpService, !sv.isEmpty { line("Gói", sv) }
                 if !bad { line("Trạng thái", VtpTrack.statusName(order) + (at.map { " · \(dayMonth($0)) \(timeText($0))" } ?? "")) }
@@ -601,11 +610,31 @@ struct VtpOrderBox: View {
                                  action: "Huỷ vận đơn") {
             busy = true
             Task { @MainActor in
-                let e = await client.vtpCancel(code)
+                let r = await client.vtpCancel(code)
                 busy = false
-                if let e { return ui.notify(e) }
-                store.applyVtpCancelled(code: code)
-                ui.notify("Đã huỷ vận đơn, đơn về Chờ gửi.")
+                if let e = r.error { return offerDetach(code, error: e) }
+                store.applyVtpCancelled(code: code, name: r.already ? "Viettel Post báo đã huỷ" : "Shop đã huỷ vận đơn")
+                ui.notify(r.already ? "Viettel Post báo vận đơn này đã huỷ từ trước. Đơn về Chờ gửi."
+                                    : "Đã huỷ vận đơn, đơn về Chờ gửi.")
+            }
+        }
+    }
+
+    /// Viettel Post không huỷ được (vd. vận đơn tạo lúc chưa nối webhook, đã huỷ trên web Viettel Post):
+    /// cho gỡ mã khỏi đơn để đơn không kẹt ở Đang giao, sau khi shop tự kiểm trên viettelpost.vn.
+    private func offerDetach(_ code: String, error: String) {
+        ui.confirm = ConfirmItem(
+            title: "Viettel Post không huỷ được",
+            message: "Viettel Post báo: \(error)\n\nVào viettelpost.vn kiểm vận đơn \(VtpTrack.pretty(code)). Nếu đơn đã huỷ ở đó (hoặc bạn vừa huỷ tay), bấm Gỡ khỏi app để đơn về Chờ gửi.",
+            action: "Gỡ khỏi app"
+        ) {
+            busy = true
+            Task { @MainActor in
+                let r = await client.vtpCancel(code, force: true)
+                busy = false
+                if let e = r.error { return ui.notify(e) }
+                store.applyVtpCancelled(code: code, name: "Shop gỡ vận đơn khỏi app")
+                ui.notify("Đã gỡ vận đơn khỏi đơn, đơn về Chờ gửi.")
             }
         }
     }

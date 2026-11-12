@@ -187,6 +187,29 @@ enum VtpTrack {
         return c
     }
 
+    /// Các đơn chung vận đơn với đơn này (gộp lúc tạo), cũ nhất trước; chưa có vận đơn thì chỉ có chính nó.
+    static func sameWaybill(_ o: Order, in all: [Order]) -> [Order] {
+        guard let c = code(o) else { return [o] }
+        let mates = all.filter { code($0) == c }.sorted { $0.lastTs < $1.lastTs }
+        return mates.isEmpty ? [o] : mates
+    }
+
+    /// Tiền thu hộ của vận đơn: tính lại như lúc tạo (COD nhập tay, tiền cọc, cước thật Viettel Post báo).
+    static func waybillCod(_ orders: [Order]) -> Int {
+        guard let c = orders.last?.customer else { return 0 }
+        let fee = orders.compactMap { $0.ship?.vtpFee }.first { $0 > 0 }
+        return Vtp.summarize(Vtp.lines(orders), address: c.address, nickname: c.nickname, realFee: fee).cod
+    }
+
+    /// Danh sách đơn: các đơn chung một vận đơn chỉ giữ một thẻ (đơn gặp trước trong danh sách).
+    static func oneCardPerWaybill(_ list: [Order]) -> [Order] {
+        var seen = Set<String>()
+        return list.filter { o in
+            guard let c = code(o) else { return true }
+            return seen.insert(c).inserted
+        }
+    }
+
     /// Dữ liệu một khách gửi lên máy chủ, cùng cách tính với file Excel và với web (vtpPayload).
     static func payload(_ g: Vtp.Group, now: Date = Clock.now) -> [String: Any] {
         let s = g.summary
@@ -302,10 +325,12 @@ extension LiveClient {
         return (nil, URL(string: raw))
     }
 
-    func vtpCancel(_ code: String) async -> String? {
-        let r = await apiCall("/api/vtp/cancel", method: "POST", body: ["code": code], timeout: 30)
-        guard let r, r.0 == 200 else { return Self.errorText(r, "Không huỷ được vận đơn") }
-        return nil
+    /// `force`: không gọi Viettel Post, chỉ gỡ mã vận đơn khỏi đơn (shop đã huỷ trên viettelpost.vn).
+    /// Thành công trả `already` = Viettel Post báo vận đơn đã huỷ từ trước.
+    func vtpCancel(_ code: String, force: Bool = false) async -> (error: String?, already: Bool) {
+        let r = await apiCall("/api/vtp/cancel", method: "POST", body: ["code": code, "force": force], timeout: 30)
+        guard let r, r.0 == 200 else { return (Self.errorText(r, "Không huỷ được vận đơn"), false) }
+        return (nil, (r.1["already"] as? Bool) ?? false)
     }
 
     /// type 3: phát lại, type 2: đồng ý hoàn về shop.
@@ -365,7 +390,7 @@ extension Store {
     }
 
     /// Huỷ vận đơn xong: đơn về Chờ gửi, giữ mã cũ để tra (giống máy chủ).
-    func applyVtpCancelled(code: String) {
+    func applyVtpCancelled(code: String, name: String = "Shop đã huỷ vận đơn") {
         var changes: [String: ShipInfo] = [:]
         for o in allOrders() where o.ship?.vtpCode == code {
             var s = o.ship ?? ShipInfo()
@@ -374,7 +399,7 @@ extension Store {
             s.vtpCode = nil
             s.vtpKind = "cancelled"
             s.vtpStatus = 107
-            s.vtpStatusName = "Shop đã huỷ vận đơn"
+            s.vtpStatusName = name
             s.vtpStatusAt = (Clock.now.timeIntervalSince1970 * 1000).rounded()
             s.exportedAt = nil
             s.batchId = nil

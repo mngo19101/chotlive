@@ -3596,8 +3596,20 @@ $('#detail-vtp-box')?.addEventListener('click', async (e) => {
     btn.disabled = true;
     const r = await apiFetch('/api/vtp/cancel', jsonPost({ code })).catch(() => null);
     btn.disabled = false;
-    if (!r?.ok) return toast(r?.error || 'Không huỷ được', '⚠️', 4000);
-    toast('Đã huỷ vận đơn, đơn về Chờ gửi', '↩');
+    if (!r?.ok) {
+      // Viettel Post không huỷ được: cho gỡ mã khỏi đơn sau khi shop tự kiểm trên viettelpost.vn, để đơn không kẹt.
+      const detach = await askConfirm({
+        title: 'Viettel Post không huỷ được',
+        message: `Viettel Post báo: ${r?.error || 'Không huỷ được'}. Vào viettelpost.vn kiểm vận đơn ${code}; nếu đơn đã huỷ ở đó, gỡ mã khỏi đơn để đơn về Chờ gửi.`,
+        ok: 'Gỡ khỏi app',
+        danger: true
+      });
+      if (!detach) return;
+      const f = await apiFetch('/api/vtp/cancel', jsonPost({ code, force: true })).catch(() => null);
+      if (!f?.ok) return toast(f?.error || 'Không gỡ được', '⚠️', 4000);
+      return toast('Đã gỡ vận đơn khỏi đơn, đơn về Chờ gửi', '↩');
+    }
+    toast(r.already ? 'Viettel Post báo vận đơn đã huỷ từ trước, đơn về Chờ gửi' : 'Đã huỷ vận đơn, đơn về Chờ gửi', '↩');
     return;
   }
   if (act === 'redeliver' || act === 'return') {

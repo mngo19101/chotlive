@@ -516,12 +516,12 @@ class Store(private val directory: File, account: String?) {
     }
 
     /** Huỷ vận đơn xong: đơn về Chờ gửi, giữ mã cũ để tra (giống máy chủ). */
-    fun applyVtpCancelled(code: String) {
+    fun applyVtpCancelled(code: String, name: String = "Shop đã huỷ vận đơn") {
         val now = Clock.now
         setShip(allOrders().filter { it.ship?.vtpCode == code }.associate { o ->
             o.id to (o.ship ?: ShipInfo()).copy(
                 state = ShipState.READY.raw, vtpOldCode = code, vtpCode = null, vtpKind = "cancelled", vtpStatus = 107,
-                vtpStatusName = "Shop đã huỷ vận đơn", vtpStatusAt = now, exportedAt = null, batchId = null,
+                vtpStatusName = name, vtpStatusAt = now, exportedAt = null, batchId = null,
             )
         }, shipping = false)
     }

@@ -156,9 +156,14 @@ suspend fun LiveClient.vtpPrintUrl(codes: List<String>, size: String): Pair<Stri
     return null to (links.text(size) ?: links.text("a6") ?: "").takeIf { it.startsWith("http") }
 }
 
-suspend fun LiveClient.vtpCancel(code: String): String? {
-    val r = apiCall("/api/vtp/cancel", "POST", buildJsonObject { put("code", code) }, 30)
-    return if (r == null || r.first != 200) errorText(r, "Không huỷ được vận đơn") else null
+/**
+ * `force`: không gọi Viettel Post, chỉ gỡ mã vận đơn khỏi đơn (shop đã huỷ trên viettelpost.vn).
+ * Trả (lỗi, already): already = Viettel Post báo vận đơn đã huỷ từ trước.
+ */
+suspend fun LiveClient.vtpCancel(code: String, force: Boolean = false): Pair<String?, Boolean> {
+    val r = apiCall("/api/vtp/cancel", "POST", buildJsonObject { put("code", code); put("force", force) }, 30)
+    if (r == null || r.first != 200) return errorText(r, "Không huỷ được vận đơn") to false
+    return null to ((r.second["already"] as? JsonPrimitive)?.content == "true")
 }
 
 /** type 3: phát lại, type 2: đồng ý hoàn về shop. */

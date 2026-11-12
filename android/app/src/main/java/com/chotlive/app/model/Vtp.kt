@@ -439,6 +439,25 @@ object VtpTrack {
     fun cancelledCode(o: Order): String? =
         if (Vtp.state(o).isPending && o.ship?.vtpKind == "cancelled") o.ship?.vtpOldCode?.takeIf { it.isNotEmpty() } else null
 
+    /** Các đơn chung vận đơn với đơn này (gộp lúc tạo), cũ nhất trước; chưa có vận đơn thì chỉ có chính nó. */
+    fun sameWaybill(o: Order, all: List<Order>): List<Order> {
+        val c = code(o) ?: return listOf(o)
+        return all.filter { code(it) == c }.sortedBy { it.lastTs }.ifEmpty { listOf(o) }
+    }
+
+    /** Tiền thu hộ của vận đơn: tính lại như lúc tạo (COD nhập tay, tiền cọc, cước thật Viettel Post báo). */
+    fun waybillCod(orders: List<Order>): Int {
+        val c = orders.lastOrNull()?.customer ?: return 0
+        val fee = orders.mapNotNull { it.ship?.vtpFee }.firstOrNull { it > 0 }
+        return Vtp.summarize(Vtp.lines(orders), c.address, c.nickname, fee).cod
+    }
+
+    /** Danh sách đơn: các đơn chung một vận đơn chỉ giữ một thẻ (đơn gặp trước trong danh sách). */
+    fun oneCardPerWaybill(list: List<Order>): List<Order> {
+        val seen = HashSet<String>()
+        return list.filter { o -> code(o)?.let { seen.add(it) } ?: true }
+    }
+
     /** Dữ liệu một khách gửi lên máy chủ, cùng cách tính với file Excel và với web (vtpPayload). */
     fun payload(g: Vtp.Group, now: Long = Clock.now): JsonObject {
         val s = g.summary
