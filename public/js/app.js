@@ -2833,6 +2833,14 @@ function applyShip(newState) {
     return toast('Hàng từ 10kg phải nhập đủ kích thước dài, rộng, cao (cm)', '⚠️');
   }
   ids.forEach((id, i) => setOrdersShip([id], { state: newState, ...shipPatch(i === 0) }));
+  // Đơn đang Sẵn sàng mà bị bỏ tick: đưa về chưa duyệt, không thì lúc tạo vận đơn vẫn bị gộp chung và cộng tiền.
+  if (newState === 'ready') {
+    const focus = state.orders.find((o) => o.id === shipCtx.focusId);
+    const dropped = pendingOrdersOfCustomer(state.orders, focus)
+      .filter((o) => !ids.includes(o.id) && shipStateOf(o) === 'ready')
+      .map((o) => o.id);
+    if (dropped.length) setOrdersShip(dropped, { state: 'ask', deposit: 0, codOverride: null });
+  }
   const draft = shipCtx.draft;
   $('#modal-ship')?.close();
   renderOrdersView();

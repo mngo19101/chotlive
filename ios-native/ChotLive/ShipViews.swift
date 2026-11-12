@@ -551,7 +551,9 @@ struct ShipReviewSheet: View {
             ui.notify("Hàng từ 10kg phải nhập đủ kích thước dài, rộng, cao (cm).")
             return
         }
-        store.approve(ids, state: state, base: patch(first: true, cod: codValue))
+        // Đơn đang Chờ gửi mà bị bỏ tick: đưa về chưa duyệt, không thì lúc tạo vận đơn vẫn bị gộp chung và cộng tiền.
+        let dropped = state == .ready ? pending.filter { !checked.contains($0.id) && Vtp.state($0) == .ready }.map(\.id) : []
+        store.approve(ids, state: state, base: patch(first: true, cod: codValue), dropped: dropped)
         if draftIds != nil {
             // Gom sau thì nháp không còn: về danh sách nháp. Lưu thì mở lại nháp để soát tiếp.
             backToDraft(open: state == .ready)

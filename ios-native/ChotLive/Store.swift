@@ -356,8 +356,16 @@ final class Store: ObservableObject {
 
     /// Bảng Duyệt đơn: chuyển các đơn được tick sang Chờ gửi (`ready`) hoặc Gom sau (`hold`).
     /// Tiền cọc ghi ở đơn đầu tiên, các cài đặt khác ghi ở mọi đơn, giống web.
-    func approve(_ orderIds: [String], state: ShipState, base: ShipInfo) {
+    /// `dropped`: đơn đã duyệt nhưng bị bỏ tick, đưa về chưa duyệt để không còn gộp chung vận đơn.
+    func approve(_ orderIds: [String], state: ShipState, base: ShipInfo, dropped: [String] = []) {
         var changes: [String: ShipInfo] = [:]
+        for id in dropped {
+            guard var s = order(id: id)?.ship else { continue }
+            s.state = ShipState.ask.rawValue
+            s.deposit = 0
+            s.codOverride = nil
+            changes[id] = s
+        }
         for (i, id) in orderIds.enumerated() {
             var s = base
             s.state = state.rawValue
