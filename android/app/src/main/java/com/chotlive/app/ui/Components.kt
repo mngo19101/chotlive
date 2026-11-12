@@ -84,6 +84,8 @@ fun T(
     align: TextAlign? = null,
     shrink: Boolean = false,
     lineHeight: Float? = null,
+    /** Mức co nhỏ nhất khi `shrink`; hết mức thì cắt bằng dấu ba chấm (như minimumScaleFactor bên iPhone). */
+    minScale: Float = 0.55f,
 ) {
     var factor by remember(text, size) { mutableFloatStateOf(1f) }
     val scale = LocalDensity.current.fontScale
@@ -104,7 +106,7 @@ fun T(
         // làm tên tiếng Việt bị co nhỏ dù thừa chỗ.
         onTextLayout = { r ->
             val wide = r.didOverflowWidth || (r.lineCount > 0 && r.isLineEllipsized(r.lineCount - 1))
-            if (shrink && wide && factor > 0.55f) factor *= 0.93f
+            if (shrink && wide && factor > minScale) factor = maxOf(minScale, factor * 0.93f)
         },
     )
 }

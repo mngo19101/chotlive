@@ -234,7 +234,7 @@ fun OrderDetailScreen(orderId: String) {
                         Avatar(o.customer.initials, o.customer.id, 52f, 18f)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Box(Modifier.weight(1f, fill = false)) { T(o.customer.nickname, 17f, BV.BOLD, shrink = true) }
+                                Box(Modifier.weight(1f, fill = false)) { T(o.customer.nickname, 17f, BV.BOLD, shrink = true, minScale = 0.85f) }
                                 if (o.customer.isBigSpender) Badge("Mua nhiều")
                             }
                             T("@${o.customer.uniqueId} · ${store.orders(o.customer).size} đơn", 13f, BV.MEDIUM, C.muted, maxLines = 1)

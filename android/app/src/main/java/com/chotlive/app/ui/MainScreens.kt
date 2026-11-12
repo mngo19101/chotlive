@@ -220,7 +220,11 @@ fun DashboardScreen() {
                 Column(Modifier.weight(0.417f).fillMaxHeight().cardStyle(20f).padding(start = 17.dp, end = 17.dp, top = 17.dp, bottom = 12.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                         Icon(IconName.USERS, 14f, color = C.muted, modifier = Modifier.padding(top = 2.dp))
-                        T("Khách hôm\nnay", 13f, BV.MEDIUM, C.muted, lineHeight = 16f)
+                        // Hai dòng cố định như bản iPhone; màn hẹp thì co chữ chứ không bẻ thành ba dòng.
+                        Column {
+                            T("Khách hôm", 13f, BV.MEDIUM, C.muted, shrink = true, lineHeight = 16f, minScale = 0.8f)
+                            T("nay", 13f, BV.MEDIUM, C.muted, maxLines = 1, lineHeight = 16f)
+                        }
                     }
                     T("$todayCount", 30f, BV.HEAVY, C.ink, Modifier.padding(top = 8.dp), track = -1f)
                     T("$newToday khách mới", 12f, BV.SEMIBOLD, C.accent, Modifier.padding(top = 4.dp), maxLines = 1)
@@ -369,14 +373,17 @@ private fun CustomerRow(c: Customer, orderCount: Int, onClick: () -> Unit) {
     ) {
         Avatar(c.initials, c.id)
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f, fill = false)) { T(c.nickname, 15f, BV.BOLD, shrink = true) }
-                if (c.isBigSpender) {
-                    Box(Modifier.padding(start = 7.dp)) { Badge("Mua nhiều") }
-                } else if (c.isNewToday) {
-                    Box(Modifier.padding(start = 7.dp)) { Badge("Mới", C.green, C.greenSoft) }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Tên + nhãn chiếm hết phần còn lại sau số tiền. Không đặt hai ô weight ngang hàng:
+                // Row chia đều chỗ cho các ô weight nên tên chỉ còn nửa hàng và bị co nhỏ.
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f, fill = false)) { T(c.nickname, 15f, BV.BOLD, shrink = true, minScale = 0.85f) }
+                    if (c.isBigSpender) {
+                        Box(Modifier.padding(start = 7.dp)) { Badge("Mua nhiều") }
+                    } else if (c.isNewToday) {
+                        Box(Modifier.padding(start = 7.dp)) { Badge("Mới", C.green, C.greenSoft) }
+                    }
                 }
-                Box(Modifier.weight(1f, fill = true))
                 T(money(c.total), 14f, BV.HEAVY, maxLines = 1)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -410,7 +417,7 @@ fun CustomerDetailScreen(customerId: String) {
                     Avatar(c.initials, c.id, 56f, 19f)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Box(Modifier.weight(1f, fill = false)) { T(c.nickname, 18f, BV.BOLD, shrink = true) }
+                            Box(Modifier.weight(1f, fill = false)) { T(c.nickname, 18f, BV.BOLD, shrink = true, minScale = 0.85f) }
                             if (c.isBigSpender) Badge("Mua nhiều")
                         }
                         T("@" + c.uniqueId, 13f, BV.MEDIUM, C.muted, maxLines = 1)

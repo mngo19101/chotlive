@@ -836,13 +836,19 @@ fun CommentRow(c: LiveComment, closing: Boolean, customer: Customer?, isNew: Boo
         Avatar(com.chotlive.app.model.initialsOf(c.nickname), c.uniqueId, 34f, 12.5f)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(if (closing) 3.4.dp else 2.dp)) {
             Row(Modifier.height(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Box(Modifier.weight(1f, fill = false)) { T(c.nickname, 13.4f, BV.BOLD, maxLines = 1) }
-                when {
-                    customer?.isBigSpender == true -> Badge("Mua nhiều", C.accentDeep, C.peachCode, 11f, 20f, 6f)
-                    isNew -> Badge("Mới", C.green, C.greenSoft, 11f, 20f, 6f)
-                    else -> Box(Modifier.weight(1f, fill = false)) { T("@" + c.uniqueId, 11f, BV.MEDIUM, C.muted, maxLines = 1) }
+                // Tên được ưu tiên chỗ (như layoutPriority bên iPhone); @tiktok chỉ lấy phần còn thừa.
+                // Không đặt nhiều ô weight ngang hàng: Row chia đều nên tên chỉ còn một phần ba hàng.
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    val hasBadge = customer?.isBigSpender == true || isNew
+                    Box(if (hasBadge) Modifier.weight(1f, fill = false) else Modifier) {
+                        T(c.nickname, 13.4f, BV.BOLD, maxLines = 1)
+                    }
+                    when {
+                        customer?.isBigSpender == true -> Badge("Mua nhiều", C.accentDeep, C.peachCode, 11f, 20f, 6f)
+                        isNew -> Badge("Mới", C.green, C.greenSoft, 11f, 20f, 6f)
+                        else -> Box(Modifier.weight(1f, fill = false)) { T("@" + c.uniqueId, 11f, BV.MEDIUM, C.muted, maxLines = 1) }
+                    }
                 }
-                Box(Modifier.weight(1f))
                 T(timeText(c.ts), 11f, BV.MEDIUM, C.muted, maxLines = 1)
                 if (closing) {
                     OnAccent {
@@ -882,7 +888,7 @@ fun OrderCommentsScreen(orderId: String) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
                         Avatar(order.customer.initials, order.customer.id, 48f, 17f)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(0.5.dp)) {
-                            T(order.customer.nickname, 17.5f, BV.BOLD, shrink = true)
+                            T(order.customer.nickname, 17.5f, BV.BOLD, shrink = true, minScale = 0.85f)
                             T("@" + order.customer.uniqueId, 13.5f, BV.MEDIUM, C.muted, maxLines = 1)
                         }
                         Badge("${groups.size} bình luận", C.accentDeep, C.peachTint, 12.5f, 28f, 10f)
