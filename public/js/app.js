@@ -2497,28 +2497,46 @@ function openOrderDetailView(orderId) {
     };
   }
 
-  const items = ord.items || [];
-  $('#detail-items-count-title').textContent = `Sản phẩm (${items.length})`;
+  // Đơn chung một vận đơn với đơn khác: hiện đủ sản phẩm của cả vận đơn, chia theo từng đơn.
+  const mates = waybillMates(ord);
+  const many = mates.length > 1;
+  const count = mates.reduce((s, m) => s + (m.items || []).length, 0);
+  $('#detail-items-count-title').textContent = many ? `Sản phẩm (${count}) · gộp ${mates.length} đơn` : `Sản phẩm (${count})`;
 
   const linesContainer = $('#detail-product-lines');
   if (linesContainer) {
-    linesContainer.innerHTML = items
-      .map(
-        (it, idx) => `
+    let idx = 0;
+    linesContainer.innerHTML = mates
+      .map((m) => {
+        const head = many
+          ? `<div class="product-line-row" style="display:flex;justify-content:space-between;gap:8px;padding-top:10px;font-size:12px;font-weight:700;white-space:nowrap;color:${m.id === ord.id ? 'var(--accent)' : 'var(--muted)'}">
+              <span>Đơn ${dmText(m.ts)} · ${esc(m.timeStr || '')}${m.id === ord.id ? ' (đang xem)' : ''}</span>
+              <span>${formatVNDHtml(m.total || 0)}</span>
+            </div>`
+          : '';
+        return (
+          head +
+          (m.items || [])
+            .map((it) => {
+              idx += 1;
+              return `
         <div class="product-line-row">
           <div class="prod-left-group">
-            <span class="prod-idx-badge">${idx + 1}</span>
+            <span class="prod-idx-badge">${idx}</span>
             <span class="prod-name">${esc(it.name)}</span>
             <span class="prod-calc">${it.qty || 1} × ${formatVNDHtml(it.price || 0)}</span>
           </div>
           <span class="prod-total">${formatVNDHtml((it.price || 0) * (it.qty || 1))}</span>
-        </div>
-      `
-      )
+        </div>`;
+            })
+            .join('')
+        );
+      })
       .join('');
   }
 
-  $('#detail-total-sum').innerHTML = formatVNDHtml(ord.total || 0);
+  if ($('#detail-total-label')) $('#detail-total-label').textContent = many ? 'Tổng tiền hàng' : 'Tổng tiền';
+  $('#detail-total-sum').innerHTML = formatVNDHtml(mates.reduce((s, m) => s + (Number(m.total) || 0), 0));
   renderDetailVtp(ord);
 }
 
@@ -3543,6 +3561,14 @@ $('#vtp-attention')?.addEventListener('click', () => {
 });
 
 /** Ô vận đơn trong chi tiết đơn. */
+/** Các đơn cùng một vận đơn đang chạy với đơn này (cũ trước), hoặc chỉ đơn này. */
+function waybillMates(ord) {
+  const code = ord?.ship?.vtpCode;
+  if (!code) return [ord];
+  const mates = state.orders.filter((o) => o.ship?.vtpCode === code).sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
+  return mates.length ? mates : [ord];
+}
+
 function renderDetailVtp(ord) {
   const box = $('#detail-vtp-box');
   if (!box) return;

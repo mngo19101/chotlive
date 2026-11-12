@@ -346,23 +346,41 @@ fun OrderDetailScreen(orderId: String) {
                         T("Tạo lúc ${timeText(o.firstTs)} · ${weekdayLabel(o.firstTs)} ${fullDate(o.firstTs)}", 13f, BV.MEDIUM, C.muted, shrink = true)
                     }
                 }
+                // Đơn chung một vận đơn với đơn khác: hiện đủ sản phẩm của cả vận đơn, chia theo từng đơn.
+                val mates = remember(store.customers, o.id) { VtpTrack.sameWaybill(o, store.allOrders()) }
+                val many = mates.size > 1
                 Column(Modifier.fillMaxWidth().cardStyle(20f).padding(start = 15.dp, end = 15.dp, top = 14.dp, bottom = 15.dp)) {
-                    T("Sản phẩm (${o.productCount})", 14f, BV.BOLD, modifier = Modifier.padding(bottom = 3.dp))
-                    o.items.forEachIndexed { index, it ->
-                        if (index > 0) HairLine()
-                        Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                            Box(Modifier.size(22.dp).clip(CircleShape).background(C.field), contentAlignment = Alignment.Center) {
-                                T("${index + 1}", 11f, BV.BOLD, C.muted)
+                    T(if (many) "Sản phẩm (${mates.sumOf { it.productCount }}) · gộp ${mates.size} đơn" else "Sản phẩm (${o.productCount})",
+                        14f, BV.BOLD, modifier = Modifier.padding(bottom = 3.dp))
+                    var index = 0
+                    mates.forEach { m ->
+                        if (many) {
+                            val mine = m.id == o.id
+                            Row(Modifier.fillMaxWidth().padding(top = if (index > 0) 10.dp else 4.dp, bottom = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                T("Đơn ${dayMonth(m.lastTs)} · ${timeText(m.lastTs)}" + if (mine) " · đơn đang xem" else "", 12f, BV.BOLD,
+                                    if (mine) C.accent else C.muted, Modifier.weight(1f), maxLines = 1)
+                                T(money(m.total), 12f, BV.BOLD, C.muted, maxLines = 1)
                             }
-                            T(it.productLabel, 14f, BV.BOLD, modifier = Modifier.widthIn(max = 140.dp), maxLines = 1)
-                            T("${it.qty} × ${money(it.price)}", 12f, BV.MEDIUM, C.muted, Modifier.weight(1f), shrink = true)
-                            T(money(it.lineTotal), 14f, BV.BOLD, maxLines = 1)
+                        }
+                        m.items.forEachIndexed { i, it ->
+                            if (i > 0 || (!many && index > 0)) HairLine()
+                            index += 1
+                            val n = index
+                            Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+                                Box(Modifier.size(22.dp).clip(CircleShape).background(C.field), contentAlignment = Alignment.Center) {
+                                    T("$n", 11f, BV.BOLD, C.muted)
+                                }
+                                T(it.productLabel, 14f, BV.BOLD, modifier = Modifier.widthIn(max = 140.dp), maxLines = 1)
+                                T("${it.qty} × ${money(it.price)}", 12f, BV.MEDIUM, C.muted, Modifier.weight(1f), shrink = true)
+                                T(money(it.lineTotal), 14f, BV.BOLD, maxLines = 1)
+                            }
                         }
                     }
                     Row(Modifier.padding(top = 7.dp).fillMaxWidth().height(44.dp).clip(rounded(14f)).background(C.peachSoft).padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        T("Tổng tiền", 14f, BV.SEMIBOLD, modifier = Modifier.weight(1f))
-                        T(money(o.total), 18f, BV.HEAVY, C.ink, track = -0.4f, maxLines = 1)
+                        T(if (many) "Tổng tiền hàng" else "Tổng tiền", 14f, BV.SEMIBOLD, modifier = Modifier.weight(1f))
+                        T(money(mates.sumOf { it.total }), 18f, BV.HEAVY, C.ink, track = -0.4f, maxLines = 1)
                     }
                 }
                 VtpOrderBox(o)

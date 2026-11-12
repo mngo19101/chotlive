@@ -351,6 +351,14 @@ struct OrderActionSheet: View {
 
 // MARK: - Chi tiết đơn hàng
 
+/// Một dòng sản phẩm ở chi tiết đơn, kèm đơn chứa nó (vận đơn gộp nhiều đơn).
+private struct ProductRow: Identifiable {
+    let order: Order
+    let index: Int
+    let item: OrderItem
+    var id: String { item.id }
+}
+
 struct OrderDetailView: View {
     let orderId: String
     @EnvironmentObject var store: Store
@@ -414,26 +422,43 @@ struct OrderDetailView: View {
         .cardStyle(20)
     }
 
+    /// Đơn chung một vận đơn với đơn khác: hiện đủ sản phẩm của cả vận đơn, chia theo từng đơn.
     private func productsCard(_ o: Order) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            T("Sản phẩm (\(o.productCount))", 14, .bold).padding(.bottom, 3)
-            ForEach(Array(o.items.enumerated()), id: \.element.id) { index, it in
-                if index > 0 { HairLine() }
+        let mates = VtpTrack.sameWaybill(o, in: store.allOrders())
+        var rows: [ProductRow] = []
+        for m in mates { for it in m.items { rows.append(ProductRow(order: m, index: rows.count + 1, item: it)) } }
+        return VStack(alignment: .leading, spacing: 0) {
+            T(mates.count > 1 ? "Sản phẩm (\(mates.reduce(0) { $0 + $1.productCount })) · gộp \(mates.count) đơn"
+                              : "Sản phẩm (\(o.productCount))", 14, .bold).padding(.bottom, 3)
+            ForEach(rows) { r in
+                if mates.count > 1, r.order.items.first?.id == r.item.id {
+                    HStack(spacing: 6) {
+                        T("Đơn \(dayMonth(r.order.lastTs)) · \(timeText(r.order.lastTs))", 12, .bold,
+                          r.order.id == o.id ? Theme.accent : Theme.muted).lineLimit(1)
+                        if r.order.id == o.id { T("· đơn đang xem", 12, .medium, Theme.muted).lineLimit(1) }
+                        Spacer(minLength: 4)
+                        T(money(r.order.total), 12, .bold, Theme.muted).lineLimit(1).fixedSize()
+                    }
+                    .padding(.top, r.index > 1 ? 10 : 4)
+                    .padding(.bottom, 2)
+                } else if r.index > 1 {
+                    HairLine()
+                }
                 HStack(spacing: 11) {
-                    T("\(index + 1)", 11, .bold, Theme.muted)
+                    T("\(r.index)", 11, .bold, Theme.muted)
                         .frame(width: 22, height: 22)
                         .background(Circle().fill(Theme.field))
-                    T(it.productLabel, 14, .bold).lineLimit(1)
-                    T("\(it.qty) × \(money(it.price))", 12, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+                    T(r.item.productLabel, 14, .bold).lineLimit(1)
+                    T("\(r.item.qty) × \(money(r.item.price))", 12, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
                     Spacer(minLength: 4)
-                    T(money(it.lineTotal), 14, .bold).lineLimit(1).fixedSize()
+                    T(money(r.item.lineTotal), 14, .bold).lineLimit(1).fixedSize()
                 }
                 .frame(height: 42)
             }
             HStack {
-                T("Tổng tiền", 14, .semibold)
+                T(mates.count > 1 ? "Tổng tiền hàng" : "Tổng tiền", 14, .semibold)
                 Spacer()
-                T(money(o.total), 18, .heavy, Theme.ink, track: -0.4).lineLimit(1)
+                T(money(mates.reduce(0) { $0 + $1.total }), 18, .heavy, Theme.ink, track: -0.4).lineLimit(1)
             }
             .padding(.horizontal, 14)
             .frame(height: 44)
