@@ -430,6 +430,18 @@ dialog.dialog-center .modal-content-card { border: 1px solid var(--line); border
 .vtp-row-main, .vtp-result-row .main { flex: 1; min-width: 0; } .vtp-row-name { font-weight: 700; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .vtp-row-sub, .vtp-row-note, .vtp-row-quote { font-size: 12px; color: var(--sub); overflow-wrap: anywhere; }
 .vtp-row-err { color: var(--bad); font-weight: 600; } .vtp-quote-ok { color: var(--ok); }
+.vtp-row-review { display: inline-flex; align-items: center; min-height: 28px; margin-top: 2px; }
+/* Soát một nháp vận đơn */
+.vtp-detail-box { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 6px; }
+.vtp-detail-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.vtp-detail-head h3 { font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.vtp-detail-head .link-btn { min-height: 28px; font-size: 13px; }
+.vtp-detail-name { font-size: 15px; font-weight: 700; }
+.vtp-detail-box p { font-size: 12.5px; overflow-wrap: anywhere; }
+.vtp-detail-check { font-weight: 700; }
+.vtp-kv { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; }
+.vtp-kv span { color: var(--sub); flex: none; } .vtp-kv b { font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.vtp-kv.strong { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; } .vtp-kv.strong b { font-size: 15px; font-weight: 800; }
 .vtp-result-row .mark { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--ok-bg); color: var(--ok); flex: none; }
 .vtp-result-row.is-bad .mark { background: var(--bad-bg); color: var(--bad); }
 .vtp-sender-line { font-size: 13px; padding: 10px 12px; border-radius: 10px; background: var(--info-bg); color: var(--info); }

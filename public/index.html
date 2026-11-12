@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=7" />
+  <link rel="stylesheet" href="/css/app.css?v=8" />
   <script src="/js/theme.js"></script>
 </head>
 <body>
@@ -926,7 +926,7 @@
     <div class="modal-content-card">
       <div class="sheet-drag-handle"></div>
       <button class="btn-modal-close" data-close-dialog aria-label="Đóng">×</button>
-      <h2 class="modal-title-main">Duyệt đơn</h2>
+      <h2 class="modal-title-main" id="ship-sheet-title">Duyệt đơn</h2>
       <div class="list-box" id="ship-orders-list"></div>
       <p class="ship-pay-hint" id="ship-merge-note"></p>
 
@@ -983,6 +983,7 @@
       <h2 class="modal-title-main" id="vtp-export-title">Xuất Viettel Post</h2>
       <p class="modal-subtitle-text" id="vtp-export-subtitle"></p>
       <div class="vtp-result" id="vtp-result" hidden></div>
+      <div class="vtp-detail md-col" id="vtp-detail" hidden></div>
       <div id="vtp-export-body" class="md-col">
         <div class="vtp-sender-line" id="vtp-sender-line" hidden></div>
         <div class="vtp-export-toolbar">
@@ -1202,6 +1203,6 @@
 
   <div class="toast-web-box" id="web-toast-box" aria-live="polite"></div>
 
-  <script type="module" src="/js/app.js?v=6"></script>
+  <script type="module" src="/js/app.js?v=7"></script>
 </body>
 </html>

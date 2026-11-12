@@ -187,6 +187,9 @@ struct ReadyExportBanner: View {
 
 struct ShipReviewSheet: View {
     let orderId: String
+    /// Mở từ nút Sửa ở "Hàng & tiền" của một nháp vận đơn: chỉ tick sẵn đúng các đơn của nháp đó,
+    /// giữ số COD đã sửa tay, và lưu xong thì quay lại nháp. nil là duyệt đơn bình thường.
+    var draftIds: Set<String>? = nil
     @EnvironmentObject var store: Store
     @EnvironmentObject var ui: AppUI
 
@@ -240,9 +243,17 @@ struct ShipReviewSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                T("Duyệt đơn", 20, .heavy, Theme.ink, track: -0.3)
+                T(draftIds == nil ? "Duyệt đơn" : "Sửa hàng & tiền", 20, .heavy, Theme.ink, track: -0.3)
                 Spacer()
-                SheetClose()
+                if draftIds == nil {
+                    SheetClose()
+                } else {
+                    // Đóng khi đang sửa nháp: không lưu gì, quay lại đúng nháp đó.
+                    Button { backToDraft(open: true) } label: {
+                        Icon(name: .close, size: 17, weight: 2.4).frame(width: 36, height: 36).background(Circle().fill(Theme.field))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, Metrics.gutter)
             .padding(.bottom, 12)
@@ -271,7 +282,9 @@ struct ShipReviewSheet: View {
     private func load() {
         guard !loaded, let focus else { return }
         loaded = true
-        let list = pending
+        // Sửa nháp: chỉ lấy các đơn của nháp, đơn khác của khách vẫn hiện nhưng không tick sẵn.
+        let own = draftIds.map { ids in pending.filter { ids.contains($0.id) } } ?? []
+        let list = own.isEmpty ? pending : own
         checked = Set(list.map(\.id))
         let pays = (list + [focus]).compactMap { $0.ship?.pay }
         pay = pays.contains("paid") || pays.contains("shipOnly") ? "paid" : "cod"
@@ -288,6 +301,17 @@ struct ShipReviewSheet: View {
         }
         weightText = Swift.String(format: "%g", Double(w) / 1000).replacingOccurrences(of: ".", with: ",")
         resetCod()
+        // Sửa nháp: COD đã sửa tay lúc duyệt thì giữ nguyên, không lặng lẽ quay về số tự cộng.
+        if draftIds != nil, let manual = list.reversed().compactMap({ $0.ship?.codOverride }).first {
+            codEdited = true
+            codText = moneyDigits(manual)
+        }
+    }
+
+    /// Quay lại bảng Nháp vận đơn; `open` thì mở thẳng nháp của khách này.
+    private func backToDraft(open: Bool) {
+        let customerId = focus?.customer.id
+        ui.present(dim: 0.42) { VtpExportSheet(openDetail: open ? customerId : nil) }
     }
 
     /// Mỗi lần mở bảng hay đổi lựa chọn, COD quay về số tự cộng.
@@ -507,7 +531,7 @@ struct ShipReviewSheet: View {
             } else {
                 OutlineButton(title: "Gom sau", height: 52) { apply(.hold) }
                     .frame(maxWidth: .infinity)
-                PrimaryButton(title: "Xác nhận gửi", fontSize: 15) { apply(.ready) }
+                PrimaryButton(title: draftIds == nil ? "Xác nhận gửi" : "Lưu thay đổi", fontSize: 15) { apply(.ready) }
                     .frame(maxWidth: .infinity)
                     .layoutPriority(1)
                     .frame(minWidth: (Metrics.screenWidth - 50) * 0.6)
@@ -528,7 +552,12 @@ struct ShipReviewSheet: View {
             return
         }
         store.approve(ids, state: state, base: patch(first: true, cod: codValue))
-        ui.dismissSheet()
+        if draftIds != nil {
+            // Gom sau thì nháp không còn: về danh sách nháp. Lưu thì mở lại nháp để soát tiếp.
+            backToDraft(open: state == .ready)
+        } else {
+            ui.dismissSheet()
+        }
     }
 }
 
@@ -550,6 +579,11 @@ struct VtpExportSheet: View {
     @State private var quoting: Set<String> = []
     /// Nháp đang mở để soát chi tiết (mã khách); nil là đang ở danh sách nháp.
     @State private var detailId: String?
+
+    /// `openDetail`: mở thẳng nháp của khách này (dùng khi vừa sửa Hàng & tiền xong).
+    init(openDetail: String? = nil) {
+        _detailId = State(initialValue: openDetail)
+    }
 
     /// Đơn ở Chờ gửi là nháp sẵn. Viettel Post hiểu địa chỉ sang phường/tỉnh khác thì nháp đó chưa cho tạo.
     private var groups: [Vtp.Group] {
@@ -711,7 +745,20 @@ struct VtpExportSheet: View {
                         }
                     }
                     detailBox("HÀNG & TIỀN") {
-                        kv("Tên hàng", "\(Vtp.goodsName) · \(max(s.qty, 1)) món")
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            T("Tên hàng", 13, .medium, Theme.muted).fixedSize()
+                            Spacer(minLength: 8)
+                            T("\(Vtp.goodsName) · \(max(s.qty, 1)) món", 13, .semibold, Theme.ink).lineLimit(1)
+                            // Sửa cân nặng, kích thước, COD, tiền cọc, người trả cước của đúng các đơn trong nháp này.
+                            if let last = g.orders.last, !sending {
+                                Button {
+                                    ui.present(dim: 0.42) {
+                                        ShipReviewSheet(orderId: last.id, draftIds: Set(g.orders.map(\.id)))
+                                    }
+                                } label: { T("Sửa", 13, .bold, Theme.accent) }
+                                .buttonStyle(.plain)
+                            }
+                        }
                         kv("Giá trị hàng", money(s.goods))
                         kv("Người trả cước", s.senderPays ? "Shop (người gửi)" : "Người nhận")
                         kv("Trọng lượng", weightText(s.weightG))

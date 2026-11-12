@@ -2591,10 +2591,16 @@ function renderVtpReadyBanner() {
 /* ---------- Bảng Giao hàng ---------- */
 let shipCtx = null; // { key, uniqueId, orderIds, checked:Set, pay, focusId }
 
-function openShipSheet(orderId) {
+/**
+ * `draft` (tuỳ chọn): mở từ nút Sửa ở "Hàng & tiền" của một nháp vận đơn. `draft.ids` là các đơn của nháp:
+ * chỉ tick sẵn đúng các đơn đó, giữ số COD đã sửa tay, lưu xong quay lại nháp `draft.key`.
+ */
+function openShipSheet(orderId, draft = null) {
   const ord = state.orders.find((o) => o.id === orderId);
   if (!ord) return;
-  shipCtx = { focusId: orderId, key: shipKeyOf(ord), uniqueId: ord.uniqueId, checked: null, pay: null, payer: null, deposit: null, fee: null, cod: null };
+  shipCtx = { focusId: orderId, key: shipKeyOf(ord), uniqueId: ord.uniqueId, checked: null, pay: null, payer: null, deposit: null, fee: null, cod: null, draft };
+  $('#ship-sheet-title').textContent = draft ? 'Sửa hàng & tiền' : 'Duyệt đơn';
+  $('#btn-ship-ready').textContent = draft ? 'Lưu thay đổi' : 'Xác nhận gửi';
   renderShipSheet();
   $('#modal-ship')?.showModal();
 }
@@ -2609,17 +2615,20 @@ function renderShipSheet() {
   const focusState = shipStateOf(focus);
   const sent = focusState === 'exported' || focusState === 'gone';
 
-  if (!shipCtx.checked) shipCtx.checked = new Set(pending.map((o) => o.id));
+  // Sửa nháp: chỉ lấy các đơn của nháp; đơn khác của khách vẫn hiện nhưng không tick sẵn.
+  const own = shipCtx.draft ? pending.filter((o) => shipCtx.draft.ids.includes(o.id)) : [];
+  const base = own.length ? own : pending;
+  if (!shipCtx.checked) shipCtx.checked = new Set(base.map((o) => o.id));
   if (!shipCtx.pay) {
-    const fromOrders = [...pending, focus].map((o) => o.ship?.pay).filter(Boolean);
+    const fromOrders = (own.length ? own : [...pending, focus]).map((o) => o.ship?.pay).filter(Boolean);
     shipCtx.pay = fromOrders.includes('paid') || fromOrders.includes('shipOnly') ? 'paid' : 'cod';
     const pick = (k) => {
-      for (const o of [...pending].reverse()) if (o.ship?.[k] !== undefined && o.ship[k] !== null && o.ship[k] !== '') return o.ship[k];
+      for (const o of [...base].reverse()) if (o.ship?.[k] !== undefined && o.ship[k] !== null && o.ship[k] !== '') return o.ship[k];
       return null;
     };
     shipCtx.payer = pick('payer');
     if (shipCtx.payer !== 'sender' && shipCtx.payer !== 'receiver') shipCtx.payer = shipCtx.pay === 'cod' ? 'receiver' : 'sender';
-    shipCtx.deposit = pending.reduce((s, o) => s + (Number(o.ship?.deposit) || 0), 0) || null;
+    shipCtx.deposit = base.reduce((s, o) => s + (Number(o.ship?.deposit) || 0), 0) || null;
     shipCtx.fee = pick('shipFee');
     // Kích thước kiện (cm): lấy theo đơn đã nhập gần nhất, chỉ dùng khi nặng từ 10kg.
     shipCtx.size = ['lengthCm', 'widthCm', 'heightCm'].map((k) => {
@@ -2628,6 +2637,11 @@ function renderShipSheet() {
     });
     // COD luôn bắt đầu bằng tổng tiền các đơn đang tick (tính tự động); bạn sửa tay được, không khoá.
     shipCtx.cod = null;
+    // Sửa nháp: COD đã sửa tay lúc duyệt thì giữ nguyên, không lặng lẽ quay về số tự cộng.
+    if (own.length) {
+      const manual = pick('codOverride');
+      if (manual !== null && Number.isFinite(Number(manual))) shipCtx.cod = Math.round(Number(manual));
+    }
   }
 
 
@@ -2819,8 +2833,15 @@ function applyShip(newState) {
     return toast('Hàng từ 10kg phải nhập đủ kích thước dài, rộng, cao (cm)', '⚠️');
   }
   ids.forEach((id, i) => setOrdersShip([id], { state: newState, ...shipPatch(i === 0) }));
+  const draft = shipCtx.draft;
   $('#modal-ship')?.close();
   renderOrdersView();
+  // Sửa từ nháp vận đơn: quay lại đúng nháp đó (Gom sau thì nháp không còn, về danh sách nháp).
+  if (draft && $('#modal-vtp-export')?.open && $('#vtp-result')?.hidden) {
+    vtpDetailKey = newState === 'ready' ? draft.key : null;
+    renderVtpExport();
+    if (newState === 'ready') return toast(`Đã lưu thay đổi${syncedWord()}`);
+  }
   if (currentDetailOrderId) openOrderDetailView(currentDetailOrderId);
   toast(
     newState === 'ready'
@@ -2851,6 +2872,9 @@ $('#btn-ship-undo')?.addEventListener('click', () => {
 /* ---------- Màn Xuất Viettel Post ---------- */
 let vtpSelected = new Set();
 let vtpTouched = false;
+/** Nháp đang mở để soát chi tiết (khoá của nhóm khách); null là đang ở danh sách nháp. */
+let vtpDetailKey = null;
+let vtpCreating = false;
 
 /**
  * Nháp vận đơn: đơn ở Chờ gửi là nháp sẵn. Khi đã kết nối Viettel Post, mỗi nháp được hỏi cước và
@@ -2908,6 +2932,7 @@ function openVtpExport() {
   $('#vtp-export-body').hidden = false;
   vtpTouched = false;
   vtpSelected = new Set();
+  vtpDetailKey = null;
   const sel = $('#vtp-service');
   // Khoá mới: lựa chọn cũ (STK) không còn đè lên mặc định Flashsale thỏa thuận.
   const cur = VTP_SERVICES.some(([c]) => c === S().vtpServiceCode) ? S().vtpServiceCode : DEFAULT_VTP_SERVICE;
@@ -2918,11 +2943,81 @@ function openVtpExport() {
   $('#modal-vtp-export')?.showModal();
 }
 
+/** Soát một nháp: người nhận, hàng & tiền, cước dự tính, ghi chú. Giống màn "Nháp · tên khách" trên điện thoại. */
+function renderVtpDetail(g) {
+  const q = g.quote;
+  const busy = q === 'busy';
+  const bad = g.problems.length > 0;
+  const name = g.receiver || g.customer?.name || g.orders[0].nickname || g.key;
+  const uid = g.customer?.uniqueId || g.orders[0].uniqueId;
+  const codes = g.orders.map((o) => o.code).filter(Boolean).join(' + ');
+  const line = vtpAddressLine(g.address);
+  const parsed = q && !busy ? q.parsed || '' : '';
+  const mismatch = q && !busy && q.addrOk === false;
+  const kv = (k, v, strong) => `<div class="vtp-kv${strong ? ' strong' : ''}"><span>${k}</span><b>${v}</b></div>`;
+  $('#vtp-export-title').textContent = `Nháp · ${name}`;
+  $('#vtp-export-subtitle').textContent = codes || `${g.orders.length} đơn`;
+
+  let addrCheck = '';
+  if (busy) addrCheck = kv('VTP hiểu', 'Đang kiểm…');
+  else if (parsed)
+    addrCheck =
+      kv('VTP hiểu', esc(parsed)) +
+      `<p class="${mismatch ? 'vtp-row-err' : 'vtp-quote-ok'} vtp-detail-check">${mismatch ? 'Khác phường hoặc tỉnh. Sửa địa chỉ trước khi tạo.' : '✓ Khớp phường và tỉnh'}</p>`;
+  else if (!bad) addrCheck = '<p class="vtp-row-note">Chưa đối chiếu được địa chỉ với Viettel Post.</p>';
+
+  let fee;
+  if (busy) fee = '<p class="vtp-row-note">Đang tính cước…</p>';
+  else if (q && q.ok)
+    fee = kv('Tổng cước', vndText(q.fee), true) + '<p class="vtp-row-note">Chưa tạo đơn. Cước thật do Viettel Post chốt khi nhận hàng.</p>';
+  else fee = `<p class="${q ? 'vtp-row-err' : 'vtp-row-note'}">${esc(q?.error || 'Cước chưa tính')}</p>`;
+
+  const sending = vtpCreating;
+  $('#vtp-detail').innerHTML = `
+    <section class="vtp-detail-box">
+      <div class="vtp-detail-head"><h3>Người nhận</h3><button type="button" class="link-btn" data-vtp-fix="${esc(uid)}">Sửa</button></div>
+      <div class="vtp-detail-name">${esc(name)}</div>
+      <div class="${g.phone ? '' : 'vtp-row-err'}">${esc(g.phone || 'Chưa có số điện thoại')}</div>
+      ${kv('App ghi', esc(line || 'Chưa có địa chỉ'))}
+      ${addrCheck}
+      ${bad ? `<p class="vtp-row-err">${esc(g.problems.join(' · '))}</p>` : ''}
+    </section>
+    <section class="vtp-detail-box">
+      <div class="vtp-detail-head"><h3>Hàng &amp; tiền</h3><button type="button" class="link-btn" data-vtp-edit-goods ${sending ? 'disabled' : ''}>Sửa</button></div>
+      ${kv('Tên hàng', `Quần áo · ${Math.max(g.qty || 0, 1)} món`)}
+      ${kv('Giá trị hàng', vndText(g.goods))}
+      ${kv('Người trả cước', g.senderPays ? 'Shop (người gửi)' : 'Người nhận')}
+      ${kv('Trọng lượng', `${g.weightG / 1000}kg`)}
+      ${g.size ? kv('Kích thước', `${g.size.join(' × ')} cm`) : ''}
+      ${kv('Thu hộ (COD)', vndText(g.cod), true)}
+    </section>
+    <section class="vtp-detail-box">
+      <div class="vtp-detail-head"><h3>Cước dự tính · ${esc(vtpCurService())}</h3></div>
+      ${fee}
+    </section>
+    <section class="vtp-detail-box">
+      <div class="vtp-detail-head"><h3>Ghi chú cho bưu tá</h3></div>
+      <p class="${g.note ? '' : 'vtp-row-note'}">${esc(g.note || 'Trống')}</p>
+    </section>
+    <div class="ship-actions">
+      <button type="button" class="btn-ghost-pill" data-vtp-detail-back ${sending ? 'disabled' : ''}>Để nháp</button>
+      <button type="button" class="btn-orange-pill" data-vtp-detail-create ${bad || busy || sending ? 'disabled' : ''}>${
+        sending ? 'Đang tạo vận đơn…' : busy ? 'Đang tính cước…' : 'Tạo vận đơn này'
+      }</button>
+    </div>`;
+}
+
 function renderVtpExport() {
   const groups = vtpGroups();
+  ensureVtpQuotes(groups);
+  // Đang soát một nháp: vẽ màn chi tiết thay cho danh sách. Nháp không còn (đã gom sau, đã gửi) thì về danh sách.
+  const detail = vtpDetailKey && vtpConnected() ? groups.find((g) => g.key === vtpDetailKey) : null;
+  if (!detail) vtpDetailKey = null;
+  $('#vtp-detail').hidden = !detail;
+  $('#vtp-export-body').hidden = !!detail;
+  if (detail) return renderVtpDetail(detail);
   if (!vtpTouched) vtpSelected = new Set(groups.filter((g) => !g.problems.length).map((g) => g.key));
   for (const k of [...vtpSelected]) if (!groups.some((g) => g.key === k && !g.problems.length)) vtpSelected.delete(k);
-  ensureVtpQuotes(groups);
 
   $('#vtp-export-subtitle').textContent = vtpConnected()
     ? `${groups.length} nháp · Viettel Post chưa nhận đơn nào. Soát xong rồi bấm Tạo.`
@@ -2950,7 +3045,8 @@ function renderVtpExport() {
             notes.push(
               `Khách đã có vận đơn xuất ${dmText(g.recentExported[0].ship.exportedAt)}`
             );
-          const other = notes.map((t) => `<div class="vtp-row-note">${esc(t)}</div>`).join('') + (bad ? '' : vtpQuoteLine(g.quote));
+          const review = !bad && vtpConnected() ? `<button type="button" class="link-btn vtp-row-review" data-vtp-detail="${esc(g.key)}">Soát chi tiết ›</button>` : '';
+          const other = notes.map((t) => `<div class="vtp-row-note">${esc(t)}</div>`).join('') + (bad ? '' : vtpQuoteLine(g.quote)) + review;
           return `
           <label class="vtp-export-row ${bad ? 'is-bad' : ''}">
             <input type="checkbox" data-vtp-key="${esc(g.key)}" ${vtpSelected.has(g.key) ? 'checked' : ''} ${bad ? 'disabled' : ''} />
@@ -3013,7 +3109,29 @@ $('#vtp-export-list')?.addEventListener('click', (e) => {
   if (fix) {
     e.preventDefault();
     openAddressEditor(fix.dataset.vtpFix);
+    return;
   }
+  const review = e.target.closest('[data-vtp-detail]');
+  if (review) {
+    e.preventDefault();
+    vtpDetailKey = review.dataset.vtpDetail;
+    renderVtpExport();
+  }
+});
+
+$('#vtp-detail')?.addEventListener('click', (e) => {
+  const g = vtpGroups().find((x) => x.key === vtpDetailKey);
+  if (e.target.closest('[data-vtp-detail-back]')) {
+    vtpDetailKey = null;
+    return renderVtpExport();
+  }
+  if (!g) return renderVtpExport();
+  const fix = e.target.closest('[data-vtp-fix]');
+  if (fix) return openAddressEditor(fix.dataset.vtpFix);
+  // Sửa cân nặng, kích thước, COD, tiền cọc, người trả cước của đúng các đơn trong nháp này.
+  if (e.target.closest('[data-vtp-edit-goods]'))
+    return openShipSheet(g.orders[g.orders.length - 1].id, { key: g.key, ids: g.orders.map((o) => o.id) });
+  if (e.target.closest('[data-vtp-detail-create]')) createVtpWaybills([g]);
 });
 
 $('#btn-vtp-select-all')?.addEventListener('click', () => {
@@ -3242,8 +3360,10 @@ function vtpPayload(g) {
   };
 }
 
-async function createVtpWaybills() {
-  const groups = vtpGroups().filter((g) => vtpSelected.has(g.key) && !g.problems.length);
+/** `only`: tạo riêng các nháp này (nút "Tạo vận đơn này" ở màn soát chi tiết); bỏ trống là tạo các nháp đang tick. */
+async function createVtpWaybills(only = null) {
+  if (vtpCreating) return;
+  const groups = (only || vtpGroups().filter((g) => vtpSelected.has(g.key))).filter((g) => !g.problems.length);
   if (!groups.length) return toast('Chọn ít nhất một khách đủ địa chỉ', '⚠️');
   if (!vtpConn.sender) {
     toast('Chọn điểm lấy hàng trước', '⚠️');
@@ -3254,7 +3374,10 @@ async function createVtpWaybills() {
   const btn = $('#btn-vtp-export-go');
   btn.disabled = true;
   btn.textContent = `Đang tạo ${groups.length} vận đơn…`;
+  vtpCreating = true;
+  if (vtpDetailKey) renderVtpExport();
   const r = await apiFetch('/api/vtp/create', jsonPost({ service, groups: groups.map(vtpPayload) })).catch(() => null);
+  vtpCreating = false;
   btn.disabled = false;
   if (!r?.ok) {
     renderVtpExport();
@@ -3297,6 +3420,8 @@ let vtpLastCodes = [];
 function showVtpResult(groups, results) {
   const okList = results.filter((x) => x.ok);
   vtpLastCodes = okList.map((x) => x.code);
+  vtpDetailKey = null;
+  $('#vtp-detail').hidden = true;
   $('#vtp-export-body').hidden = true;
   $('#vtp-export-title').textContent = 'Kết quả gửi Viettel Post';
   $('#vtp-export-subtitle').textContent = `Đã tạo ${okList.length}/${results.length} vận đơn`;
