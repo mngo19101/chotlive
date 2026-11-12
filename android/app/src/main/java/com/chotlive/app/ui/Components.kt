@@ -100,7 +100,12 @@ fun T(
         softWrap = !shrink && maxLines != 1,
         overflow = if (shrink || maxLines != Int.MAX_VALUE) TextOverflow.Ellipsis else TextOverflow.Clip,
         lineHeight = lineHeight?.let { (it / scale).sp } ?: TextUnit.Unspecified,
-        onTextLayout = { r -> if (shrink && r.hasVisualOverflow && factor > 0.55f) factor *= 0.93f },
+        // Chỉ co khi tràn chiều ngang. hasVisualOverflow còn bật khi dấu chồng (ễ, ằ, ọ) cao vượt dòng,
+        // làm tên tiếng Việt bị co nhỏ dù thừa chỗ.
+        onTextLayout = { r ->
+            val wide = r.didOverflowWidth || (r.lineCount > 0 && r.isLineEllipsized(r.lineCount - 1))
+            if (shrink && wide && factor > 0.55f) factor *= 0.93f
+        },
     )
 }
 

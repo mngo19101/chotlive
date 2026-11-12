@@ -181,12 +181,22 @@ data class TikTokAccount(
 }
 
 fun initialsOf(name: String): String {
-    val words = name.split(" ").filter { it.isNotEmpty() }
-    if (words.size >= 2) {
-        return (words.first().take(1) + words.last().take(1)).uppercase()
+    // Lấy chữ cái (theo code point) đầu mỗi từ, bỏ qua từ không có chữ như emoji, để không cắt đôi emoji thành "�".
+    fun firstLetter(w: String): String? {
+        var i = 0
+        while (i < w.length) {
+            val cp = w.codePointAt(i)
+            if (Character.isLetterOrDigit(cp)) return String(Character.toChars(cp))
+            i += Character.charCount(cp)
+        }
+        return null
     }
-    val s = name.take(2).uppercase()
-    return s.ifEmpty { "?" }
+    val letters = name.split(" ").mapNotNull { firstLetter(it) }
+    val s = when {
+        letters.size >= 2 -> letters.first() + letters.last()
+        else -> name.filter { it.isLetterOrDigit() }.take(2)
+    }
+    return s.uppercase().ifEmpty { "?" }
 }
 
 /** Khoảng thời gian đang xem (dùng chung cho Bình luận và Đơn hàng). */
