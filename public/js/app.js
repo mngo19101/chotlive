@@ -3060,7 +3060,9 @@ function renderVtpExport() {
     : `${groups.length} khách sẵn sàng gửi`;
   const list = $('#vtp-export-list');
   list.innerHTML = groups.length
-    ? groups
+    ? [...groups]
+        // Nháp sẵn sàng lên đầu, nháp cần sửa xuống cuối; sort ổn định nên giữ thứ tự trong từng nhóm.
+        .sort((a, b) => (a.problems.length > 0) - (b.problems.length > 0))
         .map((g) => {
           const bad = g.problems.length > 0;
           const name = g.receiver || g.customer?.name || g.orders[0].nickname || g.key;

@@ -617,6 +617,10 @@ struct VtpExportSheet: View {
             }
             return out
         }
+        // Đơn sẵn sàng lên đầu, đơn cần sửa xuống cuối; giữ nguyên thứ tự trong từng nhóm.
+        .enumerated()
+        .sorted { a, b in a.element.isBad != b.element.isBad ? !a.element.isBad : a.offset < b.offset }
+        .map(\.element)
     }
     private var okIds: Set<String> { Set(groups.filter { !$0.isBad }.map(\.id)) }
     private var chosen: Set<String> { touched ? selected.intersection(okIds) : okIds }
