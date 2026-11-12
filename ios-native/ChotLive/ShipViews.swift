@@ -32,7 +32,9 @@ func shipButtonLabel(_ o: Order) -> String {
     case .ask: return "Duyệt đơn"
     case .hold: return "Gom sau"
     case .ready: return "Sẵn sàng"
-    case .exported, .gone: return o.status == .delivered ? "Đã giao" : "Đang giao"
+    case .exported, .gone:
+        if VtpTrack.isReturned(o) { return "Hoàn về" }
+        return o.status == .delivered ? "Đã giao" : "Đang giao"
     }
 }
 
@@ -40,7 +42,9 @@ func shipButtonColor(_ o: Order) -> Color {
     switch Vtp.state(o) {
     case .ask, .hold: return Theme.ink
     case .ready: return Theme.accent
-    case .exported, .gone: return o.status == .delivered ? Theme.green : Theme.accent
+    case .exported, .gone:
+        if VtpTrack.isReturned(o) { return Theme.red }
+        return o.status == .delivered ? Theme.green : Theme.accent
     }
 }
 
@@ -56,7 +60,13 @@ struct ShipBadge: View {
         case .ask: Badge(text: "Đơn mới", fontSize: fontSize, height: height, hPad: 12)
         case .hold: Badge(text: "Gom sau", color: Theme.gomInk, fill: Theme.gomTag, fontSize: fontSize, height: height, hPad: 12)
         case .ready: Badge(text: "Sẵn sàng", fontSize: fontSize, height: height, hPad: 12)
-        case .exported, .gone: StatusBadge(status: order.status, fontSize: fontSize, height: height)
+        case .exported, .gone:
+            if VtpTrack.isReturned(order) {
+                Badge(text: "Hoàn về", color: Theme.red, fill: Theme.redSoft, fontSize: fontSize, height: height,
+                      hPad: height >= 25 ? 12 : 8)
+            } else {
+                StatusBadge(status: order.status, fontSize: fontSize, height: height)
+            }
         }
     }
 }
@@ -236,7 +246,8 @@ struct ShipReviewSheet: View {
     private var trial: Vtp.Summary? {
         guard let focus else { return nil }
         let list = chosen.isEmpty ? [focus] : chosen
-        let lines = list.enumerated().map { i, o in Vtp.Line(total: o.total, qty: o.productCount, ship: patch(first: i == 0, cod: nil)) }
+        // Kèm cả số thu hộ nhập tay, để cảnh báo đơn dưới 17.000đ đúng với số sẽ gửi đi (autoCod không đổi theo số này).
+        let lines = list.enumerated().map { i, o in Vtp.Line(total: o.total, qty: o.productCount, ship: patch(first: i == 0, cod: codValue)) }
         return Vtp.summarize(lines, address: focus.customer.address, nickname: focus.customer.nickname)
     }
 
@@ -462,7 +473,8 @@ struct ShipReviewSheet: View {
                     payer = v
                     resetCod()
                 }
-                if let t = trial, t.forcedSender, !t.allPaid {
+                // Kể cả khi đã chọn người gửi trả hoặc tự nhập số thu hộ: báo rõ khách sẽ trả bao nhiêu.
+                if let t = trial, !t.allPaid, t.shipFee > 0 || t.forcedSender {
                     forcedSenderWarning(t)
                 }
             }
@@ -476,7 +488,9 @@ struct ShipReviewSheet: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(Theme.red)
                 .padding(.top, 1)
-            T("Tiền COD dưới 17.000đ tự động chuyển qua người gửi trả ship và cộng tiền ship vào COD.",
+            T(t.shipFee > 0
+              ? "Thu hộ thấp hơn tiền ship: người gửi trả ship và cộng tiền ship vào thu hộ. Tạm tính ship \(money(t.shipFee)), khách trả \(money(t.cod)). Bước nháp vận đơn sẽ tính lại theo cước thật Viettel Post báo."
+              : "Tiền hàng thấp hơn tiền ship: người gửi trả ship. Thu hộ giữ đúng \(money(t.cod)) bạn đã nhập.",
               12.5, .medium, Theme.red)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -590,10 +604,18 @@ struct VtpExportSheet: View {
     /// Đơn ở Chờ gửi là nháp sẵn. Viettel Post hiểu địa chỉ sang phường/tỉnh khác thì nháp đó chưa cho tạo.
     private var groups: [Vtp.Group] {
         Vtp.readyGroups(store.allOrders()).map { g in
-            guard api, let q = quotes[VtpQuote.signature(g, service: service)], q.addrOk == false else { return g }
-            var bad = g
-            bad.summary.problems.append("Viettel Post hiểu \"\(q.parsed)\", khác địa chỉ trong app")
-            return bad
+            guard api, let q = quotes[VtpQuote.signature(g, service: service)] else { return g }
+            var out = g
+            // Đã có cước thật: đơn thu hộ thấp hơn cước đó chuyển người gửi trả và cộng đúng cước đó vào thu hộ.
+            if q.ok, q.fee > 0 {
+                out.baseSummary = g.summary
+                out.summary = Vtp.summarize(Vtp.lines(g.orders), address: g.customer.address,
+                                            nickname: g.customer.nickname, realFee: q.fee)
+            }
+            if q.addrOk == false {
+                out.summary.problems.append("Viettel Post hiểu \"\(q.parsed)\", khác địa chỉ trong app")
+            }
+            return out
         }
     }
     private var okIds: Set<String> { Set(groups.filter { !$0.isBad }.map(\.id)) }
@@ -766,6 +788,9 @@ struct VtpExportSheet: View {
                         kv("Trọng lượng", weightText(s.weightG))
                         if let z = s.size { kv("Kích thước", "\(z.0) × \(z.1) × \(z.2) cm") }
                         HairLine()
+                        if s.shipFee > 0 {
+                            kv(s.feeIsReal ? "Tiền ship cộng vào thu hộ" : "Tiền ship cộng vào thu hộ (tạm tính)", money(s.shipFee))
+                        }
                         kv("Thu hộ (COD)", money(s.cod), strong: true)
                     }
                     detailBox("CƯỚC DỰ TÍNH · \(service)") {
@@ -948,7 +973,7 @@ struct VtpExportSheet: View {
 
     private func detail(_ s: Vtp.Summary) -> String {
         let who = s.senderPays ? "Shop trả ship" : "Khách trả ship"
-        let small = s.shipFee > 0 ? " (\(s.allPaid ? "thu tiền ship" : "đơn nhỏ"), COD +\(money(s.shipFee)))" : ""
+        let small = s.shipFee > 0 ? " (\(s.allPaid ? "thu tiền ship" : "thu hộ thấp hơn ship"), COD +\(money(s.shipFee))\(s.feeIsReal ? "" : " tạm tính"))" : ""
         return [who + small, weightText(s.weightG), s.address.shortArea].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 

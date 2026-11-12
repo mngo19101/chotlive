@@ -302,6 +302,10 @@ function mergeNativeItem(existing, it) {
   };
 }
 
+/** Đơn đã gửi đi, không còn nhận thêm món (cùng quy tắc với `isOpenOrder` của web). */
+const isSentOrder = (o) =>
+  o.status === 'shipping' || o.status === 'done' || o.ship?.state === 'exported' || Boolean(o.ship?.vtpCode);
+
 function applyNativeCustomer(state, c) {
   const key = customerKey(c.uniqueId, c.userId, c.nickname) || String(c.id || '');
   if (!key) return null;
@@ -349,17 +353,26 @@ function applyNativeCustomer(state, c) {
       touched.add(holder);
       continue;
     }
-    let order = state.orders.find(
+    const sameGroup = state.orders.filter(
       (o) =>
         keyOfRecord(o) === key &&
         o.status !== 'cancelled' &&
-        (String(o.id) === groupId || (groupId && (o.items || []).some((x) => x.groupId === groupId)))
+        (String(o.id) === groupId ||
+          // Đơn web tạo trong cùng phiên live (món chưa có nhóm, chỉ có mã phiên) cũng là đơn của phiên đó.
+          (groupId &&
+            (o.splitFrom === groupId ||
+              (o.items || []).some((x) => x.groupId === groupId || (!x.groupId && x.sessionId === groupId)))))
     );
+    // Đơn đã gửi đi (đang giao, đã giao, đã xuất, đã có vận đơn) thì gói hàng và tiền thu hộ đã chốt:
+    // món chốt thêm phải sang đơn mới, không thì món đó không được gửi và không được thu tiền.
+    let order = sameGroup.find((o) => !isSentOrder(o));
+    const split = !order && sameGroup.length > 0;
     if (!order) {
       const ts = Number(it.ts) || Date.now();
       const nick = c.nickname || c.uniqueId || 'Khách Live';
       order = {
-        id: stableOrderId(key, groupId || id),
+        id: stableOrderId(key, split ? `${groupId}|${id}` : groupId || id),
+        ...(split ? { splitFrom: groupId } : {}),
         code: nextOrderCode(state, ts),
         uniqueId: c.uniqueId || '',
         userId: String(c.userId || ''),
@@ -379,7 +392,10 @@ function applyNativeCustomer(state, c) {
       };
       state.orders.unshift(order);
     }
-    order.items.push(mergeNativeItem(null, it));
+    const added = mergeNativeItem(null, it);
+    // Đơn tách ra: món mang mã nhóm của chính đơn mới, để app không gộp lại vào đơn đã gửi.
+    if (order.splitFrom) added.groupId = String(order.id);
+    order.items.push(added);
     touched.add(order);
   }
 

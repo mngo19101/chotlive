@@ -453,6 +453,51 @@ function recordLocalChanges() {
 }
 
 export const pendingChangeCount = () => countPending(pending);
+
+/**
+ * Phần đã đổi mà server chưa xác nhận, kèm nội dung bản ghi: { orders: { upsert: [đơn], remove: [mã] }, … }.
+ * Web chỉ gửi phần này thay cho cả danh sách, nên không ghi đè đơn thiết bị khác vừa thêm.
+ */
+export function pendingChangesPayload() {
+  const out = {};
+  for (const [coll, c] of Object.entries(pending.changes || {})) {
+    const wanted = new Set(c.upsert);
+    out[coll] = {
+      upsert: (Array.isArray(state[coll]) ? state[coll] : []).filter((x) => x && wanted.has(String(x.id))),
+      remove: [...c.remove]
+    };
+  }
+  return out;
+}
+
+/**
+ * Trong lúc máy này còn thay đổi chưa gửi xong, bản ghi đó trên server lại vừa đổi (thiết bị khác sửa):
+ * máy này đang giữ bản của mình nên chưa thấy phần họ sửa. Gửi xong phải tải lại để hai bên khớp nhau.
+ */
+let shadowedRemote = false;
+export function takeShadowedRemote() {
+  const v = shadowedRemote;
+  shadowedRemote = false;
+  return v;
+}
+
+function noteShadowedRemote(remote) {
+  for (const coll of TRACKED) {
+    const mine = pending.changes[coll]?.upsert;
+    if (!mine?.length || !Array.isArray(remote[coll])) continue;
+    const wanted = new Set(mine);
+    const local = new Map((state[coll] || []).map((x) => [String(x?.id), x]));
+    for (const r of remote[coll]) {
+      const id = String(r?.id);
+      if (!wanted.has(id)) continue;
+      const cur = local.get(id);
+      if (r !== cur && JSON.stringify(r) !== JSON.stringify(cur)) {
+        shadowedRemote = true;
+        return;
+      }
+    }
+  }
+}
 export const getPendingVersion = () => pendingVersion;
 export const getPendingOwner = () => pending.owner;
 
@@ -486,6 +531,7 @@ export function applyRemoteState(remote, action = 'remote') {
   isApplyingRemote = true;
   try {
     if (typeof remote.isCleanAccount === 'boolean') state.isCleanAccount = remote.isCleanAccount;
+    if (hadPending) noteShadowedRemote(remote);
     for (const coll of TRACKED) {
       if (Array.isArray(remote[coll])) state[coll] = overlayPending(coll, remote[coll], state[coll], pending);
     }
@@ -638,9 +684,49 @@ export function isOpenOrder(o) {
   return o.ship?.state !== 'exported' && !o.ship?.vtpCode;
 }
 
-export function findMatchingOrder(orders, person) {
+/**
+ * Tiền thu hộ nhập tay là cho gói hàng cũ: đơn đổi món (thêm, sửa giá, bớt) thì bỏ số đó để tính lại theo
+ * hàng mới. Số nhập tay tính chung cho mọi đơn đang mở của khách (gửi cùng một gói) nên bỏ ở tất cả.
+ * Trả về true nếu có đơn bị bỏ số nhập tay; nơi gọi tự lưu.
+ */
+export function clearManualCod(order) {
+  let cleared = false;
+  for (const o of state.orders || []) {
+    if (o.ship?.codOverride == null || !isOpenOrder(o) || !areSameCustomer(o, order)) continue;
+    o.ship = { ...o.ship, codOverride: null };
+    cleared = true;
+  }
+  return cleared;
+}
+
+const WEEKDAYS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+/** "Tạo lúc 20:42 · CN 25/10/2026" theo đúng ngày tạo. */
+export function createdDescOf(ts = Date.now()) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `Tạo lúc ${p(d.getHours())}:${p(d.getMinutes())} · ${WEEKDAYS[d.getDay()]} ${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
+/** Bản web cũ ghi cứng "CN" cho mọi ngày: tính lại thứ theo đúng ngày ghi trong chuỗi. */
+export function fixCreatedDesc(desc) {
+  const m = String(desc || '').match(/^(.*· )CN (\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return desc || '';
+  const d = new Date(Number(m[4]), Number(m[3]) - 1, Number(m[2]));
+  return `${m[1]}${WEEKDAYS[d.getDay()]} ${m[2]}/${m[3]}/${m[4]}`;
+}
+
+/**
+ * Đơn còn mở của khách nhận món mới. Giống app điện thoại: mỗi phiên live một đơn, nên món chốt trong
+ * phiên nào vào đơn của phiên đó; đơn gom từ phiên trước giữ riêng, lúc duyệt mới chọn gộp hay gửi riêng.
+ * Món không thuộc phiên live nào thì vào đơn còn mở không thuộc phiên live nào.
+ */
+export function findMatchingOrder(orders, person, sessionId = '') {
   if (!orders || !person) return null;
-  return orders.find((o) => isOpenOrder(o) && areSameCustomer(o, person)) || null;
+  const sid = String(sessionId || '');
+  const inSession = (o) =>
+    sid ? (o.items || []).some((it) => String(it.sessionId || '') === sid) : !(o.items || []).some((it) => it.sessionId);
+  return orders.find((o) => isOpenOrder(o) && areSameCustomer(o, person) && inSession(o)) || null;
 }
 
 export function mergeDuplicateOrders() {
@@ -738,7 +824,9 @@ export function addOrMergeOrder(data) {
     qty = 1,
     comment = '',
     commentId = '',
-    sessionId = ''
+    sessionId = '',
+    // Tạo đơn tay: luôn là đơn mới, như nút Tạo đơn trên app điện thoại.
+    forceNew = false
   } = data;
 
   const d = new Date();
@@ -746,12 +834,16 @@ export function addOrMergeOrder(data) {
   const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
 
   const person = { uniqueId, userId, nickname, phone };
-  const existingOrder = findMatchingOrder(state.orders, person);
+  // Bình luận đã lưu thành món ở bất kỳ đơn nào của khách (kể cả đơn phiên khác, đơn đã gửi) thì không lưu lần nữa.
+  if (commentId) {
+    const holder = state.orders.find(
+      (o) => o.status !== 'cancelled' && areSameCustomer(o, person) && (o.items || []).some((it) => it.commentId === commentId)
+    );
+    if (holder) return { order: holder, isMerged: false, isDuplicate: true, newItem: null };
+  }
+  const existingOrder = forceNew ? null : findMatchingOrder(state.orders, person, sessionId);
 
   if (existingOrder) {
-    if (commentId && existingOrder.items?.some((it) => it.commentId === commentId)) {
-      return { order: existingOrder, isMerged: false, isDuplicate: true, newItem: null };
-    }
 
     const newItem = {
       id: 'it_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
@@ -771,14 +863,7 @@ export function addOrMergeOrder(data) {
       (s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 1),
       0
     );
-    // Tiền thu hộ nhập tay là cho gói hàng cũ: thêm món thì bỏ số đó để tính lại theo hàng mới.
-    // Số nhập tay tính chung cho mọi đơn đang mở của khách (gửi cùng một gói) nên bỏ ở tất cả.
-    let codReset = false;
-    for (const o of state.orders) {
-      if (o.ship?.codOverride == null || !isOpenOrder(o) || !areSameCustomer(o, existingOrder)) continue;
-      o.ship = { ...o.ship, codOverride: null };
-      codReset = true;
-    }
+    const codReset = clearManualCod(existingOrder);
 
     if (phone && !existingOrder.phone) existingOrder.phone = phone;
     if (address && !existingOrder.address) existingOrder.address = address;
@@ -837,7 +922,7 @@ export function addOrMergeOrder(data) {
       ts: Date.now(),
       timeStr,
       dateStr,
-      createdDesc: `Tạo lúc ${timeStr} · CN ${dateStr}/2026`,
+      createdDesc: createdDescOf(d.getTime()),
       printCount: 0,
       avatarWarm: true,
       items: [newItem],

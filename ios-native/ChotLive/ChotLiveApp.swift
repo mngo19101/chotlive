@@ -119,14 +119,17 @@ enum CommentAlert {
 @MainActor
 func printComment(_ c: LiveComment, store: Store, printer: PrinterManager) async -> String? {
     let items = store.saveToCustomer(c)
+    // Đơn có tiền thu hộ nhập tay vừa nhận thêm món: báo để người bán biết số đó đã được tính lại.
+    let codNotice = store.takeCodResetNotice()
+    let also = codNotice.map { "\n\n" + $0 } ?? ""
     guard printer.isConnected else {
-        return "Đã lưu đơn của \(c.nickname). Chưa kết nối máy in nên chưa in tem — vào Tôi › Máy in để kết nối."
+        return "Đã lưu đơn của \(c.nickname). Chưa kết nối máy in nên chưa in tem — vào Tôi › Máy in để kết nối." + also
     }
     if let error = await printer.sendAndWait(TicketRenderer.liveTicketBytes(comment: c)) {
-        return "Đã lưu đơn của \(c.nickname) nhưng chưa in được tem. \(error)"
+        return "Đã lưu đơn của \(c.nickname) nhưng chưa in được tem. \(error)" + also
     }
     items.forEach { store.markPrinted(itemId: $0.id) }
-    return nil
+    return codNotice
 }
 
 /// In tem cho tất cả sản phẩm của đơn, dừng ở tem lỗi đầu tiên. Trả về thông báo (nil nếu thành công).

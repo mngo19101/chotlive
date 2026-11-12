@@ -15,7 +15,10 @@ import {
   applyRemoteState,
   onRemoteStateApplied,
   pendingChangeCount,
-  setOrdersShip
+  setOrdersShip,
+  clearManualCod,
+  createdDescOf,
+  fixCreatedDesc
 } from './store.js';
 import { VTP_PROVINCES, vtpWardsOf, vtpProvinceByName, normalizeVN } from './vtp-address.js';
 import {
@@ -1698,6 +1701,8 @@ function orderStateBadge(o) {
   const [text, cls] =
     o.status === 'done'
       ? ['Đã giao', 'status-done-badge']
+      : isVtpReturned(o)
+      ? ['Hoàn về', 'ship-tag-vtp-bad']
       : o.status === 'shipping' || st === 'exported' || st === 'gone'
       ? ['Đang giao', 'ship-tag-ready']
       : st === 'ready'
@@ -2239,9 +2244,13 @@ function renderOrdersView() {
       const isPrinted = o.status === 'printed';
       const isShipping = o.status === 'shipping';
       // Không hiện nhãn "Đã in": nút In đơn / In lại đã cho biết đơn in chưa.
-      const badgeText = isNew ? 'Đơn mới' : isPrinted ? '' : isShipping ? 'Đang giao' : 'Đã giao';
+      // Hàng Viettel Post trả về shop: đơn vẫn ở mục Đang giao nhưng trạng thái ghi "Hoàn về".
+      const isReturned = isVtpReturned(o);
+      const badgeText = isReturned ? 'Hoàn về' : isNew ? 'Đơn mới' : isPrinted ? '' : isShipping ? 'Đang giao' : 'Đã giao';
       const hasPrinted = isPrinted || Number(o.printCount) > 0;
-      const badgeClass = isNew
+      const badgeClass = isReturned
+        ? 'ship-tag-vtp-bad'
+        : isNew
         ? 'status-new-badge'
         : isPrinted
         ? 'status-printed-badge'
@@ -2391,6 +2400,10 @@ $('#btn-oc-detail')?.addEventListener('click', () => {
 /** Hỏi lại rồi xoá đơn; trong 5 giây đầu bấm Hoàn tác thì đơn trở lại như cũ. */
 async function confirmDeleteOrder(ord) {
   if (!ord) return;
+  // Vận đơn còn hiệu lực mà xoá đơn thì bưu tá vẫn tới lấy hàng, app lại không còn gì để theo dõi.
+  if (ord.ship?.vtpCode && ord.status !== 'done') {
+    return toast(`Đơn đang có vận đơn ${ord.ship.vtpCode}. Huỷ vận đơn ở chi tiết đơn trước rồi mới xoá đơn.`, '⚠️', 5000);
+  }
   const yes = await askConfirm({
     title: 'Xoá đơn này?',
     message: `Xoá đơn ${ord.code || ''} của ${ord.nickname || ord.uniqueId}. Sau khi xoá có 5 giây để bấm Hoàn tác.`,
@@ -2444,12 +2457,13 @@ function openOrderDetailView(orderId) {
     const isNew = ord.status === 'new';
     const isPrinted = ord.status === 'printed';
     const isShipping = ord.status === 'shipping';
-    badgeEl.textContent = isNew ? 'Đơn mới' : isPrinted ? '' : isShipping ? 'Đang giao' : 'Đã giao';
+    const isReturned = isVtpReturned(ord);
+    badgeEl.textContent = isReturned ? 'Hoàn về' : isNew ? 'Đơn mới' : isPrinted ? '' : isShipping ? 'Đang giao' : 'Đã giao';
     badgeEl.hidden = !badgeEl.textContent;
     if ($('#detail-ship-label')) $('#detail-ship-label').textContent = shipButtonLabel(ord);
     if ($('#detail-print-label')) $('#detail-print-label').textContent = isPrinted || Number(ord.printCount) > 0 ? 'In lại' : 'In đơn';
     badgeEl.className = `badge-order-status ${
-      isNew ? 'status-new-badge' : isPrinted ? 'status-printed-badge' : 'status-done-badge'
+      isReturned ? 'ship-tag-vtp-bad' : isNew ? 'status-new-badge' : isPrinted ? 'status-printed-badge' : 'status-done-badge'
     }`;
   }
 
@@ -2471,7 +2485,8 @@ function openOrderDetailView(orderId) {
   }
 
   if ($('#detail-created-text')) {
-    $('#detail-created-text').textContent = ord.createdDesc || `Tạo lúc ${ord.timeStr || '20:42'} · CN ${ord.dateStr || '25/10'}/2026`;
+    // Đơn tạo từ bản web cũ ghi cứng "CN" cho mọi ngày: sửa lại thứ theo đúng ngày trong chuỗi.
+    $('#detail-created-text').textContent = fixCreatedDesc(ord.createdDesc) || createdDescOf(Number(ord.ts) || Date.now());
   }
 
   const gotoCustBtn = $('#btn-detail-goto-customer');
@@ -2543,6 +2558,7 @@ function shipButtonLabel(o) {
   const st = shipStateOf(o);
   if (st === 'hold') return 'Gom sau';
   if (st === 'ready') return 'Sẵn sàng gửi';
+  if (isVtpReturned(o)) return 'Hoàn về';
   if (o.ship?.vtpCode && o.status !== 'done') return vtpNeedsAction(o) ? 'Cần xử lý' : 'Vận đơn';
   if (st === 'exported' || st === 'gone') return o.status === 'done' ? 'Đã giao' : 'Đang giao';
   return 'Duyệt đơn';
@@ -2569,7 +2585,8 @@ function renderVtpReadyBanner() {
   const banner = $('#vtp-ready-banner');
   if (!banner) return;
   // Xuất VTP lấy mọi đơn đã duyệt chưa xuất ở mọi ngày (không theo ngày đang xem); cùng khách gộp 1 vận đơn.
-  const groups = groupByCustomer(state.orders, state.customers, 'ready', state.orders);
+  // Nháp nào đã có cước thật thì thu hộ ở đây cũng tính theo cước đó, khớp với bảng nháp.
+  const groups = vtpGroups();
   banner.hidden = groups.length === 0;
   if (banner.hidden) return;
   const merged = groups.filter((g) => g.orders.length > 1).length;
@@ -2702,7 +2719,12 @@ function renderShipSheet() {
   if (document.activeElement !== $('#ship-deposit')) $('#ship-deposit').value = shipCtx.deposit ? String(shipCtx.deposit) : '';
   $('#btn-ship-cod-auto').hidden = shipCtx.cod === null;
   // Đơn dưới 17.000đ mà chọn người nhận trả: vẫn cho chọn, khi xuất tự đổi người gửi trả và cộng ship vào COD.
-  $('#ship-payer-warn').hidden = sent || !(sum.forcedSender && sum.pay === 'cod');
+  // Kể cả khi đã chọn người gửi trả hoặc tự nhập số thu hộ: báo rõ khách sẽ trả bao nhiêu khi nhận hàng.
+  const payerWarn = $('#ship-payer-warn');
+  payerWarn.hidden = sent || sum.pay !== 'cod' || !(sum.shipFee > 0 || sum.forcedSender);
+  payerWarn.textContent = sum.shipFee > 0
+    ? `Thu hộ thấp hơn tiền ship: người gửi trả ship và cộng tiền ship vào thu hộ. Tạm tính ship ${vndText(sum.shipFee)}, khách trả ${vndText(sum.cod)}. Bước nháp vận đơn sẽ tính lại theo cước thật Viettel Post báo.`
+    : `Tiền hàng thấp hơn tiền ship: người gửi trả ship. Thu hộ giữ đúng ${vndText(sum.cod)} bạn đã nhập.`;
   const warn = $('#ship-addr-warn');
   // Thiếu kích thước đã báo ngay dưới 3 ô Dài / Rộng / Cao; ô này chỉ báo lỗi địa chỉ / số điện thoại.
   const addrProblems = sum.problems.filter((p) => !p.includes('kích thước'));
@@ -2898,8 +2920,12 @@ function vtpGroups() {
   if (!vtpConnected()) return groups;
   const service = vtpCurService();
   for (const g of groups) {
-    const q = vtpQuotes.get(vtpQuoteSig(g, service));
+    // Chữ ký lấy từ số tạm tính (chưa có cước thật) để không đổi khi cước thật được cộng vào thu hộ.
+    g.quoteSig = vtpQuoteSig(g, service);
+    const q = vtpQuotes.get(g.quoteSig);
     g.quote = q;
+    // Đã có cước thật: đơn thu hộ thấp hơn cước đó chuyển người gửi trả và cộng đúng cước đó vào thu hộ.
+    if (q && q !== 'busy' && q.ok && q.fee > 0) Object.assign(g, summarizeGroup(g, { realFee: q.fee }));
     // Viettel Post đọc ra phường/tỉnh khác app: chưa cho tạo, bấm Sửa địa chỉ.
     if (q && q !== 'busy' && q.addrOk === false) g.problems.push(`Viettel Post hiểu "${q.parsed}", khác địa chỉ trong app`);
   }
@@ -2909,9 +2935,10 @@ function vtpGroups() {
 function ensureVtpQuotes(groups) {
   if (!vtpConnected() || !vtpConn.sender) return;
   const service = vtpCurService();
-  const need = groups.filter((g) => g.address.ok && !g.problems.length && !vtpQuotes.has(vtpQuoteSig(g, service)));
+  const sigOf = (g) => g.quoteSig || vtpQuoteSig(g, service);
+  const need = groups.filter((g) => g.address.ok && !g.problems.length && !vtpQuotes.has(sigOf(g)));
   if (!need.length) return;
-  const sigs = new Map(need.map((g) => [g.key, vtpQuoteSig(g, service)]));
+  const sigs = new Map(need.map((g) => [g.key, sigOf(g)]));
   for (const s of sigs.values()) vtpQuotes.set(s, 'busy');
   apiFetch('/api/vtp/quote', jsonPost({ service, groups: need.map(vtpPayload) }))
     .then((r) => {
@@ -2997,6 +3024,7 @@ function renderVtpDetail(g) {
       ${kv('Người trả cước', g.senderPays ? 'Shop (người gửi)' : 'Người nhận')}
       ${kv('Trọng lượng', `${g.weightG / 1000}kg`)}
       ${g.size ? kv('Kích thước', `${g.size.join(' × ')} cm`) : ''}
+      ${g.shipFee ? kv(g.feeIsReal ? 'Tiền ship cộng vào thu hộ' : 'Tiền ship cộng vào thu hộ (tạm tính)', vndText(g.shipFee)) : ''}
       ${kv('Thu hộ (COD)', vndText(g.cod), true)}
     </section>
     <section class="vtp-detail-box">
@@ -3047,7 +3075,7 @@ function renderVtpExport() {
             : `<button type="button" class="link-btn" data-vtp-fix="${esc(g.customer?.uniqueId || g.orders[0].uniqueId)}">Sửa</button>`;
           const sub = bad
             ? `<span class="vtp-row-err">${esc(g.problems.join(' · '))}</span> ${fixBtn}`
-            : `${g.senderPays ? 'Shop trả ship' : 'Khách trả ship'}${g.shipFee ? ' (đơn nhỏ, COD +' + vndText(g.shipFee) + ')' : ''} · COD ${vndText(g.cod)} · ${g.weightG / 1000}kg`;
+            : `${g.senderPays ? 'Shop trả ship' : 'Khách trả ship'}${g.shipFee ? ` (${g.pay === 'paid' ? 'thu tiền ship' : 'thu hộ thấp hơn ship'}, COD +${vndText(g.shipFee)}${g.feeIsReal ? '' : ' tạm tính'})` : ''} · COD ${vndText(g.cod)} · ${g.weightG / 1000}kg`;
           const notes = [];
           if (g.recentExported.length)
             notes.push(
@@ -3192,6 +3220,13 @@ function vtpTrackUrl(code) {
 }
 function vtpKindOf(o) {
   return o.ship?.vtpKind || (o.ship?.vtpCode ? 'created' : '');
+}
+/** Viettel Post đã trả hàng về shop: đơn vẫn nằm ở mục Đang giao nhưng trạng thái hiện "Hoàn về". */
+function isVtpReturned(o) {
+  return !!o?.ship?.vtpCode && vtpKindOf(o) === 'returned' && o.status !== 'done';
+}
+function vtpStatusText(o) {
+  return isVtpReturned(o) ? 'Hoàn về' : o.ship?.vtpStatusName || 'Chờ lấy hàng';
 }
 function vtpNeedsAction(o) {
   return !!o.ship?.vtpCode && ['attention', 'returned'].includes(vtpKindOf(o)) && o.status !== 'done';
@@ -3480,7 +3515,7 @@ function vtpTagHtml(o) {
   }
   const kind = vtpKindOf(o);
   const cls = o.status === 'done' || kind === 'delivered' ? 'ship-tag-vtp-done' : vtpNeedsAction(o) ? 'ship-tag-vtp-bad' : 'ship-tag-vtp';
-  return `<span class="ship-tag ${cls}">VTP ${esc(code)} · ${esc(o.ship.vtpStatusName || 'Chờ lấy hàng')}</span>`;
+  return `<span class="ship-tag ${cls}">VTP ${esc(code)} · ${esc(vtpStatusText(o))}</span>`;
 }
 
 function renderVtpAttention() {
@@ -3493,7 +3528,7 @@ function renderVtpAttention() {
   $('#vtp-attention-title').textContent = `${codes.size} đơn cần xử lý`;
   $('#vtp-attention-sub').textContent = [...codes.values()]
     .slice(0, 3)
-    .map((o) => `${o.nickname || o.uniqueId}: ${o.ship.vtpStatusName || ''}`)
+    .map((o) => `${o.nickname || o.uniqueId}: ${vtpStatusText(o)}`)
     .join(' · ');
 }
 
@@ -3526,7 +3561,7 @@ function renderDetailVtp(ord) {
   box.className = `detail-vtp-box${bad ? ' is-bad' : ''}`;
   box.innerHTML = `
     <div class="vtp-line"><span>Mã vận đơn <span class="vtp-code">${esc(code)}</span></span>${ord.ship.vtpFee ? `<span>Cước ${vndText(ord.ship.vtpFee)}</span>` : ''}</div>
-    <div class="vtp-status">${bad ? 'Cần xử lý · ' : ''}${esc(ord.ship.vtpStatusName || 'Chờ lấy hàng')}${at ? ` <span class="vtp-note" style="font-weight:400">· ${esc(at)}</span>` : ''}</div>
+    <div class="vtp-status">${bad && !isVtpReturned(ord) ? 'Cần xử lý · ' : ''}${esc(vtpStatusText(ord))}${at ? ` <span class="vtp-note" style="font-weight:400">· ${esc(at)}</span>` : ''}</div>
     ${ord.ship.vtpNote ? `<div class="vtp-note">${esc(ord.ship.vtpNote)}</div>` : ''}
     <div class="vtp-actions">
       <button type="button" class="btn-outline-pill" data-vtp-act="print">In tem</button>
@@ -3679,14 +3714,24 @@ $('#btn-save-order-items')?.addEventListener('click', () => {
   const ord = state.orders.find((o) => o.id === currentDetailOrderId);
   if (ord) {
     // Dòng trống (chưa gõ tên, chưa gõ giá) thì bỏ; có giá mà quên tên thì gọi là "Sản phẩm".
-    ord.items = editingOrderItemsCopy
+    const items = editingOrderItemsCopy
       .filter((it) => String(it.name || '').trim() || it.price)
       .map((it) => ({ ...it, name: String(it.name || '').trim() || 'Sản phẩm' }));
-    ord.total = ord.items.reduce((s, x) => s + (x.price || 0) * (x.qty || 1), 0);
+    const sum = (list) => list.reduce((s, x) => s + (Number(x.price) || 0) * (Number(x.qty) || 1), 0);
+    const moneyChanged = sum(items) !== sum(ord.items || []);
+    // Đơn đã có vận đơn thì tiền thu hộ đã gửi Viettel Post: đổi món ở đây không đổi được số đó.
+    if (moneyChanged && ord.ship?.vtpCode && ord.status !== 'done') {
+      return toast(`Đơn đã có vận đơn ${ord.ship.vtpCode}, tiền thu hộ đã gửi Viettel Post. Huỷ vận đơn rồi mới sửa món.`, '⚠️', 5000);
+    }
+    ord.items = items;
+    ord.subtotal = sum(items);
+    ord.total = Math.max(0, ord.subtotal + (Number(ord.shippingFee) || 0) - (Number(ord.discount) || 0));
+    const codReset = moneyChanged && clearManualCod(ord);
     save('order_items_edited');
     openOrderDetailView(currentDetailOrderId);
     $('#modal-edit-order-items')?.close();
-    toast(`Đã cập nhật${syncedWord()} sản phẩm trong đơn!`, '✓');
+    if (codReset) toast(`Đơn của ${ord.nickname || ord.uniqueId} vừa đổi món: đã bỏ tiền thu hộ nhập tay, tính lại theo hàng mới`, 'ℹ️', 5000);
+    else toast(`Đã cập nhật${syncedWord()} sản phẩm trong đơn!`, '✓');
   }
 });
 
@@ -3728,7 +3773,8 @@ $('#btn-submit-create-order')?.addEventListener('click', () => {
     nickname: name,
     productName: prodName,
     price,
-    qty: 1
+    qty: 1,
+    forceNew: true
   });
 
   if (order) {

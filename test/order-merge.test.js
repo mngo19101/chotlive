@@ -79,3 +79,30 @@ test('gộp đơn trùng không kéo đơn đang giao vào đơn mới', async (
   assert.equal(store.mergeDuplicateOrders(), 0);
   assert.equal(store.state.orders.length, 2);
 });
+
+test('mỗi phiên live một đơn: món của phiên mới không nhập vào đơn gom từ phiên trước', async () => {
+  const held = order({ status: 'new', ship: { state: 'hold' }, items: [{ id: 'i1', commentId: 'c1', sessionId: 's_thu2', name: 'Mã 100', price: 100000, qty: 1 }] });
+  await load([held]);
+  const first = add({ sessionId: 's_thu4' });
+  assert.equal(first.isMerged, false);
+  assert.notEqual(first.order.id, 'o1');
+  assert.equal(store.state.orders.length, 2);
+  assert.equal(store.state.orders.find((o) => o.id === 'o1').items.length, 1);
+  // Món tiếp theo của cùng phiên vào chung đơn của phiên đó.
+  const second = add({ sessionId: 's_thu4', commentId: 'c3' });
+  assert.equal(second.isMerged, true);
+  assert.equal(second.order.id, first.order.id);
+  assert.equal(store.state.orders.length, 2);
+  // Bình luận đã lưu ở đơn phiên trước thì không lưu lại thành món mới.
+  const again = add({ sessionId: 's_thu4', commentId: 'c1' });
+  assert.equal(again.isDuplicate, true);
+  assert.equal(again.order.id, 'o1');
+  assert.equal(store.state.orders.length, 2);
+});
+
+test('tạo đơn tay luôn ra đơn mới, kể cả khi khách còn đơn đang mở', async () => {
+  await load([order()]);
+  const r = add({ commentId: '', forceNew: true });
+  assert.equal(r.isMerged, false);
+  assert.equal(store.state.orders.length, 2);
+});

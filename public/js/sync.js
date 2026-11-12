@@ -14,7 +14,9 @@ import {
   getPendingOwner,
   getPendingVersion,
   markPendingSynced,
-  pendingChangeCount
+  pendingChangeCount,
+  pendingChangesPayload,
+  takeShadowedRemote
 } from './store.js';
 
 const SERVER_URL_KEY = 'susu_sync_server_url';
@@ -218,6 +220,9 @@ function finishSynced(version) {
     offlineNoticeShown = false;
     notifyOffline('synced', count);
   }
+  // Lúc còn chờ gửi, máy này giữ bản của mình và bỏ qua phần thiết bị khác sửa trên cùng bản ghi:
+  // gửi xong thì tải lại bản của server để không giữ mãi bản cũ.
+  if (!pendingChangeCount() && takeShadowedRemote()) fetchInitialStateFromServer();
 }
 
 export function onSyncStatusChange(fn) {
@@ -298,14 +303,14 @@ function buildWsUrl(baseUrl) {
 function buildPayload(currentState) {
   // Bình luận và phiên live do server ghi. Thiết bị chỉ báo bình luận nào vừa được in;
   // gửi cả danh sách như trước sẽ ghi đè và làm mất bình luận của thiết bị khác.
-  const { serverUrl: _deviceOnly, ...settings } = currentState.settings || {};
+  // Đơn, khách và ID TikTok: chỉ gửi bản ghi máy này vừa đổi hoặc xoá (`changes`), không gửi cả danh sách.
+  // Gửi cả danh sách thì đơn điện thoại vừa thêm mà web chưa kịp nhận sẽ bị ghi đè mất trên server.
+  const { serverUrl: _deviceOnly, accounts: _tracked, ...settings } = currentState.settings || {};
   return {
     isCleanAccount: currentState.isCleanAccount,
-    orders: currentState.orders,
-    customers: currentState.customers,
+    changes: pendingChangesPayload(),
     comments: (currentState.comments || []).filter((c) => c.printed),
     sessions: currentState.sessions,
-    accounts: currentState.accounts,
     prints: currentState.prints,
     settings,
     salesMetrics: currentState.salesMetrics,

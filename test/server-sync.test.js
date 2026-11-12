@@ -386,6 +386,52 @@ test('app gửi đơn lên thì web nhận được, web sửa thì app nhận �
   app.close();
 });
 
+test('web chỉ gửi phần vừa đổi: đơn app vừa thêm mà web chưa thấy không bị ghi đè mất', async () => {
+  const web = await device().opened;
+  const app = await device({ native: true }).opened;
+  const ids = async () => (await api('/api/state')).body.state.orders.map((o) => o.id);
+  const sent = () => web.messages.filter((m) => m.type === 'sync_ack').length;
+
+  // Web tạo một đơn.
+  const mine = { id: 'o_web_only', code: 'W1', uniqueId: 'khach.web', nickname: 'Khách web', status: 'new', ts: Date.now(), items: [{ id: 'w1', name: 'Mã 1', price: 50000, qty: 1 }], total: 50000 };
+  web.send({ type: 'sync_update', clientId: 'web1', state: { changes: { orders: { upsert: [mine], remove: [] } } } });
+  await until(() => sent() === 1, 'web được xác nhận');
+  const before = await ids();
+  assert.ok(before.includes('o_web_only'));
+
+  // App thêm đơn của khách khác; web sửa đơn của mình dựa trên bản cũ, chưa hề thấy đơn của app.
+  app.send({
+    type: 'native_update',
+    id: 21,
+    customers: [{ id: 'khach.app', uniqueId: 'khach.app', userId: '', nickname: 'Khách app',
+      items: [{ id: 'cmt-app-9', comment: 'Chốt 90', price: 90000, ts: Date.now(), qty: 1, groupId: 'g9', commentId: 'cmt-app-9' }] }]
+  });
+  await until(() => app.messages.some((m) => m.type === 'native_ack' && m.id === 21), 'app được xác nhận');
+  web.send({ type: 'sync_update', clientId: 'web1', state: { changes: { orders: { upsert: [{ ...mine, status: 'printed' }], remove: [] } } } });
+  await until(() => sent() === 2, 'web được xác nhận lần hai');
+
+  const st = (await api('/api/state')).body.state;
+  assert.equal(st.orders.find((o) => o.id === 'o_web_only').status, 'printed');
+  assert.ok(st.orders.some((o) => o.uniqueId === 'khach.app'), 'đơn của app còn nguyên');
+  assert.equal(st.orders.length, before.length + 1);
+  assert.ok(st.customers.some((c) => c.uniqueId === 'khach.app'), 'khách của app còn nguyên');
+
+  // Web xoá đơn của mình: chỉ đơn đó mất.
+  web.send({ type: 'sync_update', clientId: 'web1', state: { changes: { orders: { upsert: [], remove: ['o_web_only'] } } } });
+  await until(() => sent() === 3, 'web được xác nhận lần ba');
+  const after = await ids();
+  assert.ok(!after.includes('o_web_only'));
+  assert.equal(after.length, before.length);
+
+  // Dữ liệu sai kiểu trong `changes` không làm hỏng danh sách.
+  web.send({ type: 'sync_update', clientId: 'web1', state: { changes: { orders: { upsert: [null, 5, { name: 'thiếu mã' }], remove: [null, {}] }, customers: 7 } } });
+  await until(() => sent() === 4, 'web được xác nhận lần bốn');
+  assert.deepEqual(await ids(), after);
+  await stillAlive();
+  web.close();
+  app.close();
+});
+
 test('địa chỉ server không bị đồng bộ sang thiết bị khác', async () => {
   const web = await device().opened;
   web.send({ type: 'sync_update', clientId: 'web1', state: { settings: { shopName: 'Shop A', serverUrl: 'http://localhost:3000' } } });

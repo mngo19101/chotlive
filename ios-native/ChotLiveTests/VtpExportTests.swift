@@ -55,6 +55,38 @@ final class VtpExportTests: XCTestCase {
         XCTAssertEqual(cod([line(150_000, ShipInfo(pay: "cod", payer: "sender", deposit: 140_000))]).cod, 27_000)
         // Nhập tay thắng số tự tính.
         XCTAssertEqual(cod([line(150_000, ShipInfo(pay: "cod", codOverride: 123_000))]).cod, 123_000)
+        // Nhập tay dưới 17.000đ: người gửi trả cước, cộng 17.000đ vào số đã nhập.
+        let low = cod([line(150_000, ShipInfo(pay: "cod", payer: "receiver", codOverride: 10_000))])
+        XCTAssertEqual(low.cod, 27_000)
+        XCTAssertEqual(low.shipFee, 17_000)
+        XCTAssertTrue(low.senderPays)
+        XCTAssertTrue(low.forcedSender)
+        // Đơn nhỏ đã cộng ship mà nhập tay đúng 27.000đ: giữ nguyên, không cộng lần nữa.
+        let kept = cod([line(10_000, ShipInfo(pay: "cod", codOverride: 27_000))])
+        XCTAssertEqual(kept.cod, 27_000)
+        XCTAssertTrue(kept.senderPays)
+        // Nhập tay đúng 17.000đ trở lên thì giữ người trả cước đã chọn.
+        XCTAssertFalse(cod([line(150_000, ShipInfo(pay: "cod", payer: "receiver", codOverride: 17_000))]).senderPays)
+    }
+
+    /// Có cước thật Viettel Post: thu hộ thấp hơn cước đó thì người gửi trả cước, cộng đúng cước đó vào thu hộ.
+    func testRealFeeRules() {
+        let cod = { (lines: [Vtp.Line], fee: Int?) in
+            Vtp.summarize(lines, address: self.address, nickname: "Lan", realFee: fee)
+        }
+        let near = [line(17_500, ShipInfo(pay: "cod", payer: "receiver"))]
+        XCTAssertFalse(cod(near, nil).senderPays)
+        let real = cod(near, 18_480)
+        XCTAssertTrue(real.senderPays)
+        XCTAssertEqual(real.shipFee, 18_480)
+        XCTAssertEqual(real.cod, 35_980)
+        XCTAssertTrue(real.feeIsReal)
+        XCTAssertEqual(cod([line(10_000, ShipInfo(pay: "cod"))], 18_480).cod, 28_480)
+        XCTAssertEqual(cod([line(150_000, ShipInfo(pay: "cod", payer: "receiver"))], 18_480).cod, 150_000)
+        XCTAssertEqual(cod([line(150_000, ShipInfo(pay: "cod", payer: "receiver", codOverride: 18_000))], 18_480).cod, 36_480)
+        // Cước thật rẻ hơn 17.000đ: ngưỡng vẫn là 17.000đ, tiền cộng vào là cước thật.
+        XCTAssertEqual(cod([line(16_900, ShipInfo(pay: "cod"))], 16_800).cod, 33_700)
+        XCTAssertEqual(cod([line(150_000, ShipInfo(pay: "paid", payer: "receiver"))], 18_480).cod, 18_480)
     }
 
     func testGroupsMergeReadyOrdersOfAllDaysAndRows() throws {

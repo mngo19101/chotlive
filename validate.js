@@ -34,6 +34,44 @@ export function cleanState(state) {
   return out;
 }
 
+const CHANGE_KEYS = ['orders', 'customers', 'accounts'];
+
+/**
+ * `changes` của web: với mỗi danh sách chỉ gồm các bản ghi vừa đổi (`upsert`) và mã bản ghi đã xoá (`remove`),
+ * thay cho cả danh sách. Nhờ vậy web không ghi đè đơn mà thiết bị khác vừa thêm trong lúc web chưa kịp nhận.
+ */
+export function cleanChanges(changes) {
+  const out = {};
+  if (!isObject(changes)) return out;
+  for (const key of CHANGE_KEYS) {
+    const c = changes[key];
+    if (!isObject(c)) continue;
+    out[key] = {
+      upsert: CLEANERS[key](c.upsert).filter((r) => r.id != null),
+      remove: onlyIds(c.remove).map(String)
+    };
+  }
+  return out;
+}
+
+/**
+ * Áp `{ upsert, remove }` vào danh sách đang có: bản ghi trùng mã thì thay tại chỗ, bản ghi mới thêm vào đầu
+ * (`append`: thêm vào cuối), mã trong `remove` thì bỏ. Bản ghi web không nhắc tới giữ nguyên.
+ */
+export function applyRecordChanges(list, change, { append = false } = {}) {
+  const remove = new Set(change.remove);
+  const fresh = new Map(change.upsert.map((r) => [String(r.id), r]));
+  const kept = [];
+  for (const cur of Array.isArray(list) ? list : []) {
+    const id = String(cur?.id);
+    if (remove.has(id)) continue;
+    kept.push(fresh.get(id) || cur);
+    fresh.delete(id);
+  }
+  const added = [...fresh.values()].filter((r) => !remove.has(String(r.id)));
+  return append ? [...kept, ...added] : [...added, ...kept];
+}
+
 /** Dữ liệu `native_update` từ app iOS. */
 export function cleanNativeUpdate(update) {
   const out = { ...update };

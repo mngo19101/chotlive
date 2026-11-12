@@ -82,6 +82,8 @@ enum Vtp {
         var forcedSender = false
         /// Phí ship đã cộng vào thu hộ (đơn nhỏ / bank đủ mà người nhận trả ship).
         var shipFee = 0
+        /// `shipFee` là cước thật Viettel Post báo (true) hay còn tạm tính theo 17.000đ (false).
+        var feeIsReal = false
         var deposit = 0
         var autoCod = 0
         var codOverridden = false
@@ -104,7 +106,9 @@ enum Vtp {
     }
 
     /// `lines` cũ nhất trước: cài đặt của đơn mới nhất thắng, giống web.
-    static func summarize(_ lines: [Line], address: DeliveryAddress?, nickname: String) -> Summary {
+    /// `realFee`: cước thật Viettel Post vừa báo cho nháp này. Có thì đơn thu hộ thấp hơn cước đó chuyển
+    /// người gửi trả cước và cộng đúng cước đó vào thu hộ; chưa có thì tạm tính theo 17.000đ.
+    static func summarize(_ lines: [Line], address: DeliveryAddress?, nickname: String, realFee: Int? = nil) -> Summary {
         var s = Summary()
         // "shipOnly": dữ liệu cũ của web, coi như đã bank.
         let goodsPaid = { (l: Line) in l.ship?.pay == "paid" || l.ship?.pay == "shipOnly" }
@@ -113,24 +117,36 @@ enum Vtp {
         let unpaidRaw = lines.filter { !goodsPaid($0) }.reduce(0) { $0 + max(0, $1.total) }
         s.deposit = min(unpaidRaw, lines.reduce(0) { $0 + max(0, $1.ship?.deposit ?? 0) })
         let unpaid = unpaidRaw - s.deposit
-        let fee = last(lines) { $0.shipFee } ?? smallOrderShipFee
+        s.feeIsReal = (realFee ?? 0) > 0
+        let fee = s.feeIsReal ? realFee! : (last(lines) { $0.shipFee } ?? smallOrderShipFee)
+        // Ngưỡng "đơn nhỏ": thu hộ thấp hơn tiền ship. Không thấp hơn 17.000đ, vì dưới mức đó Viettel Post
+        // từ chối đơn người nhận trả cước dù cước thật có rẻ hơn.
+        let limit = max(smallOrderLimit, fee)
         let payerRaw = last(lines) { ($0.payer ?? "").isEmpty ? nil : $0.payer }
         let payer = payerRaw == "sender" || payerRaw == "receiver" ? payerRaw! : (s.allPaid ? "sender" : "receiver")
         let override = last(lines) { $0.codOverride }
 
         // Đơn thu hộ dưới 17.000đ: Viettel Post báo lỗi nếu người nhận trả cước, nên luôn xuất
         // người gửi trả và khách trả lại phí ship qua tiền thu hộ, kể cả khi bảng chọn người nhận.
-        let small = !s.allPaid && unpaid < smallOrderLimit
+        let small = !s.allPaid && unpaid < limit
         // Đã bank đủ mà người nhận trả ship: Viettel Post báo lỗi khi COD 0đ + người nhận trả,
         // nên xuất thành người gửi trả cước và thu hộ đúng phí ship.
         let bankShipByReceiver = s.allPaid && payer == "receiver"
-        s.senderPays = payer == "sender" || bankShipByReceiver || small
+        // Tiền thu hộ nhập tay cũng theo đúng quy tắc đó: số nhập dưới 17.000đ thì người gửi trả cước
+        // và cộng phí ship vào số đã nhập, để khách nhận hàng trả đủ cả tiền ship.
+        let overrideSmall = !s.allPaid && override.map { $0 < limit } == true
+        s.senderPays = payer == "sender" || bankShipByReceiver || small || overrideSmall
         s.forcedSender = payer == "receiver" && s.senderPays
         let addFee = bankShipByReceiver || small
         s.autoCod = (s.allPaid ? 0 : unpaid) + (addFee ? fee : 0)
-        s.cod = override ?? s.autoCod
+        if let override {
+            s.cod = overrideSmall ? override + fee : override
+            s.shipFee = overrideSmall ? fee : 0
+        } else {
+            s.cod = s.autoCod
+            s.shipFee = addFee ? fee : 0
+        }
         s.codOverridden = override != nil
-        s.shipFee = override == nil && addFee ? fee : 0
         s.weightG = lines.compactMap { $0.ship?.weightG }.filter { $0 > 0 }.max() ?? defaultWeightG
         s.qty = lines.reduce(0) { $0 + $1.qty }
         if let l = last(lines, { $0.lengthCm }), let w = last(lines, { $0.widthCm }), let h = last(lines, { $0.heightCm }),
@@ -170,6 +186,8 @@ enum Vtp {
         var orders: [Order]
         var recentExported: [Order]
         var summary: Summary
+        /// Bản tạm tính (chưa cộng cước thật): chữ ký hỏi cước lấy từ đây để không đổi khi cước thật được áp vào.
+        var baseSummary: Summary? = nil
 
         var id: String { customer.id }
         var isBad: Bool { !summary.problems.isEmpty }

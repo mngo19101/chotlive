@@ -34,7 +34,7 @@ import { parsePrice, extractProductInfo } from './public/js/price.js';
 import { LiveManager, liveKey } from './live-manager.js';
 import { createLimiter, waitMessage } from './rate-limit.js';
 import { createTelegramBridge } from './telegram.js';
-import { cleanNativeUpdate, cleanState, isObject } from './validate.js';
+import { applyRecordChanges, cleanChanges, cleanNativeUpdate, cleanState, isObject } from './validate.js';
 import {
   MAX_STATE_BYTES,
   MAX_UNAUTHENTICATED_WS_BYTES,
@@ -1765,14 +1765,25 @@ function applyIncomingStateForUser(userId, rawIncoming, action = 'update', clien
   const demoCommentIds = new Set(initialComments.map((c) => c.id));
   const demoAccIds = new Set((DEFAULT_SETTINGS.accounts || []).map((a) => a.id));
 
+  // Web bản mới chỉ gửi bản ghi vừa đổi (`changes`); bản cũ gửi cả danh sách thì vẫn nhận như trước.
+  const changes = cleanChanges(rawIncoming?.changes);
+  const withoutDemo = (change, demoIds) =>
+    isClean ? { ...change, upsert: change.upsert.filter((r) => !demoIds.has(r.id)) } : change;
+
   return mutateState(userId, action, clientId, excludeWs, (targetState) => {
     if (Array.isArray(incoming.orders)) {
       const orders = isClean ? incoming.orders.filter((o) => !demoOrderIds.has(o.id)) : incoming.orders;
       // Web gửi cả danh sách đơn: phần vận đơn Viettel Post do máy chủ ghi thì giữ bản của máy chủ.
       targetState.orders = vtp.keepServerVtp(targetState.orders, orders);
+    } else if (changes.orders) {
+      // Chỉ đơn web vừa đổi mới bị thay; đơn app vừa thêm mà web chưa thấy thì còn nguyên.
+      const orders = applyRecordChanges(targetState.orders, withoutDemo(changes.orders, demoOrderIds));
+      targetState.orders = vtp.keepServerVtp(targetState.orders, orders);
     }
     if (Array.isArray(incoming.customers)) {
       targetState.customers = isClean ? incoming.customers.filter((c) => !demoCustIds.has(c.id)) : incoming.customers;
+    } else if (changes.customers) {
+      targetState.customers = applyRecordChanges(targetState.customers, withoutDemo(changes.customers, demoCustIds));
     }
     if (Array.isArray(incoming.comments)) {
       mergeIncomingComments(userId, targetState, isClean ? incoming.comments.filter((c) => !demoCommentIds.has(c?.id)) : incoming.comments);
@@ -1783,6 +1794,8 @@ function applyIncomingStateForUser(userId, rawIncoming, action = 'update', clien
     }
     if (Array.isArray(incoming.accounts)) {
       targetState.accounts = isClean ? incoming.accounts.filter((a) => !demoAccIds.has(a.id)) : incoming.accounts;
+    } else if (changes.accounts) {
+      targetState.accounts = applyRecordChanges(targetState.accounts, withoutDemo(changes.accounts, demoAccIds), { append: true });
     }
     if (Array.isArray(incoming.prints)) targetState.prints = incoming.prints.slice(0, 100);
     if (incoming.settings && typeof incoming.settings === 'object') {

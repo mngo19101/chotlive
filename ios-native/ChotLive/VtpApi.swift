@@ -111,7 +111,7 @@ struct VtpQuote: Equatable {
 
     /// Chữ ký của nháp: đổi địa chỉ, tiền, cân nặng hay gói thì hỏi lại cước.
     static func signature(_ g: Vtp.Group, service: String) -> String {
-        let s = g.summary
+        let s = g.baseSummary ?? g.summary
         let size = s.size.map { "\($0.0)x\($0.1)x\($0.2)" } ?? ""
         return [g.id, s.address.line, "\(s.cod)", "\(s.goods)", "\(s.weightG)", size, service].joined(separator: "|")
     }
@@ -138,6 +138,11 @@ enum VtpTrack {
         code(o) != nil && ["attention", "returned"].contains(kind(o)) && o.status != .delivered
     }
 
+    /// Viettel Post đã trả hàng về shop: đơn vẫn nằm ở tab Đang giao nhưng trạng thái hiện "Hoàn về".
+    static func isReturned(_ o: Order) -> Bool {
+        code(o) != nil && kind(o) == "returned" && o.status != .delivered
+    }
+
     /// Huỷ được khi bưu tá chưa lấy hàng.
     static func canCancel(_ o: Order) -> Bool {
         guard code(o) != nil, o.status != .delivered else { return false }
@@ -148,6 +153,7 @@ enum VtpTrack {
 
     static func statusName(_ o: Order) -> String {
         if o.status == .delivered { return o.ship?.vtpStatusName ?? "Giao thành công" }
+        if isReturned(o) { return "Hoàn về" }
         let name = o.ship?.vtpStatusName ?? ""
         return name.isEmpty ? "Chờ lấy hàng" : name
     }

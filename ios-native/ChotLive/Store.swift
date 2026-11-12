@@ -212,7 +212,7 @@ final class Store: ObservableObject {
     func saveToCustomer(_ c: LiveComment) -> [OrderItem] {
         let key = Self.key(uniqueId: c.uniqueId, userId: c.userId)
         let tokens = c.price > 0 ? PriceParser.orderTokens(c.text) : []
-        let items: [OrderItem]
+        var items: [OrderItem]
         if tokens.count > 1 {
             items = tokens.enumerated().map { i, t in
                 OrderItem(id: i == 0 ? c.id : "\(c.id)#\(i + 1)", comment: c.text, price: t.price, ts: c.ts,
@@ -227,7 +227,11 @@ final class Store: ObservableObject {
         if let idx = customers.firstIndex(where: { $0.id == key || (!c.userId.isEmpty && $0.userId == c.userId) }) {
             let existing = customers[idx].items.filter { ($0.commentId ?? $0.id) == c.id }
             if !existing.isEmpty { return existing }
+            // Đơn của phiên này đã gửi đi thì món mới phải sang đơn khác (xem `openGroupId`).
+            let group = openGroupId(of: customers[idx], sessionId: c.sessionId)
+            if group != c.sessionId { for i in items.indices { items[i].groupId = group } }
             customers[idx].items.append(contentsOf: items)
+            clearManualCod(customerIndex: idx)
             if customers[idx].userId.isEmpty { customers[idx].userId = c.userId }
             if !c.nickname.isEmpty { customers[idx].nickname = c.nickname }
         } else {
@@ -238,9 +242,44 @@ final class Store: ObservableObject {
         return items
     }
 
+    /// Nhóm (đơn) nhận món mới của một phiên live. Bình thường là đơn của chính phiên đó. Đơn ấy đã gửi đi
+    /// (đang giao, đã giao, đã xuất, đã có vận đơn) thì gói hàng và tiền thu hộ đã chốt: món chốt thêm
+    /// vào đơn còn mở khác của phiên, chưa có thì mở đơn mới, để món đó vẫn được duyệt, gửi và thu tiền.
+    private func openGroupId(of customer: Customer, sessionId: String?) -> String? {
+        guard let sessionId else { return nil }
+        let mine = orders(of: customer).filter { o in o.items.contains { $0.sessionId == sessionId && $0.groupId != nil } }
+        guard !mine.isEmpty else { return sessionId }
+        let open = mine.filter { Vtp.state($0).isPending && ($0.ship?.vtpCode ?? "").isEmpty }
+        if open.contains(where: { $0.key == sessionId }) { return sessionId }
+        if let group = open.first?.items.compactMap(\.groupId).first { return group }
+        return sessionId + "~" + UUID().uuidString.prefix(8).lowercased()
+    }
+
+    /// Tên khách vừa bị bỏ số thu hộ nhập tay vì đơn đổi món; màn hình đọc một lần để báo.
+    private var codResetName: String?
+
+    func takeCodResetNotice() -> String? {
+        defer { codResetName = nil }
+        return codResetName.map { "Đơn của \($0) vừa đổi món: đã bỏ tiền thu hộ nhập tay, tính lại theo hàng mới." }
+    }
+
+    /// Tiền thu hộ nhập tay là cho gói hàng cũ. Đơn chưa gửi của khách đổi món (thêm, sửa giá, bớt) thì bỏ số đó
+    /// ở mọi đơn chưa gửi của khách, để thu hộ tính lại theo hàng mới, giống web.
+    private func clearManualCod(customerIndex idx: Int) {
+        let pending = Set(orders(of: customers[idx]).filter { Vtp.state($0).isPending }.flatMap { $0.items.map(\.id) })
+        var cleared = false
+        for ii in customers[idx].items.indices
+        where pending.contains(customers[idx].items[ii].id) && customers[idx].items[ii].ship?.codOverride != nil {
+            customers[idx].items[ii].ship?.codOverride = nil
+            cleared = true
+        }
+        if cleared { codResetName = customers[idx].displayName }
+    }
+
     func deleteItem(customerId: String, itemId: String) {
         guard let idx = customers.firstIndex(where: { $0.id == customerId }) else { return }
         customers[idx].items.removeAll { $0.id == itemId }
+        clearManualCod(customerIndex: idx)
         if customers[idx].items.isEmpty { customers.remove(at: idx) }
         touchCustomer(customerId, deletedItems: [itemId])
         save()
@@ -261,6 +300,7 @@ final class Store: ObservableObject {
         let ids = Set(o.items.map(\.id))
         customers[idx].items.removeAll { ids.contains($0.id) }
         customers[idx].items.append(contentsOf: edited)
+        if edited.reduce(0, { $0 + $1.lineTotal }) != o.total { clearManualCod(customerIndex: idx) }
         if customers[idx].items.isEmpty { customers.remove(at: idx) }
         touchCustomer(o.customer.id, deletedItems: ids.subtracting(edited.map(\.id)))
         save()

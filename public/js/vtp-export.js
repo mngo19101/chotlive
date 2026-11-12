@@ -129,8 +129,12 @@ const lastShipField = (orders, key) => {
 };
 const moneyOrNull = (v) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? null : Math.max(0, Math.round(Number(v))));
 
-/** Tiền, cân nặng, cách trả cước và địa chỉ của một vận đơn gộp. */
-export function summarizeGroup({ orders, customer }) {
+/**
+ * Tiền, cân nặng, cách trả cước và địa chỉ của một vận đơn gộp.
+ * `realFee`: cước thật Viettel Post vừa báo cho nháp này (bước tính cước). Có thì đơn thu hộ thấp hơn cước
+ * đó chuyển người gửi trả cước và cộng đúng cước đó vào thu hộ; chưa có thì tạm tính theo 17.000đ.
+ */
+export function summarizeGroup({ orders, customer }, { realFee = null } = {}) {
   // Đơn đã bank đủ hoặc chỉ còn thiếu ship thì không thu tiền hàng nữa.
   const goodsPaid = (o) => o.ship?.pay === 'paid' || o.ship?.pay === 'shipOnly'; // 'shipOnly': dữ liệu cũ, coi như đã bank
   const allPaid = orders.length > 0 && orders.every(goodsPaid);
@@ -138,25 +142,32 @@ export function summarizeGroup({ orders, customer }) {
   const unpaidRaw = orders.filter((o) => !goodsPaid(o)).reduce((s, o) => s + goodsTotal(o), 0);
   const deposit = Math.min(unpaidRaw, orders.reduce((s, o) => s + (moneyOrNull(o.ship?.deposit) || 0), 0));
   const unpaid = unpaidRaw - deposit;
-  const fee = moneyOrNull(lastShipField(orders, 'shipFee')) ?? SMALL_ORDER_SHIP_FEE;
+  const quoted = moneyOrNull(realFee);
+  const feeIsReal = quoted !== null && quoted > 0;
+  const fee = feeIsReal ? quoted : moneyOrNull(lastShipField(orders, 'shipFee')) ?? SMALL_ORDER_SHIP_FEE;
+  // Ngưỡng "đơn nhỏ": thu hộ thấp hơn tiền ship. Không thấp hơn 17.000đ, vì dưới mức đó Viettel Post
+  // từ chối đơn người nhận trả cước dù cước thật có rẻ hơn.
+  const limit = Math.max(SMALL_ORDER_LIMIT, fee);
   const payerRaw = lastShipField(orders, 'payer');
   // Không chọn thì người nhận trả; riêng đơn đã bank đủ / chỉ thiếu ship (dữ liệu cũ) shop trả.
   const payer = payerRaw === 'sender' || payerRaw === 'receiver' ? payerRaw : allPaid ? 'sender' : 'receiver';
   const override = moneyOrNull(lastShipField(orders, 'codOverride'));
 
-  // Đơn thu hộ dưới 17.000đ (kể cả đơn 0đ) mà shop trả cước: khách trả lại phí ship qua tiền thu hộ.
-  const small = !allPaid && unpaid < SMALL_ORDER_LIMIT;
+  // Đơn thu hộ thấp hơn tiền ship (kể cả đơn 0đ): shop trả cước, khách trả lại tiền ship đó qua tiền thu hộ.
+  const small = !allPaid && unpaid < limit;
   // Đã bank đủ mà chọn người nhận trả ship: Viettel Post báo lỗi khi COD 0đ + người nhận trả,
-  // nên xuất thành người gửi trả cước và thu hộ đúng phí ship (17.000đ) của khách.
+  // nên xuất thành người gửi trả cước và thu hộ đúng tiền ship của khách.
   const bankShipByReceiver = allPaid && payer === 'receiver';
-  // Đơn dưới 17.000đ: Viettel Post báo lỗi nếu người nhận trả cước, nên luôn xuất người gửi trả
-  // và cộng phí ship vào thu hộ, kể cả khi bảng Duyệt đơn chọn người nhận trả.
-  const senderPays = payer === 'sender' || bankShipByReceiver || small;
+  // Đơn nhỏ luôn xuất người gửi trả và cộng tiền ship vào thu hộ, kể cả khi bảng Duyệt đơn chọn người nhận trả.
+  // Tiền thu hộ nhập tay cũng theo đúng quy tắc đó: số nhập thấp hơn tiền ship thì người gửi trả cước
+  // và cộng tiền ship vào số đã nhập, để khách nhận hàng trả đủ cả tiền ship shop đã trả.
+  const overrideSmall = !allPaid && override !== null && override < limit;
+  const senderPays = payer === 'sender' || bankShipByReceiver || small || overrideSmall;
   const forcedSender = payer === 'receiver' && senderPays;
   const addFee = bankShipByReceiver || small;
   const autoCod = (allPaid ? 0 : unpaid) + (addFee ? fee : 0);
-  const cod = override ?? autoCod;
-  const shipFee = override === null && addFee ? fee : 0;
+  const cod = override === null ? autoCod : overrideSmall ? override + fee : override;
+  const shipFee = override === null ? (addFee ? fee : 0) : overrideSmall ? fee : 0;
   const weightG = Math.max(...orders.map((o) => Number(o.ship?.weightG) || 0), 0) || DEFAULT_WEIGHT_G;
   const dims = ['lengthCm', 'widthCm', 'heightCm'].map((k) => moneyOrNull(lastShipField(orders, k)));
   const size = dims.every((v) => v > 0) ? dims : null;
@@ -179,6 +190,7 @@ export function summarizeGroup({ orders, customer }) {
     senderPays,
     forcedSender,
     shipFee,
+    feeIsReal,
     deposit,
     autoCod,
     codOverridden: override !== null,

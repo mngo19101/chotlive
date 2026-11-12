@@ -805,7 +805,11 @@ struct CustomerDetailView: View {
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 3) {
                 T(money(o.total), 14, .heavy).lineLimit(1).fixedSize()
-                StatusBadge(status: o.status)
+                if VtpTrack.isReturned(o) {
+                    Badge(text: "Hoàn về", color: Theme.red, fill: Theme.redSoft)
+                } else {
+                    StatusBadge(status: o.status)
+                }
             }
         }
         .padding(.vertical, 8)

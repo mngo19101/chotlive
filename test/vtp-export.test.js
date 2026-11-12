@@ -4,6 +4,7 @@ import {
   buildVtpRows,
   buildVtpXlsx,
   groupByCustomer,
+  summarizeGroup,
   olderPendingOf,
   shipStateOf
 } from '../public/js/vtp-export.js';
@@ -297,6 +298,30 @@ test('khách cọc trừ vào COD, nhập tay COD, chọn người trả cước
   assert.equal(buildVtpRows([g4])[7][18], 'Người gửi trả');
 });
 
+test('thu hộ nhập tay dưới 17.000đ: người gửi trả cước, cộng 17.000đ vào số đã nhập', () => {
+  // Hàng 150.000đ, nhập tay thu hộ 10.000đ, chọn người nhận trả: xuất người gửi trả, khách trả 27.000đ.
+  const low = order({ ship: { state: 'ready', pay: 'cod', codOverride: 10000, payer: 'receiver' } });
+  const g = groupByCustomer([low], [customer], 'ready')[0];
+  assert.equal(g.cod, 27000);
+  assert.equal(g.shipFee, 17000);
+  assert.equal(g.senderPays, true);
+  assert.equal(g.forcedSender, true);
+  assert.equal(buildVtpRows([g])[7][18], 'Người gửi trả');
+  // Nhập tay 0đ cũng vậy: khách trả đúng tiền ship.
+  const zero = order({ ship: { state: 'ready', pay: 'cod', codOverride: 0, payer: 'sender' } });
+  assert.equal(groupByCustomer([zero], [customer], 'ready')[0].cod, 17000);
+  // Đơn nhỏ đã cộng ship (10.000 + 17.000) mà nhập tay đúng 27.000đ: giữ nguyên, không cộng lần nữa.
+  const kept = order({ items: [{ name: 'Mã 1', price: 10000, qty: 1 }], ship: { state: 'ready', pay: 'cod', codOverride: 27000 } });
+  const gk = groupByCustomer([kept], [customer], 'ready')[0];
+  assert.equal(gk.cod, 27000);
+  assert.equal(gk.senderPays, true);
+  // Nhập tay đúng 17.000đ trở lên thì giữ nguyên người trả cước đã chọn.
+  const edge = order({ ship: { state: 'ready', pay: 'cod', codOverride: 17000, payer: 'receiver' } });
+  const ge = groupByCustomer([edge], [customer], 'ready')[0];
+  assert.equal(ge.cod, 17000);
+  assert.equal(ge.senderPays, false);
+});
+
 test('đơn hôm nay kéo theo đơn đã duyệt của ngày trước khi xuất, khách không có đơn hôm nay thì không', () => {
   const old = order({ id: 'old', ts: 100, ship: { state: 'ready', pay: 'cod' } });
   const today = order({ id: 'today', ts: 900, ship: { state: 'ready', pay: 'cod' } });
@@ -316,4 +341,35 @@ test('hàng từ 10kg: kích thước dài/rộng/cao ghi vào cột Dài, Rộn
   const row = buildVtpRows([g])[7];
   assert.deepEqual(row.slice(15, 18), [50, 40, 30]);
   assert.equal(row[7], 12000);
+});
+
+test('có cước thật Viettel Post: thu hộ thấp hơn cước đó thì người gửi trả cước, cộng đúng cước đó vào thu hộ', () => {
+  const sum = (o, realFee) => summarizeGroup({ orders: [o], customer }, { realFee });
+  // Hàng 17.500đ, cước thật 18.480đ: thấp hơn cước nên người gửi trả, khách trả 17.500 + 18.480.
+  const near = order({ items: [{ name: 'Mã 1', price: 17500, qty: 1 }], ship: { state: 'ready', pay: 'cod', payer: 'receiver' } });
+  assert.equal(sum(near).senderPays, false); // chưa có cước thật: tạm tính theo 17.000đ, chưa đổi
+  const real = sum(near, 18480);
+  assert.equal(real.senderPays, true);
+  assert.equal(real.forcedSender, true);
+  assert.equal(real.shipFee, 18480);
+  assert.equal(real.cod, 35980);
+  assert.equal(real.feeIsReal, true);
+  // Hàng 10.000đ: cộng cước thật, không còn cộng 17.000đ cố định.
+  const small = order({ items: [{ name: 'Mã 1', price: 10000, qty: 1 }], ship: { state: 'ready', pay: 'cod' } });
+  assert.equal(sum(small).cod, 27000);
+  assert.equal(sum(small, 18480).cod, 28480);
+  // Hàng cao hơn cước thật: không đổi gì.
+  const big = order({ ship: { state: 'ready', pay: 'cod', payer: 'receiver' } });
+  assert.equal(sum(big, 18480).cod, 150000);
+  assert.equal(sum(big, 18480).senderPays, false);
+  // Thu hộ nhập tay thấp hơn cước thật: cộng cước thật vào số đã nhập.
+  const manual = order({ ship: { state: 'ready', pay: 'cod', payer: 'receiver', codOverride: 18000 } });
+  assert.equal(sum(manual, 18480).cod, 36480);
+  assert.equal(sum(manual, 18480).senderPays, true);
+  // Cước thật rẻ hơn 17.000đ: ngưỡng vẫn là 17.000đ, tiền cộng vào là cước thật.
+  const cheap = order({ items: [{ name: 'Mã 1', price: 16900, qty: 1 }], ship: { state: 'ready', pay: 'cod' } });
+  assert.equal(sum(cheap, 16800).cod, 33700);
+  // Đã bank đủ, người nhận trả ship: thu hộ đúng cước thật.
+  const bank = order({ ship: { state: 'ready', pay: 'paid', payer: 'receiver' } });
+  assert.equal(sum(bank, 18480).cod, 18480);
 });

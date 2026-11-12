@@ -255,6 +255,11 @@ private struct StatusTab: View {
 
 @MainActor
 func confirmDelete(_ o: Order, store: Store, ui: AppUI, then: @escaping () -> Void = {}) {
+    // Vận đơn còn hiệu lực mà xoá đơn thì bưu tá vẫn tới lấy hàng, app lại không còn gì để theo dõi.
+    if let code = VtpTrack.code(o), o.status != .delivered {
+        ui.notify("Đơn đang có vận đơn \(VtpTrack.pretty(code)). Huỷ vận đơn ở chi tiết đơn trước rồi mới xoá đơn.")
+        return
+    }
     ui.confirm = ConfirmItem(title: "Xoá đơn của \(o.customer.displayName)?",
                              message: "Không thể khôi phục sau khi xoá.", action: "Xoá đơn") {
         store.deleteOrder(o)
@@ -585,7 +590,16 @@ struct OrderEditView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             PrimaryButton(title: items.isEmpty ? "Lưu (đơn sẽ bị xoá)" : "Lưu đơn · \(money(items.reduce(0) { $0 + $1.lineTotal }))") {
-                if let o = order { store.updateOrder(o, items: items) }
+                if let o = order {
+                    // Đơn đã có vận đơn thì tiền thu hộ đã gửi Viettel Post: đổi món ở đây không đổi được số đó.
+                    if let code = VtpTrack.code(o), o.status != .delivered,
+                       items.reduce(0, { $0 + $1.lineTotal }) != o.total {
+                        ui.notify("Đơn đã có vận đơn \(VtpTrack.pretty(code)), tiền thu hộ đã gửi Viettel Post. Huỷ vận đơn ở chi tiết đơn rồi mới sửa món.")
+                        return
+                    }
+                    store.updateOrder(o, items: items)
+                    ui.notify(store.takeCodResetNotice())
+                }
                 ui.pop()
             }
             .padding(.horizontal, Metrics.gutter)

@@ -366,3 +366,37 @@ test('app đổi tên khách: tên người nhận còn là tên cũ thì đổi
   assert.equal(st.customers[0].name, 'Trí Minh');
   assert.equal(st.customers[0].receiver, 'Mẹ Lan');
 });
+
+test('món chốt thêm sau khi đơn đã có vận đơn: sang đơn mới, đơn đã gửi giữ nguyên', () => {
+  const st = baseState();
+  st.orders[0].status = 'shipping';
+  st.orders[0].ship = { state: 'exported', vtpCode: 'VTP123456' };
+  const customer = (items) => ({ customers: [{ id: 'linh.nguyen', uniqueId: 'Linh.Nguyen', userId: '71928419201', nickname: 'Linh', items }] });
+  const item = (id) => ({ id, comment: 'chốt 90', price: 90000, ts: 1794000100000, groupId: 'o_web' });
+
+  applyNativeUpdate(st, customer([item('it_2')]));
+  assert.equal(st.orders.length, 2);
+  const sent = st.orders.find((o) => o.id === 'o_web');
+  const extra = st.orders.find((o) => o.id !== 'o_web');
+  assert.deepEqual(sent.items.map((i) => i.id), ['it_1']);
+  assert.equal(sent.status, 'shipping');
+  assert.equal(sent.ship.vtpCode, 'VTP123456');
+  assert.deepEqual(extra.items.map((i) => i.id), ['it_2']);
+  assert.equal(extra.status, 'new');
+  assert.equal(extra.ship, undefined);
+
+  // Món chốt thêm tiếp theo của cùng nhóm vào chung đơn mới, không tạo thêm đơn.
+  applyNativeUpdate(st, customer([item('it_3')]));
+  assert.equal(st.orders.length, 2);
+  assert.deepEqual(extra.items.map((i) => i.id), ['it_2', 'it_3']);
+
+  // App nhận lại: món mới mang nhóm của đơn mới nên không bị gộp vào đơn đã gửi.
+  const groups = Object.fromEntries(toNativeSnapshot(st).customers[0].items.map((i) => [i.id, i.groupId]));
+  assert.equal(groups.it_1, 'o_web');
+  assert.equal(groups.it_2, extra.id);
+  assert.equal(groups.it_3, extra.id);
+
+  // Gửi lại đúng các món đó (app gửi lại cả khách) không sinh thêm đơn.
+  applyNativeUpdate(st, customer([{ ...item('it_2'), groupId: extra.id }, { ...item('it_3'), groupId: extra.id }]));
+  assert.equal(st.orders.length, 2);
+});
