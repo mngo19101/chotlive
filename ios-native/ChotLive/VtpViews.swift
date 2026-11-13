@@ -515,7 +515,20 @@ struct VtpOrderBox: View {
             .buttonStyle(.plain)
 
             VStack(spacing: 8) {
-                line("Thu hộ (COD)", money(VtpTrack.waybillCod(mates)))
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    T("Thu hộ (COD)", 13, .medium, Theme.muted)
+                    if mates.contains(where: { $0.ship?.codOverride != nil }) {
+                        HStack(spacing: 3) {
+                            Icon(name: .pencil, size: 9, weight: 2.4, color: Theme.accent)
+                            T("đã sửa", 11, .semibold, Theme.accent)
+                        }
+                        .padding(.horizontal, 7)
+                        .frame(height: 20)
+                        .background(Capsule().fill(Theme.peachSoft))
+                    }
+                    Spacer(minLength: 10)
+                    T(money(VtpTrack.waybillCod(mates)), 13, .semibold).lineLimit(1)
+                }
                 if mates.count > 1 {
                     line("Gộp", "\(mates.count) đơn · \(money(mates.reduce(0) { $0 + $1.total })) tiền hàng")
                 }

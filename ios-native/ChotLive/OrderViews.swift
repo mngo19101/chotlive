@@ -351,6 +351,45 @@ struct OrderActionSheet: View {
 
 // MARK: - Chi tiết đơn hàng
 
+/// Ô tổng khi tiền thu hộ đã sửa tay ở nháp: dòng nhỏ tiền hàng gốc, ô viền to là số shipper sẽ thu.
+private struct EditedCodTotal: View {
+    let goodsLabel: String
+    let goods: Int
+    let codLabel: String
+    let cod: Int
+    let fill: Color
+    let ring: Color
+    let tagColor: Color
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                T(goodsLabel, 13, .semibold, Theme.muted)
+                Spacer()
+                T(money(goods), 13, .semibold, Theme.muted).lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 9)
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    T(codLabel, 14, .semibold).lineLimit(1)
+                    HStack(spacing: 3) {
+                        Icon(name: .pencil, size: 10, weight: 2.4, color: tagColor)
+                        T("Đã sửa ở nháp", 11, .semibold, tagColor)
+                    }
+                }
+                Spacer()
+                T(money(cod), 18, .heavy, Theme.ink, track: -0.4).lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(fill))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(ring, lineWidth: 2))
+            .padding(.top, 7)
+        }
+    }
+}
+
 /// Một dòng sản phẩm ở chi tiết đơn, kèm đơn chứa nó (vận đơn gộp nhiều đơn).
 private struct ProductRow: Identifiable {
     let order: Order
@@ -372,12 +411,13 @@ struct OrderDetailView: View {
         }) {
             if let o = order {
                 ScrollView(showsIndicators: false) {
+                    let others = Vtp.state(o).isPending
+                        ? Vtp.pendingOrders(of: o.customer.id, in: store.allOrders()).filter { $0.id != o.id } : []
                     VStack(spacing: Metrics.gap) {
                         customerCard(o)
-                        productsCard(o)
+                        // Đơn còn gom chung với đơn khác: số thu hộ sửa tay là của cả nhóm, hiện ở thẻ gom.
+                        productsCard(o, showCod: VtpTrack.code(o) != nil || others.isEmpty)
                         VtpOrderBox(order: o)
-                        let others = Vtp.state(o).isPending
-                            ? Vtp.pendingOrders(of: o.customer.id, in: store.allOrders()).filter { $0.id != o.id } : []
                         if !others.isEmpty { gomCard(o, others) }
                     }
                     .padding(.horizontal, Metrics.gutter)
@@ -423,8 +463,11 @@ struct OrderDetailView: View {
     }
 
     /// Đơn chung một vận đơn với đơn khác: hiện đủ sản phẩm của cả vận đơn, chia theo từng đơn.
-    private func productsCard(_ o: Order) -> some View {
+    /// Tiền thu hộ sửa tay ở nháp (khác tiền hàng) thì ô to hiện số thu hộ đó, tiền hàng lùi xuống dòng nhỏ phía trên.
+    private func productsCard(_ o: Order, showCod: Bool) -> some View {
         let mates = VtpTrack.sameWaybill(o, in: store.allOrders())
+        let goods = mates.reduce(0) { $0 + $1.total }
+        let cod = showCod ? VtpTrack.editedCod(mates).flatMap { $0 == goods ? nil : $0 } : nil
         var rows: [ProductRow] = []
         for m in mates { for it in m.items { rows.append(ProductRow(order: m, index: rows.count + 1, item: it)) } }
         return VStack(alignment: .leading, spacing: 0) {
@@ -455,15 +498,20 @@ struct OrderDetailView: View {
                 }
                 .frame(height: 42)
             }
-            HStack {
-                T(mates.count > 1 ? "Tổng tiền hàng" : "Tổng tiền", 14, .semibold)
-                Spacer()
-                T(money(mates.reduce(0) { $0 + $1.total }), 18, .heavy, Theme.ink, track: -0.4).lineLimit(1)
+            if let cod {
+                EditedCodTotal(goodsLabel: "Tiền hàng", goods: goods, codLabel: "Thu hộ (COD)", cod: cod,
+                               fill: Theme.peachSoft, ring: Theme.accent, tagColor: Theme.accent)
+            } else {
+                HStack {
+                    T(mates.count > 1 ? "Tổng tiền hàng" : "Tổng tiền", 14, .semibold)
+                    Spacer()
+                    T(money(goods), 18, .heavy, Theme.ink, track: -0.4).lineLimit(1)
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 44)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.peachSoft))
+                .padding(.top, 7)
             }
-            .padding(.horizontal, 14)
-            .frame(height: 44)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.peachSoft))
-            .padding(.top, 7)
         }
         .padding(.horizontal, 15)
         .padding(.top, 14)
@@ -474,6 +522,10 @@ struct OrderDetailView: View {
     /// Các đơn chưa gửi khác của khách (đơn gom ngày trước…): xem nhanh và gộp đơn này vào chung một vận đơn.
     private func gomCard(_ o: Order, _ others: [Order]) -> some View {
         let merged = Vtp.alreadyMerged(o, with: others)
+        let group = (others + [o]).sorted { $0.lastTs < $1.lastTs }
+        let goods = group.reduce(0) { $0 + $1.total }
+        // Chỉ nhóm đã gộp mới có chung số thu hộ sửa tay; chưa gộp thì số đó chỉ là của từng đơn.
+        let cod = merged ? VtpTrack.editedCod(group).flatMap { $0 == goods ? nil : $0 } : nil
         return VStack(alignment: .leading, spacing: 0) {
             T("Đơn đã gom chưa gửi (\(others.count))", 14, .bold, Theme.gomInk).padding(.bottom, 3)
             ForEach(Array(others.enumerated()), id: \.element.id) { index, x in
@@ -493,15 +545,20 @@ struct OrderDetailView: View {
                 }
                 .buttonStyle(.plain)
             }
-            HStack {
-                T(merged ? "Gửi chung, tổng" : "Tổng nếu gộp", 14, .semibold)
-                Spacer()
-                T(money(others.reduce(o.total) { $0 + $1.total }), 18, .heavy, Theme.ink, track: -0.4).lineLimit(1)
+            if let cod {
+                EditedCodTotal(goodsLabel: "Tiền hàng gửi chung", goods: goods, codLabel: "Gửi chung, thu hộ", cod: cod,
+                               fill: Theme.gomTag, ring: Theme.gomInk.opacity(0.45), tagColor: Theme.gomInk)
+            } else {
+                HStack {
+                    T(merged ? "Gửi chung, tổng" : "Tổng nếu gộp", 14, .semibold)
+                    Spacer()
+                    T(money(goods), 18, .heavy, Theme.ink, track: -0.4).lineLimit(1)
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 44)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.gomTag))
+                .padding(.top, 7)
             }
-            .padding(.horizontal, 14)
-            .frame(height: 44)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.gomTag))
-            .padding(.top, 7)
             if !merged {
                 OutlineButton(title: "Gộp vào đơn đã gom", icon: .truck, color: Theme.gomInk, height: 44) {
                     ui.present(dim: 0.42) { ShipReviewSheet(orderId: o.id) }

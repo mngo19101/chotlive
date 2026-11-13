@@ -450,7 +450,17 @@ fun VtpOrderBox(order: Order) {
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val mates = VtpTrack.sameWaybill(order, store.allOrders())
-            InfoLine("Thu hộ (COD)", money(VtpTrack.waybillCod(mates)))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                T("Thu hộ (COD)", 13f, BV.MEDIUM, C.muted, maxLines = 1)
+                if (mates.any { it.ship?.codOverride != null }) {
+                    Row(Modifier.height(20.dp).capsule(C.peachSoft).padding(horizontal = 7.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Icon(IconName.PENCIL, 9f, 2.4f, C.accent)
+                        T("đã sửa", 11f, BV.SEMIBOLD, C.accent, maxLines = 1)
+                    }
+                }
+                T(money(VtpTrack.waybillCod(mates)), 13f, BV.SEMIBOLD, C.ink, Modifier.weight(1f), align = TextAlign.End, maxLines = 1)
+            }
             if (mates.size > 1) InfoLine("Gộp", "${mates.size} đơn · ${money(mates.sumOf { it.total })} tiền hàng")
             s?.vtpFee?.takeIf { it > 0 }?.let { InfoLine("Cước", money(it)) }
             s?.vtpService?.takeIf { it.isNotEmpty() }?.let { InfoLine("Gói", it) }

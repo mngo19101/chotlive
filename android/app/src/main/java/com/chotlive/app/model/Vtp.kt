@@ -452,6 +452,10 @@ object VtpTrack {
         return Vtp.summarize(Vtp.lines(orders), c.address, c.nickname, fee).cod
     }
 
+    /** Tiền thu hộ đã sửa tay ở nháp của nhóm đơn này (cũ nhất trước), tính như lúc tạo vận đơn; null khi chưa sửa. */
+    fun editedCod(orders: List<Order>): Int? =
+        if (orders.none { it.ship?.codOverride != null }) null else waybillCod(orders)
+
     /** Danh sách đơn: các đơn chung một vận đơn chỉ giữ một thẻ (đơn gặp trước trong danh sách). */
     fun oneCardPerWaybill(list: List<Order>): List<Order> {
         val seen = HashSet<String>()

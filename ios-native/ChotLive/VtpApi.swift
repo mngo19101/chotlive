@@ -201,6 +201,12 @@ enum VtpTrack {
         return Vtp.summarize(Vtp.lines(orders), address: c.address, nickname: c.nickname, realFee: fee).cod
     }
 
+    /// Tiền thu hộ đã sửa tay ở nháp của nhóm đơn này (cũ nhất trước), tính như lúc tạo vận đơn; nil khi chưa sửa.
+    static func editedCod(_ orders: [Order]) -> Int? {
+        guard orders.contains(where: { $0.ship?.codOverride != nil }) else { return nil }
+        return waybillCod(orders)
+    }
+
     /// Danh sách đơn: các đơn chung một vận đơn chỉ giữ một thẻ (đơn gặp trước trong danh sách).
     static func oneCardPerWaybill(_ list: [Order]) -> [Order] {
         var seen = Set<String>()

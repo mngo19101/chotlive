@@ -349,6 +349,13 @@ fun OrderDetailScreen(orderId: String) {
                 // Đơn chung một vận đơn với đơn khác: hiện đủ sản phẩm của cả vận đơn, chia theo từng đơn.
                 val mates = remember(store.customers, o.id) { VtpTrack.sameWaybill(o, store.allOrders()) }
                 val many = mates.size > 1
+                val others = remember(store.customers, o.id) {
+                    if (Vtp.state(o).isPending) Vtp.pendingOrders(o.customer.id, store.allOrders()).filter { it.id != o.id } else emptyList()
+                }
+                val goods = mates.sumOf { it.total }
+                // Tiền thu hộ sửa tay ở nháp (khác tiền hàng): ô to hiện số đó. Đơn còn gom chung với đơn khác thì
+                // số sửa tay là của cả nhóm, hiện ở thẻ gom.
+                val cod = if (VtpTrack.code(o) != null || others.isEmpty()) VtpTrack.editedCod(mates)?.takeIf { it != goods } else null
                 Column(Modifier.fillMaxWidth().cardStyle(20f).padding(start = 15.dp, end = 15.dp, top = 14.dp, bottom = 15.dp)) {
                     T(if (many) "Sản phẩm (${mates.sumOf { it.productCount }}) · gộp ${mates.size} đơn" else "Sản phẩm (${o.productCount})",
                         14f, BV.BOLD, modifier = Modifier.padding(bottom = 3.dp))
@@ -377,16 +384,17 @@ fun OrderDetailScreen(orderId: String) {
                             }
                         }
                     }
-                    Row(Modifier.padding(top = 7.dp).fillMaxWidth().height(44.dp).clip(rounded(14f)).background(C.peachSoft).padding(horizontal = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        T(if (many) "Tổng tiền hàng" else "Tổng tiền", 14f, BV.SEMIBOLD, modifier = Modifier.weight(1f))
-                        T(money(mates.sumOf { it.total }), 18f, BV.HEAVY, C.ink, track = -0.4f, maxLines = 1)
+                    if (cod != null) {
+                        EditedCodTotal("Tiền hàng", goods, "Thu hộ (COD)", cod, C.peachSoft, C.accent, C.accent)
+                    } else {
+                        Row(Modifier.padding(top = 7.dp).fillMaxWidth().height(44.dp).clip(rounded(14f)).background(C.peachSoft).padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            T(if (many) "Tổng tiền hàng" else "Tổng tiền", 14f, BV.SEMIBOLD, modifier = Modifier.weight(1f))
+                            T(money(goods), 18f, BV.HEAVY, C.ink, track = -0.4f, maxLines = 1)
+                        }
                     }
                 }
                 VtpOrderBox(o)
-                val others = remember(store.customers, o.id) {
-                    if (Vtp.state(o).isPending) Vtp.pendingOrders(o.customer.id, store.allOrders()).filter { it.id != o.id } else emptyList()
-                }
                 if (others.isNotEmpty()) GomCard(o, others)
             }
             Column(Modifier.padding(start = Metrics.GUTTER.dp, end = Metrics.GUTTER.dp, top = 4.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -408,11 +416,38 @@ fun OrderDetailScreen(orderId: String) {
     }
 }
 
+/** Ô tổng khi tiền thu hộ đã sửa tay ở nháp: dòng nhỏ tiền hàng gốc, ô viền to là số shipper sẽ thu. */
+@Composable
+private fun EditedCodTotal(
+    goodsLabel: String, goods: Int, codLabel: String, cod: Int,
+    fill: androidx.compose.ui.graphics.Color, ring: androidx.compose.ui.graphics.Color, tagColor: androidx.compose.ui.graphics.Color,
+) {
+    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+        T(goodsLabel, 13f, BV.SEMIBOLD, C.muted, Modifier.weight(1f), maxLines = 1)
+        T(money(goods), 13f, BV.SEMIBOLD, C.muted, maxLines = 1)
+    }
+    Row(Modifier.padding(top = 7.dp).fillMaxWidth().height(50.dp).clip(rounded(14f)).background(fill)
+        .border(2.dp, ring, rounded(14f)).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            T(codLabel, 14f, BV.SEMIBOLD, maxLines = 1)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Icon(IconName.PENCIL, 10f, 2.4f, tagColor)
+                T("Đã sửa ở nháp", 11f, BV.SEMIBOLD, tagColor, maxLines = 1)
+            }
+        }
+        T(money(cod), 18f, BV.HEAVY, C.ink, track = -0.4f, maxLines = 1)
+    }
+}
+
 /** Các đơn chưa gửi khác của khách (đơn gom ngày trước…): xem nhanh và gộp đơn này vào chung một vận đơn. */
 @Composable
 private fun GomCard(o: Order, others: List<Order>) {
     val ui = LocalAppUI.current
     val merged = Vtp.alreadyMerged(o, others)
+    val group = (others + o).sortedBy { it.lastTs }
+    val goods = group.sumOf { it.total }
+    // Chỉ nhóm đã gộp mới có chung số thu hộ sửa tay; chưa gộp thì số đó chỉ là của từng đơn.
+    val cod = if (merged) VtpTrack.editedCod(group)?.takeIf { it != goods } else null
     Column(Modifier.fillMaxWidth().cardStyle(20f, C.gomFill, C.gomLine).padding(start = 15.dp, end = 15.dp, top = 14.dp, bottom = 15.dp)) {
         T("Đơn đã gom chưa gửi (${others.size})", 14f, BV.BOLD, C.gomInk, Modifier.padding(bottom = 3.dp))
         others.forEachIndexed { index, x ->
@@ -427,10 +462,14 @@ private fun GomCard(o: Order, others: List<Order>) {
                 Icon(IconName.CHEVRON_RIGHT, 14f, color = C.muted)
             }
         }
-        Row(Modifier.padding(top = 7.dp).fillMaxWidth().height(44.dp).clip(rounded(14f)).background(C.gomTag).padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            T(if (merged) "Gửi chung, tổng" else "Tổng nếu gộp", 14f, BV.SEMIBOLD, modifier = Modifier.weight(1f))
-            T(money(o.total + others.sumOf { it.total }), 18f, BV.HEAVY, C.ink, track = -0.4f, maxLines = 1)
+        if (cod != null) {
+            EditedCodTotal("Tiền hàng gửi chung", goods, "Gửi chung, thu hộ", cod, C.gomTag, C.gomInk.copy(alpha = 0.45f), C.gomInk)
+        } else {
+            Row(Modifier.padding(top = 7.dp).fillMaxWidth().height(44.dp).clip(rounded(14f)).background(C.gomTag).padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                T(if (merged) "Gửi chung, tổng" else "Tổng nếu gộp", 14f, BV.SEMIBOLD, modifier = Modifier.weight(1f))
+                T(money(goods), 18f, BV.HEAVY, C.ink, track = -0.4f, maxLines = 1)
+            }
         }
         if (!merged) {
             OutlineButton("Gộp vào đơn đã gom", Modifier.padding(top = 10.dp).fillMaxWidth(), IconName.TRUCK, C.gomInk) {
