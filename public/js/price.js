@@ -23,6 +23,21 @@ function escapeRegExp(string) {
 const RE =
   /(?<![a-z\d])(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(\d{1,3})?(?![a-z\d])/g;
 
+/**
+ * Số điện thoại Việt Nam (0… hoặc +84…), kể cả viết tách bằng dấu cách, chấm, gạch:
+ * "0912 345 678", "098.812.3456", "024 3826 1234". Phải đủ 10-11 số mới tính là số điện thoại.
+ * Giống PHONE của PriceParser trên app iPhone và Android.
+ */
+const PHONE_RE = /(?<!\d)(?:\+84[\s.-]{0,3}|0)\d{2,3}[\s.-]{0,3}\d{3,4}[\s.-]{0,3}\d{3,4}(?!\d)/g;
+
+/** Thay số điện thoại bằng "#" (giữ nguyên độ dài) để phần bắt giá không đọc nhầm thành giá. */
+function maskPhones(s) {
+  return s.replace(PHONE_RE, (m) => {
+    const digits = m.replace(/\D/g, '').length - (m.startsWith('+') ? 1 : 0);
+    return digits === 10 || digits === 11 ? '#'.repeat(m.length) : m;
+  });
+}
+
 const INQUIRY_RE =
   /(?:bao nhieu|bn\b|co duoc|khong|k a|k shop|xem lai|con size|khi nao|may ngay|ship ve|tu van|hoi |o dau|co hop k)/i;
 
@@ -40,7 +55,7 @@ export function isInquiry(comment = '') {
 export function parsePriceWithMatch(text, opts = {}) {
   const { multiplier = 1000, minPrice = 1, maxPrice = 50000000 } = opts;
   if (!text) return { price: null, matchText: '' };
-  const s = stripAccents(String(text).toLowerCase());
+  const s = maskPhones(stripAccents(String(text).toLowerCase()));
   let best = null;
   let bestMatch = '';
 
@@ -50,7 +65,8 @@ export function parsePriceWithMatch(text, opts = {}) {
     if (digitsOnly.length >= 9) continue; // số điện thoại / mã đơn
 
     const isGrouped = /^\d{1,3}(?:[.,]\d{3})+$/.test(rawNum);
-    let n = isGrouped && !/^(k|tr|trieu|cu)$/.test(unit)
+    // "2.500k" là 2.500 nghìn; riêng "1.500tr" vẫn đọc là 1,5 triệu.
+    let n = isGrouped && !/^(tr|trieu|cu)$/.test(unit)
       ? Number(digitsOnly)
       : Number(rawNum.replace(',', '.'));
     if (!Number.isFinite(n)) continue;
@@ -89,7 +105,7 @@ const CODE_FILLERS = /(?<![a-z\d])(?:ma|va|voi)(?![a-z\d])|[\s,;+&/.-]/g;
  * Giống PriceParser.isOnlyCodes của app iPhone và Android.
  */
 export function isOnlyCodes(text, opts = {}) {
-  const s = stripAccents(String(text || '').toLowerCase());
+  const s = maskPhones(stripAccents(String(text || '').toLowerCase()));
   let found = false;
   const rest = s.replace(RE, (match) => {
     if (!parsePrice(match, opts)) return match;
@@ -104,6 +120,22 @@ export function parsePriceInput(text, multiplier = 1000) {
   if (text === '' || text == null) return 0;
   const v = parsePrice(String(text), { multiplier, minPrice: 1, maxPrice: 1e12 });
   return v ?? 0;
+}
+
+const MONEY_INPUT_RE = /^(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(\d{1,3})?$/;
+
+/**
+ * Ô nhập số tiền (thu hộ, tiền cọc): số thuần là đồng ("150" = 150đ), dấu chấm/phẩy là nhóm nghìn
+ * ("150.000" = 150.000đ), nhận "150k", "1.5tr". Trống hoặc không hợp lệ (số âm, "150.5") trả null.
+ */
+export function parseMoneyInput(text) {
+  const s = stripAccents(String(text ?? '').toLowerCase()).replace(/\s+/g, '');
+  const m = MONEY_INPUT_RE.exec(s);
+  if (!m) return null;
+  const [, rawNum, unit = ''] = m;
+  const bigUnit = /^(k|tr|trieu|cu|nghin|ngan)$/.test(unit);
+  if (!bigUnit && /[.,]/.test(rawNum) && !/^\d{1,3}(?:[.,]\d{3})+$/.test(rawNum)) return null;
+  return parsePriceWithMatch(s, { multiplier: 1, minPrice: 0, maxPrice: 1e12 }).price;
 }
 
 export function formatVND(n) {

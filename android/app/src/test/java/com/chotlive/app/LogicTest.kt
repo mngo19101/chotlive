@@ -35,6 +35,25 @@ class PriceParserTest {
         for ((text, price) in web) assertEquals(text, price, PriceParser.parse(text))
     }
 
+    /** BL-12: cùng danh sách với PRICE_VECTORS của test/price.test.js (0 ở đây là null bên web). */
+    private val bl12 = listOf(
+        "chốt mã 150 sđt 0912 345 678" to 150000, "lấy 150 0912.345.678" to 150000, "150 sđt 0912-345-678" to 150000,
+        "sđt 098.812.3456 lấy 250" to 250000, "0988 123 456 mã 99" to 99000, "024 3826 1234 mã 120" to 120000,
+        "+84 912 345 678 mã 150" to 150000, "0912345678 150" to 150000, "0912 345 678" to 0,
+        "2.500k" to 2500000, "1,200k" to 1200000, "1.5k" to 1500, "150k" to 150000, "150 k" to 150000,
+        "1.5tr" to 1500000, "150,000" to 150000, "150.000đ" to 150000, "1.200.000" to 1200000, "1,5tr" to 1500000,
+        "Chốt 120 với 180" to 180000, "lấy 2 cái 150" to 150000, "mã 090 150 180" to 180000,
+        "cho em xin giá" to 0, "" to 0,
+    )
+
+    @Test
+    fun phoneNumbersAndGroupedThousandsBl12() {
+        for ((text, price) in bl12) assertEquals(text, price, PriceParser.parse(text))
+        for (text in listOf("0912 345 678", "0912.345.678", "150 0912 345 678")) assertFalse(text, PriceParser.isOnlyCodes(text))
+        assertTrue(PriceParser.isOnlyCodes("mã 150"))
+        assertEquals(listOf(150000), PriceParser.orderTokens("chốt mã 150 sđt 0912 345 678").map { it.price })
+    }
+
     @Test
     fun orderTokensJoinLinkedCodes() {
         assertEquals(listOf(120000, 180000), PriceParser.orderTokens("Chốt 120 với 180").map { it.price })

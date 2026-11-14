@@ -73,6 +73,7 @@ import { countdownClock, countdownText, remainingText } from './countdown.js';
 import {
   parsePrice,
   parsePriceInput,
+  parseMoneyInput,
   formatVND,
   formatPhone,
   extractProductInfo,
@@ -2825,11 +2826,7 @@ $$('[data-ship-payer]').forEach((b) =>
   })
 );
 
-const moneyInput = (el) => {
-  const raw = String(el.value).trim();
-  const n = Number(raw);
-  return raw === '' || !Number.isFinite(n) || n < 0 ? null : Math.round(n);
-};
+const moneyInput = (el) => parseMoneyInput(el.value);
 $('#ship-cod')?.addEventListener('input', (e) => {
   if (!shipCtx) return;
   shipCtx.cod = moneyInput(e.target);

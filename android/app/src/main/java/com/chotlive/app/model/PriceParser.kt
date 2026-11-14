@@ -11,6 +11,16 @@ object PriceParser {
     private val grouped = Regex("""^\d{1,3}(?:[.,]\d{3})+$""")
     private val marks = Regex("""\p{Mn}+""")
 
+    /** Số điện thoại Việt Nam (0… hoặc +84…), kể cả viết tách: "0912 345 678", "098.812.3456".
+     *  Phải đủ 10-11 số. Giống PHONE_RE của public/js/price.js. */
+    private val phone = Regex("""(?<!\d)(?:\+84[\s.-]{0,3}|0)\d{2,3}[\s.-]{0,3}\d{3,4}[\s.-]{0,3}\d{3,4}(?!\d)""")
+
+    /** Thay số điện thoại bằng "#" (giữ nguyên độ dài) để phần bắt giá không đọc nhầm thành giá. */
+    private fun maskPhones(s: String): String = phone.replace(s) { m ->
+        val digits = m.value.count { it in '0'..'9' } - (if (m.value.startsWith("+")) 1 else 0)
+        if (digits == 10 || digits == 11) "#".repeat(m.value.length) else m.value
+    }
+
     fun stripAccents(s: String): String =
         marks.replace(Normalizer.normalize(s, Normalizer.Form.NFD), "")
             .replace("đ", "d").replace("Đ", "D")
@@ -27,7 +37,7 @@ object PriceParser {
 
     /** Mọi số/giá trong bình luận, theo thứ tự xuất hiện. */
     fun tokens(text: String, multiplier: Double = 1000.0, minPrice: Double = 1.0, maxPrice: Double = 50_000_000.0): List<Token> {
-        val s = folded(text)
+        val s = maskPhones(folded(text))
         val found = mutableListOf<Token>()
         for (m in regex.findAll(s)) {
             val rawNum = m.groupValues[1]
@@ -37,7 +47,8 @@ object PriceParser {
             if (digitsOnly.length >= 9) continue // số điện thoại / mã đơn
 
             val isGrouped = grouped.matches(rawNum)
-            val bigUnit = unit in setOf("k", "tr", "trieu", "cu")
+            // "2.500k" là 2.500 nghìn; riêng "1.500tr" vẫn đọc là 1,5 triệu.
+            val bigUnit = unit in setOf("tr", "trieu", "cu")
             val n: Double = if (isGrouped && !bigUnit) {
                 digitsOnly.toDoubleOrNull() ?: 0.0
             } else {
