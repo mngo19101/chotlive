@@ -22,6 +22,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Mọi lần tạo vận đơn Viettel Post giả nhận được (nội dung gửi lên). */
 const sent = [];
+/** Mọi lần hỏi cước (báo giá) Viettel Post giả nhận được. */
+const quoted = [];
 const fakeVtp = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
@@ -31,6 +33,10 @@ const fakeVtp = http.createServer((req, res) => {
     if (req.url === '/wards') return send([]);
     if (req.url === '/v2/user/LoginVTP') return okData({ token: 'partner', phone: '0900000000', userId: 1 });
     if (req.url === '/v2/user/listInventory') return okData([{ groupaddressId: 1, name: 'Shop', phone: '0900000000', address: '1 Lê Lợi, Phường Thuận Hoá, TP.Huế' }]);
+    if (req.url === '/v2/order/getPriceNlp' || req.url === '/v2/order/getPriceAllNlp') {
+      quoted.push({ url: req.url, ...JSON.parse(body || '{}') });
+      return okData({ MONEY_TOTAL: 22000 });
+    }
     if (req.url === '/v2/order/createOrderNlp') {
       sent.push(JSON.parse(body || '{}'));
       return okData({ ORDER_NUMBER: 'COD' + (100000 + sent.length), MONEY_TOTAL: 25000 });
@@ -286,4 +292,24 @@ test('đơn từ app (đồng bộ qua native-sync): COD app tính khớp số m
   const r = checkGroupCod(orders, 270000);
   assert.equal(r.ok, true, r.error);
   assert.equal(r.goods, 320000);
+});
+
+test('báo giá: COD sai kiểu hoặc ngoài khoảng thì báo lỗi, không hỏi Viettel Post với COD bị ép về 0đ/450đ', async () => {
+  const q = (cod) => api('/api/vtp/quote', { service: 'VSL9', groups: [group('q', ['q'], cod)] });
+  for (const cod of [null, '450.000', -1, '', 450000.5, 1e12, '450000', undefined, true]) {
+    const before = quoted.length;
+    const r = await q(cod);
+    assert.equal(r.status, 200);
+    const res = r.body.results[0];
+    assert.equal(res.ok, false, `cod=${JSON.stringify(cod)} phải bị từ chối`);
+    assert.match(res.error, /thu hộ/i);
+    assert.equal(quoted.length, before, `cod=${JSON.stringify(cod)}: không được hỏi Viettel Post`);
+  }
+  const ok = await q(450000);
+  assert.equal(ok.body.results[0].ok, true, ok.body.results[0].error);
+  assert.equal(ok.body.results[0].fee, 22000);
+  const asked = quoted.filter((x) => x.url === '/v2/order/getPriceNlp').at(-1);
+  assert.equal(asked.MONEY_COLLECTION, 450000, 'hỏi cước đúng số thu hộ');
+  // 0đ (đơn đã chuyển khoản, shop trả ship) vẫn hợp lệ.
+  assert.equal((await q(0)).body.results[0].ok, true);
 });

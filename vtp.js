@@ -146,6 +146,9 @@ export function clipBytes(s, maxBytes = 150) {
 export const MAX_COD = 100_000_000;
 export const MAX_SHIP_FEE = 2_000_000;
 const vnd = (n) => Number(n).toLocaleString('vi-VN') + 'đ';
+const BAD_COD = 'Tiền thu hộ không hợp lệ. Cập nhật app rồi gửi lại.';
+/** COD hợp lệ: số nguyên 0..MAX_COD. Chuỗi "450.000", null, số âm, số lẻ: không hợp lệ (không ép về 0). */
+const codOk = (cod) => typeof cod === 'number' && Number.isInteger(cod) && cod >= 0 && cod <= MAX_COD;
 
 /**
  * Đối chiếu tiền thu hộ client gửi (`cod`) với số tính từ các đơn trên máy chủ, cùng công thức với web/app
@@ -154,9 +157,7 @@ const vnd = (n) => Number(n).toLocaleString('vi-VN') + 'đ';
  * Trả { ok, cod, goods, senderPays } hoặc { ok: false, error }.
  */
 export function checkGroupCod(orders, cod) {
-  if (typeof cod !== 'number' || !Number.isInteger(cod) || cod < 0 || cod > MAX_COD) {
-    return { ok: false, error: 'Tiền thu hộ không hợp lệ. Cập nhật app rồi gửi lại.' };
-  }
+  if (!codOk(cod)) return { ok: false, error: BAD_COD };
   // Cũ nhất trước, như web/app: cài đặt (COD sửa tay, người trả cước…) của đơn mới nhất thắng.
   const list = [...orders].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
   const pick = (s) => ({ ok: true, cod: s.cod, goods: s.goods, senderPays: s.senderPays });
@@ -259,7 +260,9 @@ export async function vtpQuote(store, userId, g, service, wards = null) {
   const conn = store.get(userId);
   const s = conn?.sender;
   if (!s?.address) return { ok: false, error: 'Chưa chọn điểm lấy hàng' };
-  const cod = Math.max(0, Math.round(Number(g.cod) || 0));
+  // Cước báo giá được cộng vào COD của đơn nhỏ: hỏi với COD sai (ép về 0đ/450đ) là cước sai theo.
+  if (!codOk(g.cod)) return { ok: false, error: BAD_COD };
+  const cod = g.cod;
   const base = {
     SENDER_ADDRESS: clipBytes(s.address, 150),
     RECEIVER_ADDRESS: clipBytes(g.address, 150),
