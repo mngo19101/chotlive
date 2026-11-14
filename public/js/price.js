@@ -38,6 +38,21 @@ function maskPhones(s) {
   });
 }
 
+/** Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2". */
+const SIZE_QTY_BEFORE = /(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$/;
+/** Số 1-2 chữ số ngay trước "cái", "đôi", "kg"... là số lượng/cân nặng: "lấy 2 cái", "50 kg". */
+const QTY_AFTER = /^\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon)(?![a-z\d])/;
+/** Có "mã" đứng trước thì vẫn là mã: "mã 99 bộ đồ". */
+const CODE_BEFORE = /(?<![a-z\d])ma\s*$/;
+
+/** Số ở vị trí [start, end) của s là size hoặc số lượng, không phải giá. Giống isSizeOrQty trên app iPhone và Android. */
+function isSizeOrQty(s, start, end, rawNum, unit) {
+  if (unit) return false;
+  const before = s.slice(0, start);
+  if (SIZE_QTY_BEFORE.test(before)) return true;
+  return /^\d{1,2}$/.test(rawNum) && QTY_AFTER.test(s.slice(end)) && !CODE_BEFORE.test(before);
+}
+
 const INQUIRY_RE =
   /(?:bao nhieu|bn\b|co duoc|khong|k a|k shop|xem lai|con size|khi nao|may ngay|ship ve|tu van|hoi |o dau|co hop k)/i;
 
@@ -63,6 +78,7 @@ export function parsePriceWithMatch(text, opts = {}) {
     const [rawMatch, rawNum, unit = '', trail = ''] = m;
     const digitsOnly = rawNum.replace(/[.,]/g, '');
     if (digitsOnly.length >= 9) continue; // số điện thoại / mã đơn
+    if (isSizeOrQty(s, m.index, m.index + rawMatch.length, rawNum, unit)) continue;
 
     const isGrouped = /^\d{1,3}(?:[.,]\d{3})+$/.test(rawNum);
     // "2.500k" là 2.500 nghìn; riêng "1.500tr" vẫn đọc là 1,5 triệu.

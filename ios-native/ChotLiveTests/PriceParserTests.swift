@@ -17,6 +17,18 @@ final class PriceParserTests: XCTestCase {
         for (text, price) in vectors { XCTAssertEqual(PriceParser.parse(text), price, text) }
     }
 
+    /// Size và số lượng không phải giá: cùng danh sách với SIZE_QTY_VECTORS của test/price.test.js.
+    private let sizeQty: [(String, Int)] = [
+        ("size 38 0912 345 678", 0), ("size 38", 0), ("sz 38 mã 250", 250000), ("size: 40 lấy 150", 150000),
+        ("lấy 2 cái", 0), ("chốt 2 cái 150", 150000), ("lấy 2 cái 150", 150000), ("sl 2", 0),
+        ("số lượng: 3 mã 120", 120000), ("50 kg", 0), ("nặng 50 kg mã 199", 199000), ("mã 99 bộ đồ", 99000),
+        ("150 cái", 150000), ("38", 38000),
+    ]
+
+    func testSizeAndQuantityAreNotPrices() {
+        for (text, price) in sizeQty { XCTAssertEqual(PriceParser.parse(text), price, text) }
+    }
+
     func testPhoneIsNotOnlyCodes() {
         for text in ["0912 345 678", "0912.345.678", "150 0912 345 678"] { XCTAssertFalse(PriceParser.isOnlyCodes(text), text) }
         XCTAssertTrue(PriceParser.isOnlyCodes("mã 150"))

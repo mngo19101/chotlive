@@ -3728,8 +3728,9 @@ $('#edit-items-container')?.addEventListener('input', (e) => {
   } else if (e.target.classList.contains('item-edit-qty')) {
     it.qty = Math.max(1, parseInt(e.target.value) || 1);
   } else if (e.target.classList.contains('item-edit-price')) {
-    const raw = e.target.value.replace(/[^0-9]/g, '');
-    if (raw) it.price = parseInt(raw);
+    // Đọc giá như ô Tạo đơn: "150" = 150.000đ (theo hệ số), "150k", "150.000đ". Trống/không đọc được thì giữ giá cũ.
+    const v = parsePriceInput(e.target.value, priceOpts().multiplier);
+    if (v) it.price = v;
   }
 
   const total = editingOrderItemsCopy.reduce((s, x) => s + (x.price || 0) * (x.qty || 1), 0);

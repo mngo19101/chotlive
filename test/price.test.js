@@ -45,6 +45,36 @@ test('BL-12: số điện thoại không thành giá, nhóm nghìn kèm k nhân 
   for (const [text, price] of PRICE_VECTORS) assert.equal(parsePrice(text), price, text);
 });
 
+// Size và số lượng không phải giá. Android (LogicTest.kt) và iOS (PriceParserTests.swift) giữ đúng danh sách này.
+const SIZE_QTY_VECTORS = [
+  ['size 38 0912 345 678', null],
+  ['size 38', null],
+  ['sz 38 mã 250', 250000],
+  ['size: 40 lấy 150', 150000],
+  ['lấy 2 cái', null],
+  ['chốt 2 cái 150', 150000],
+  ['lấy 2 cái 150', 150000],
+  ['sl 2', null],
+  ['số lượng: 3 mã 120', 120000],
+  ['50 kg', null],
+  ['nặng 50 kg mã 199', 199000],
+  ['mã 99 bộ đồ', 99000],
+  ['150 cái', 150000],
+  ['38', 38000],
+];
+
+test('size và số lượng không thành giá', () => {
+  for (const [text, price] of SIZE_QTY_VECTORS) assert.equal(parsePrice(text), price, text);
+});
+
+test('BL-14a: ô sửa giá món đọc giá như ô Tạo đơn (nhân hệ số, nhận k, nhóm nghìn)', () => {
+  for (const [text, v] of [['150', 150000], ['150k', 150000], ['150.000đ', 150000], ['1.5tr', 1500000]])
+    assert.equal(price.parsePriceInput(text, 1000), v, text);
+  const app = readFileSync(new URL('../public/js/app.js', import.meta.url), 'utf8');
+  const handler = app.slice(app.indexOf("e.target.classList.contains('item-edit-price')"));
+  assert.match(handler.slice(0, 300), /parsePriceInput\(e\.target\.value, priceOpts\(\)\.multiplier\)/);
+});
+
 test('BL-12: số điện thoại viết tách không làm bình luận thành "chỉ ghi mã"', () => {
   for (const text of ['0912 345 678', '0912.345.678', '150 0912 345 678']) assert.equal(isOnlyCodes(text), false, text);
   assert.equal(isOnlyCodes('mã 150'), true);

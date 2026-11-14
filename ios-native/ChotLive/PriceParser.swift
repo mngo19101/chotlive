@@ -25,6 +25,29 @@ enum PriceParser {
         return ns as String
     }
 
+    /// Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2".
+    private static let sizeQtyBefore = try! NSRegularExpression(pattern: #"(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$"#)
+    /// Số 1-2 chữ số ngay trước "cái", "đôi", "kg"... là số lượng/cân nặng: "lấy 2 cái", "50 kg".
+    private static let qtyAfter = try! NSRegularExpression(
+        pattern: #"^\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon)(?![a-z\d])"#
+    )
+    /// Có "mã" đứng trước thì vẫn là mã: "mã 99 bộ đồ".
+    private static let codeBefore = try! NSRegularExpression(pattern: #"(?<![a-z\d])ma\s*$"#)
+    private static let oneOrTwoDigits = try! NSRegularExpression(pattern: #"^\d{1,2}$"#)
+
+    private static func has(_ re: NSRegularExpression, _ s: String) -> Bool {
+        re.firstMatch(in: s, range: NSRange(location: 0, length: (s as NSString).length)) != nil
+    }
+
+    /// Số ở vị trí `range` của ns là size hoặc số lượng, không phải giá. Giống isSizeOrQty của public/js/price.js.
+    private static func isSizeOrQty(_ ns: NSString, _ range: NSRange, rawNum: String, unit: String) -> Bool {
+        if !unit.isEmpty { return false }
+        let before = ns.substring(to: range.location)
+        if has(sizeQtyBefore, before) { return true }
+        return has(oneOrTwoDigits, rawNum) && has(qtyAfter, ns.substring(from: range.location + range.length))
+            && !has(codeBefore, before)
+    }
+
     static func stripAccents(_ s: String) -> String {
         s.folding(options: .diacriticInsensitive, locale: Locale(identifier: "en"))
             .replacingOccurrences(of: "đ", with: "d")
@@ -59,6 +82,7 @@ enum PriceParser {
             let rawNum = group(1), unit = group(2), trail = group(3)
             let digitsOnly = rawNum.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: "")
             if digitsOnly.count >= 9 { continue } // số điện thoại / mã đơn
+            if isSizeOrQty(ns, m.range, rawNum: rawNum, unit: unit) { continue }
 
             let isGrouped = grouped.firstMatch(in: rawNum, range: NSRange(location: 0, length: (rawNum as NSString).length)) != nil
             // "2.500k" là 2.500 nghìn; riêng "1.500tr" vẫn đọc là 1,5 triệu.

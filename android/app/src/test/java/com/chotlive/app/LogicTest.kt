@@ -54,6 +54,19 @@ class PriceParserTest {
         assertEquals(listOf(150000), PriceParser.orderTokens("chốt mã 150 sđt 0912 345 678").map { it.price })
     }
 
+    /** Size và số lượng không phải giá: cùng danh sách với SIZE_QTY_VECTORS của test/price.test.js. */
+    private val sizeQty = listOf(
+        "size 38 0912 345 678" to 0, "size 38" to 0, "sz 38 mã 250" to 250000, "size: 40 lấy 150" to 150000,
+        "lấy 2 cái" to 0, "chốt 2 cái 150" to 150000, "lấy 2 cái 150" to 150000, "sl 2" to 0,
+        "số lượng: 3 mã 120" to 120000, "50 kg" to 0, "nặng 50 kg mã 199" to 199000, "mã 99 bộ đồ" to 99000,
+        "150 cái" to 150000, "38" to 38000,
+    )
+
+    @Test
+    fun sizeAndQuantityAreNotPrices() {
+        for ((text, price) in sizeQty) assertEquals(text, price, PriceParser.parse(text))
+    }
+
     @Test
     fun orderTokensJoinLinkedCodes() {
         assertEquals(listOf(120000, 180000), PriceParser.orderTokens("Chốt 120 với 180").map { it.price })

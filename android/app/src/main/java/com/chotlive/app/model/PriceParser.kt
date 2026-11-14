@@ -26,6 +26,22 @@ object PriceParser {
             .replace("đ", "d").replace("Đ", "D")
             .let { Normalizer.normalize(it, Normalizer.Form.NFC) }
 
+    /** Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2". */
+    private val sizeQtyBefore = Regex("""(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$""")
+    /** Số 1-2 chữ số ngay trước "cái", "đôi", "kg"... là số lượng/cân nặng: "lấy 2 cái", "50 kg". */
+    private val qtyAfter = Regex("""^\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon)(?![a-z\d])""")
+    /** Có "mã" đứng trước thì vẫn là mã: "mã 99 bộ đồ". */
+    private val codeBefore = Regex("""(?<![a-z\d])ma\s*$""")
+    private val oneOrTwoDigits = Regex("""^\d{1,2}$""")
+
+    /** Số ở vị trí [start, end) của s là size hoặc số lượng, không phải giá. Giống isSizeOrQty của public/js/price.js. */
+    private fun isSizeOrQty(s: String, start: Int, end: Int, rawNum: String, unit: String): Boolean {
+        if (unit.isNotEmpty()) return false
+        val before = s.substring(0, start)
+        if (sizeQtyBefore.containsMatchIn(before)) return true
+        return oneOrTwoDigits.matches(rawNum) && qtyAfter.containsMatchIn(s.substring(end)) && !codeBefore.containsMatchIn(before)
+    }
+
     /** Một số/giá tìm thấy trong bình luận. `start`/`end` là vị trí trong chuỗi đã bỏ dấu. */
     data class Token(val start: Int, val end: Int, val code: String, val price: Int)
 
@@ -45,6 +61,7 @@ object PriceParser {
             val trail = m.groupValues[3]
             val digitsOnly = rawNum.replace(".", "").replace(",", "")
             if (digitsOnly.length >= 9) continue // số điện thoại / mã đơn
+            if (isSizeOrQty(s, m.range.first, m.range.last + 1, rawNum, unit)) continue
 
             val isGrouped = grouped.matches(rawNum)
             // "2.500k" là 2.500 nghìn; riêng "1.500tr" vẫn đọc là 1,5 triệu.
