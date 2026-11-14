@@ -141,6 +141,9 @@ struct ShipInfo: Codable, Equatable {
     /// Mã vận đơn đã huỷ, để tra lại; đơn về Chờ gửi.
     var vtpOldCode: String? = nil
     var vtpFee: Int? = nil
+    /// Tiền thu hộ và giá trị hàng máy chủ đã gửi Viettel Post lúc tạo; nil với vận đơn tạo trước khi máy chủ lưu.
+    var vtpCod: Int? = nil
+    var vtpGoods: Int? = nil
     var vtpService: String? = nil
     var vtpStatus: Int? = nil
     var vtpStatusName: String? = nil
@@ -162,7 +165,7 @@ struct ShipInfo: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case state, pay, payer, deposit, shipFee, codOverride, weightG, exportedAt, batchId, lengthCm, widthCm, heightCm
-        case vtpCode, vtpOldCode, vtpFee, vtpService, vtpStatus, vtpStatusName, vtpStatusAt, vtpKind, vtpNote, vtpError, vtpErrorAt
+        case vtpCode, vtpOldCode, vtpFee, vtpCod, vtpGoods, vtpService, vtpStatus, vtpStatusName, vtpStatusAt, vtpKind, vtpNote, vtpError, vtpErrorAt
     }
 
     private static func text(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> String? {
@@ -197,6 +200,8 @@ struct ShipInfo: Codable, Equatable {
         vtpCode = Self.text(c, .vtpCode)
         vtpOldCode = Self.text(c, .vtpOldCode)
         vtpFee = Self.money(Self.number(c, .vtpFee))
+        vtpCod = Self.money(Self.number(c, .vtpCod))
+        vtpGoods = Self.money(Self.number(c, .vtpGoods))
         vtpService = Self.text(c, .vtpService)
         vtpStatus = Self.number(c, .vtpStatus).flatMap { $0.isFinite && abs($0) < 1e9 ? Int($0) : nil }
         vtpStatusName = Self.text(c, .vtpStatusName)
@@ -226,6 +231,8 @@ struct ShipInfo: Codable, Equatable {
         try c.encodeIfPresent(vtpCode, forKey: .vtpCode)
         try c.encodeIfPresent(vtpOldCode, forKey: .vtpOldCode)
         try c.encodeIfPresent(vtpFee, forKey: .vtpFee)
+        try c.encodeIfPresent(vtpCod, forKey: .vtpCod)
+        try c.encodeIfPresent(vtpGoods, forKey: .vtpGoods)
         try c.encodeIfPresent(vtpService, forKey: .vtpService)
         try c.encodeIfPresent(vtpStatus, forKey: .vtpStatus)
         try c.encodeIfPresent(vtpStatusName, forKey: .vtpStatusName)

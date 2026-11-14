@@ -3461,6 +3461,8 @@ async function createVtpWaybills(only = null) {
         exportedAt: Date.now(),
         vtpCode: res.code,
         vtpFee: res.fee,
+        // Đúng số máy chủ đã gửi Viettel Post (máy chủ cũng lưu vào đơn).
+        ...(res.cod != null ? { vtpCod: res.cod, vtpGoods: res.goods } : {}),
         vtpService: service,
         vtpStatus: 0,
         vtpStatusName: 'Chờ lấy hàng',
@@ -3586,6 +3588,7 @@ function renderDetailVtp(ord) {
   box.className = `detail-vtp-box${bad ? ' is-bad' : ''}`;
   box.innerHTML = `
     <div class="vtp-line"><span>Mã vận đơn <span class="vtp-code">${esc(code)}</span></span>${ord.ship.vtpFee ? `<span>Cước ${vndText(ord.ship.vtpFee)}</span>` : ''}</div>
+    ${ord.ship.vtpCod != null ? `<div class="vtp-line"><span>Thu hộ (đã gửi Viettel Post)</span><span>${vndText(ord.ship.vtpCod)}</span></div>` : ''}
     <div class="vtp-status">${bad && !isVtpReturned(ord) ? 'Cần xử lý · ' : ''}${esc(vtpStatusText(ord))}${at ? ` <span class="vtp-note" style="font-weight:400">· ${esc(at)}</span>` : ''}</div>
     ${ord.ship.vtpNote ? `<div class="vtp-note">${esc(ord.ship.vtpNote)}</div>` : ''}
     <div class="vtp-actions">

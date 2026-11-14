@@ -55,6 +55,8 @@ data class VtpConnection(
 /** Kết quả tạo vận đơn cho một khách. */
 data class VtpCreateResult(
     val key: String, val ok: Boolean, val code: String = "", val fee: Int = 0, val already: Boolean = false, val error: String = "",
+    /** Tiền thu hộ / giá trị hàng máy chủ đã gửi Viettel Post (null: máy chủ bản cũ chưa trả). */
+    val cod: Int? = null, val goods: Int? = null,
 ) {
     companion object {
         fun from(d: JsonObject): VtpCreateResult {
@@ -62,6 +64,7 @@ data class VtpCreateResult(
             return VtpCreateResult(
                 key = d.text("key") ?: "", ok = ok, code = d.text("code") ?: "", fee = d.num("fee")?.toInt() ?: 0,
                 already = d.bool("already") ?: false, error = d.text("error") ?: if (ok) "" else "Lỗi không rõ",
+                cod = d.num("cod")?.toInt(), goods = d.num("goods")?.toInt(),
             )
         }
     }

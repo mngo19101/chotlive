@@ -180,6 +180,26 @@ final class VtpExportTests: XCTestCase {
         XCTAssertNil(plain?["vtpCode"])
     }
 
+    /// BL-11: đã tạo vận đơn thì hiện đúng số máy chủ đã gửi Viettel Post, không tính lại theo cước webhook.
+    func testWaybillCodShowsTheAmountSentToViettelPost() throws {
+        // Đơn 10.000đ, gửi COD 32.000đ (cước báo giá 22.000đ); webhook sau báo cước 30.000đ.
+        let json = #"{"state":"exported","pay":"cod","vtpCode":"156288120034","vtpFee":30000,"vtpCod":32000,"vtpGoods":10000}"#
+        let s = try JSONDecoder().decode(ShipInfo.self, from: Data(json.utf8))
+        XCTAssertEqual(s.vtpCod, 32_000)
+        XCTAssertEqual(s.vtpGoods, 10_000)
+        let o = order("a", price: 10_000, ship: s, status: (true, false))
+        XCTAssertEqual(VtpTrack.waybillCod([o]), 32_000)
+        // Vận đơn tạo trước khi máy chủ lưu số đã gửi: tính lại như cũ.
+        var legacy = s
+        legacy.vtpCod = nil
+        XCTAssertEqual(VtpTrack.waybillCod([order("b", price: 10_000, ship: legacy, status: (true, false))]), 40_000)
+        // Ghi kết quả tạo vận đơn lên máy: lưu số máy chủ trả về.
+        let r = VtpCreateResult(["key": "lan.anh", "ok": true, "code": "1", "fee": 25000, "cod": 32000, "goods": 10000])
+        XCTAssertEqual(r.cod, 32_000)
+        XCTAssertEqual(r.goods, 10_000)
+        XCTAssertNil(VtpCreateResult(["key": "x", "ok": true, "code": "1"]).cod)
+    }
+
     func testVtpPayloadMatchesExcelMoney() {
         let a = order("a", price: 120_000, ship: ShipInfo(state: "ready", pay: "cod", deposit: 20_000))
         let b = order("b", price: 80_000, ts: Date(timeIntervalSince1970: 2000), ship: ShipInfo(state: "ready", pay: "cod"))

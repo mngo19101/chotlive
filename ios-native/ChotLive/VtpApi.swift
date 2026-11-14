@@ -59,6 +59,9 @@ struct VtpCreateResult: Identifiable, Equatable {
     var ok: Bool
     var code: String
     var fee: Int
+    /// Tiền thu hộ / giá trị hàng máy chủ đã gửi Viettel Post (nil: máy chủ bản cũ chưa trả).
+    var cod: Int? = nil
+    var goods: Int? = nil
     var already: Bool
     var error: String
 
@@ -69,6 +72,8 @@ struct VtpCreateResult: Identifiable, Equatable {
         ok = (d["ok"] as? Bool) ?? false
         code = VtpConnection.string(d["code"]) ?? ""
         fee = (d["fee"] as? NSNumber)?.intValue ?? 0
+        cod = (d["cod"] as? NSNumber)?.intValue
+        goods = (d["goods"] as? NSNumber)?.intValue
         already = (d["already"] as? Bool) ?? false
         error = VtpConnection.string(d["error"]) ?? (ok ? "" : "Lỗi không rõ")
     }
@@ -194,8 +199,10 @@ enum VtpTrack {
         return mates.isEmpty ? [o] : mates
     }
 
-    /// Tiền thu hộ của vận đơn: tính lại như lúc tạo (COD nhập tay, tiền cọc, cước thật Viettel Post báo).
+    /// Tiền thu hộ của vận đơn: đúng số máy chủ đã gửi Viettel Post. Vận đơn tạo trước khi máy chủ lưu số đó
+    /// (hoặc nháp chưa tạo) thì tính lại như lúc tạo (COD nhập tay, tiền cọc, cước thật Viettel Post báo).
     static func waybillCod(_ orders: [Order]) -> Int {
+        if let sent = orders.first(where: { code($0) != nil && $0.ship?.vtpCod != nil })?.ship?.vtpCod { return sent }
         guard let c = orders.last?.customer else { return 0 }
         let fee = orders.compactMap { $0.ship?.vtpFee }.first { $0 > 0 }
         return Vtp.summarize(Vtp.lines(orders), address: c.address, nickname: c.nickname, realFee: fee).cod
@@ -360,7 +367,7 @@ extension LiveClient {
 // MARK: - Ghi kết quả lên máy ngay, không chờ máy chủ đồng bộ về
 
 extension Store {
-    func applyVtpCreated(_ orders: [Order], code: String, fee: Int, service: String, at now: Date = Clock.now) {
+    func applyVtpCreated(_ orders: [Order], code: String, fee: Int, cod: Int? = nil, goods: Int? = nil, service: String, at now: Date = Clock.now) {
         let ms = (now.timeIntervalSince1970 * 1000).rounded()
         let batch = "vtp_" + String(Int64(ms), radix: 36)
         var changes: [String: ShipInfo] = [:]
@@ -371,6 +378,9 @@ extension Store {
             s.batchId = batch
             s.vtpCode = code
             s.vtpFee = fee
+            // Số máy chủ đã gửi Viettel Post; máy chủ bản cũ không trả thì giữ số đang có.
+            if let cod { s.vtpCod = cod }
+            if let goods { s.vtpGoods = goods }
             s.vtpService = service
             s.vtpStatus = 0
             s.vtpStatusName = "Chờ lấy hàng"

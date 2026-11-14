@@ -77,6 +77,25 @@ class VtpTest {
     }
 
     @Test
+    fun waybillCodShowsTheAmountSentToViettelPost() {
+        // BL-11: đơn 10.000đ gửi COD 32.000đ (cước báo giá 22.000đ); webhook sau báo cước 30.000đ.
+        val s = AppJson.decodeFromString(ShipInfo.serializer(),
+            "{\"state\":\"exported\",\"pay\":\"cod\",\"vtpCode\":\"156288120034\",\"vtpFee\":30000,\"vtpCod\":32000,\"vtpGoods\":10000}")
+        assertEquals(32_000, s.vtpCod)
+        assertEquals(10_000, s.vtpGoods)
+        assertEquals(32_000, VtpTrack.waybillCod(listOf(order("a", 10_000, ship = s, shipping = true))))
+        // Vận đơn tạo trước khi máy chủ lưu số đã gửi: tính lại như cũ.
+        assertEquals(40_000, VtpTrack.waybillCod(listOf(order("b", 10_000, ship = s.copy(vtpCod = null), shipping = true))))
+        // Ghi kết quả tạo vận đơn lên máy: lưu số máy chủ trả về.
+        val store = newStore()
+        store.saveToCustomer(comment("c1", "chốt 10", "s1"))
+        store.approve(listOf(store.allOrders()[0].id), ShipState.READY, ShipInfo(pay = "cod"))
+        store.applyVtpCreated(store.allOrders(), "156288120034", 25_000, "VSL9", cod = 32_000, goods = 10_000)
+        assertEquals(32_000, store.allOrders()[0].ship?.vtpCod)
+        assertEquals(32_000, VtpTrack.waybillCod(store.allOrders()))
+    }
+
+    @Test
     fun codRules() {
         // Gộp 2 đơn thu tiền hàng.
         assertEquals(419_000, cod(listOf(line(120_000, ShipInfo(pay = "cod")), line(299_000, ShipInfo(pay = "cod")))).cod)

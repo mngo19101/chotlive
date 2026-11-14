@@ -1308,10 +1308,15 @@ async function vtpCreateHandler(req, res) {
     }
     const existing = orders.find((o) => o.ship?.vtpCode);
     if (existing) {
-      results.push({ key: g.key, ok: true, code: existing.ship.vtpCode, already: true });
+      const { vtpCode, vtpFee, vtpCod, vtpGoods } = existing.ship;
+      results.push({ key: g.key, ok: true, code: vtpCode, already: true, fee: vtpFee ?? 0, cod: vtpCod ?? null, goods: vtpGoods ?? null });
       continue;
     }
-    const r = await vtp.vtpCreateOrder(vtpStore, userId, g, service, vtpWards);
+    // Tiền thu hộ và giá trị hàng lấy theo đơn trên máy chủ, không tin nguyên số client gửi (BL-03).
+    const chk = vtp.checkGroupCod(orders, g.cod);
+    const r = chk.ok
+      ? await vtp.vtpCreateOrder(vtpStore, userId, { ...g, cod: chk.cod, goods: chk.goods, senderPays: chk.senderPays }, service, vtpWards)
+      : { ok: false, error: chk.error };
     if (r.ok) {
       console.log(`[vtp] Tạo vận đơn ${String(g.ref || g.key || '').slice(0, 60)} → ${r.code}${r.parsed ? ` · VTP hiểu: ${r.parsed}` : ' · chưa đối chiếu được địa chỉ'}`);
       mutateState(userId, 'vtp_created', '', null, (s) => {
@@ -1324,6 +1329,9 @@ async function vtpCreateHandler(req, res) {
             batchId,
             vtpCode: r.code,
             vtpFee: r.fee,
+            // Đúng số đã gửi Viettel Post; webhook đổi cước không đổi số này (BL-11).
+            vtpCod: r.cod,
+            vtpGoods: r.goods,
             vtpService: service,
             vtpStatus: 0,
             vtpStatusName: 'Chờ lấy hàng',

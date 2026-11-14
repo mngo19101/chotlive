@@ -126,6 +126,9 @@ data class ShipInfo(
     /** Mã vận đơn đã huỷ, để tra lại; đơn về Chờ gửi. */
     val vtpOldCode: String? = null,
     val vtpFee: Int? = null,
+    /** Tiền thu hộ và giá trị hàng máy chủ đã gửi Viettel Post lúc tạo; null với vận đơn tạo trước khi máy chủ lưu. */
+    val vtpCod: Int? = null,
+    val vtpGoods: Int? = null,
     val vtpService: String? = null,
     val vtpStatus: Int? = null,
     val vtpStatusName: String? = null,

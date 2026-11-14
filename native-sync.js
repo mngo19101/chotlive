@@ -102,7 +102,7 @@ export function nativeShip(ship) {
 }
 
 const VTP_TEXT_KEYS = ['vtpCode', 'vtpOldCode', 'vtpService', 'vtpStatusName', 'vtpKind', 'vtpNote', 'vtpError'];
-const VTP_NUM_KEYS = ['vtpFee', 'vtpStatus', 'vtpStatusAt', 'vtpErrorAt', 'vtpEventAt'];
+const VTP_NUM_KEYS = ['vtpFee', 'vtpCod', 'vtpGoods', 'vtpStatus', 'vtpStatusAt', 'vtpErrorAt', 'vtpEventAt'];
 
 /**
  * `ship` gửi xuống app: thêm mã vận đơn và trạng thái Viettel Post do máy chủ ghi.

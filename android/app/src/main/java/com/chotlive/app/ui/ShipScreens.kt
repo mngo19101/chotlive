@@ -603,7 +603,7 @@ fun VtpExportSheet(openDetail: String? = null) {
             // Máy chủ đã ghi mã vận đơn vào đơn; ghi luôn trên máy để không phải chờ đồng bộ.
             for (res in results) {
                 val g = list.firstOrNull { it.id == res.key } ?: continue
-                if (res.ok && res.code.isNotEmpty()) store.applyVtpCreated(g.orders, res.code, res.fee, service)
+                if (res.ok && res.code.isNotEmpty()) store.applyVtpCreated(g.orders, res.code, res.fee, service, cod = res.cod, goods = res.goods)
                 else if (!res.ok) store.applyVtpError(g.orders, res.error)
             }
             result = list to results

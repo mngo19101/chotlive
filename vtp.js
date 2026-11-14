@@ -6,6 +6,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { summarizeGroup } from './public/js/vtp-export.js';
 
 export const VTP_BASE = process.env.VTP_BASE || 'https://partner.viettelpost.vn';
 
@@ -141,6 +142,37 @@ export function clipBytes(s, maxBytes = 150) {
   return out;
 }
 
+/** Trần tiền thu hộ một vận đơn; trần cước dùng để suy ra cước client đã báo giá. */
+export const MAX_COD = 100_000_000;
+export const MAX_SHIP_FEE = 2_000_000;
+const vnd = (n) => Number(n).toLocaleString('vi-VN') + 'đ';
+
+/**
+ * Đối chiếu tiền thu hộ client gửi (`cod`) với số tính từ các đơn trên máy chủ, cùng công thức với web/app
+ * (summarizeGroup). `cod` phải là số nguyên 0..MAX_COD (chuỗi "450.000", null, số âm, số lẻ: từ chối, không ép về 0).
+ * Client tính theo cước thật vừa báo giá mà máy chủ không giữ: suy ra cước đó từ `cod` rồi tính lại cho khớp.
+ * Trả { ok, cod, goods, senderPays } hoặc { ok: false, error }.
+ */
+export function checkGroupCod(orders, cod) {
+  if (typeof cod !== 'number' || !Number.isInteger(cod) || cod < 0 || cod > MAX_COD) {
+    return { ok: false, error: 'Tiền thu hộ không hợp lệ. Cập nhật app rồi gửi lại.' };
+  }
+  // Cũ nhất trước, như web/app: cài đặt (COD sửa tay, người trả cước…) của đơn mới nhất thắng.
+  const list = [...orders].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
+  const pick = (s) => ({ ok: true, cod: s.cod, goods: s.goods, senderPays: s.senderPays });
+  const base = summarizeGroup({ orders: list });
+  if (base.cod === cod) return pick(base);
+  const fee = cod - (base.cod - base.shipFee);
+  if (fee > 0 && fee <= MAX_SHIP_FEE) {
+    const real = summarizeGroup({ orders: list }, { realFee: fee });
+    if (real.cod === cod) return pick(real);
+  }
+  return {
+    ok: false,
+    error: `Tiền thu hộ ${vnd(cod)} khác số tính từ đơn trên máy chủ (${vnd(base.cod)}${base.shipFee ? ' tạm tính ship' : ''}). Đợi đồng bộ xong rồi gửi lại.`
+  };
+}
+
 /**
  * Tạo một vận đơn. `g` do trình duyệt gom sẵn (cùng cách tính với file Excel):
  * { ref, receiver, phone, address, goodsName, qty, weightG, goods, cod, senderPays, note, size:[d,r,c]|null }
@@ -192,7 +224,8 @@ export async function vtpCreateOrder(store, userId, g, service, wards = null) {
   }
   const d = r.json.data;
   const code = String(d.ORDER_NUMBER);
-  const out = { ok: true, code, fee: Number(d.MONEY_TOTAL) || 0, sortCode: d.SORT_CODE || '' };
+  // `cod`/`goods`: đúng số đã gửi Viettel Post, máy chủ lưu lại để mọi máy hiện số này (không tính lại).
+  const out = { ok: true, code, fee: Number(d.MONEY_TOTAL) || 0, cod: body.MONEY_COLLECTION, goods: product.PRODUCT_PRICE, sortCode: d.SORT_CODE || '' };
   // Viettel Post đọc địa chỉ bằng NLP rồi trả về mã phường họ hiểu: đối chiếu với phường/tỉnh app gửi.
   // Hiểu sai thì huỷ ngay vận đơn vừa tạo, báo lỗi để shop sửa địa chỉ, không để hàng đi nhầm nơi.
   if (wards) {
@@ -448,7 +481,7 @@ export function vtpEventTime(at) {
 }
 
 /** Các trường vận đơn trong order.ship chỉ máy chủ ghi (tạo đơn, huỷ, webhook). */
-const VTP_SHIP_FIELDS = ['vtpCode', 'vtpOldCode', 'vtpFee', 'vtpService', 'vtpStatus', 'vtpStatusName', 'vtpStatusAt', 'vtpEventAt', 'vtpKind', 'vtpNote', 'vtpError', 'vtpErrorAt'];
+const VTP_SHIP_FIELDS = ['vtpCode', 'vtpOldCode', 'vtpFee', 'vtpCod', 'vtpGoods', 'vtpService', 'vtpStatus', 'vtpStatusName', 'vtpStatusAt', 'vtpEventAt', 'vtpKind', 'vtpNote', 'vtpError', 'vtpErrorAt'];
 
 /**
  * Web gửi lên cả danh sách đơn, có thể là bản chụp từ trước khi máy chủ ghi mã vận đơn hoặc trạng thái

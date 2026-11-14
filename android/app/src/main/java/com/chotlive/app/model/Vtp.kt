@@ -445,8 +445,12 @@ object VtpTrack {
         return all.filter { code(it) == c }.sortedBy { it.lastTs }.ifEmpty { listOf(o) }
     }
 
-    /** Tiền thu hộ của vận đơn: tính lại như lúc tạo (COD nhập tay, tiền cọc, cước thật Viettel Post báo). */
+    /**
+     * Tiền thu hộ của vận đơn: đúng số máy chủ đã gửi Viettel Post. Vận đơn tạo trước khi máy chủ lưu số đó
+     * (hoặc nháp chưa tạo) thì tính lại như lúc tạo (COD nhập tay, tiền cọc, cước thật Viettel Post báo).
+     */
     fun waybillCod(orders: List<Order>): Int {
+        orders.firstOrNull { code(it) != null && it.ship?.vtpCod != null }?.ship?.vtpCod?.let { return it }
         val c = orders.lastOrNull()?.customer ?: return 0
         val fee = orders.mapNotNull { it.ship?.vtpFee }.firstOrNull { it > 0 }
         return Vtp.summarize(Vtp.lines(orders), c.address, c.nickname, fee).cod

@@ -500,13 +500,15 @@ class Store(private val directory: File, account: String?) {
 
     // Ghi kết quả Viettel Post lên máy ngay, không chờ máy chủ đồng bộ về.
 
-    fun applyVtpCreated(orders: List<Order>, code: String, fee: Int, service: String, now: Long = Clock.now) {
+    fun applyVtpCreated(orders: List<Order>, code: String, fee: Int, service: String, now: Long = Clock.now, cod: Int? = null, goods: Int? = null) {
         val batch = "vtp_" + now.toString(36)
         setShip(orders.associate { o ->
             o.id to (o.ship ?: ShipInfo()).copy(
                 state = ShipState.EXPORTED.raw, exportedAt = now, batchId = batch,
                 vtpCode = code, vtpFee = fee, vtpService = service, vtpStatus = 0, vtpStatusName = "Chờ lấy hàng",
                 vtpStatusAt = now, vtpKind = "created", vtpNote = null, vtpError = null, vtpErrorAt = null,
+                // Số máy chủ đã gửi Viettel Post; máy chủ bản cũ không trả thì giữ số đang có.
+                vtpCod = cod ?: o.ship?.vtpCod, vtpGoods = goods ?: o.ship?.vtpGoods,
             )
         }, shipping = true)
     }
