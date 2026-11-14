@@ -49,23 +49,29 @@ test('INJ-01: bình luận dài toàn từ khoá ngắn không làm treo hàm nh
   assert.ok(ms < 10, `10k ký tự: ${ms.toFixed(1)} ms`);
 });
 
-test('INJ-01: bình luận thật vẫn nhận đúng địa chỉ, số lượng, tên món', () => {
-  const r = extractProductInfo('chốt 2 cái áo 150k sdt 0988123456 đc 12 nguyễn trãi quận 1, hcm', 150000);
-  assert.equal(r.phone, '0988123456');
-  assert.equal(r.quantity, 2);
-  assert.equal(r.address, '150k đc 12 nguyễn trãi quận 1');
+test('INJ-01: bình luận thật vẫn bắt đúng giá, số lượng, tên món', () => {
+  const opts = { multiplier: 1000, minPrice: 1, maxPrice: 1e12 };
+  const cases = [
+    ['chốt 2 cái áo 150k sdt 0988123456', 150000, 2, 'Áo'],
+    ['lấy 1 váy hoa 1tr2', 1200000, 1, 'Váy hoa'],
+    ['mã 12 size m 250', 250000, 1, 'Mã 12 size m'],
+    ['ở quận 3 lấy 2 cái 99k', 99000, 2, 'Ở quận 3']
+  ];
+  for (const [s, price, qty, name] of cases) {
+    assert.equal(parsePrice(s, opts), price, s);
+    const r = extractProductInfo(s, price);
+    assert.equal(r.quantity, qty, s);
+    assert.equal(r.productName, name, s);
+  }
+  assert.equal(extractProductInfo('chốt 2 cái áo 150k sdt 0988123456', 150000).phone, '0988123456');
 
-  const r2 = extractProductInfo('lấy 1 váy hoa, địa chỉ: 25 lê lợi phường bến nghé quận 1', 0);
-  assert.equal(r2.address, '25 lê lợi phường bến nghé quận 1');
-  assert.equal(r2.productName, 'Váy hoa');
-
-  // Bình luận dài bình thường (gần 500 ký tự) vẫn bắt được địa chỉ.
-  const long = 'mình lấy bộ này nhé ' + 'đẹp quá '.repeat(50) + ', giao về 99 trần hưng đạo phường 5 quận 5 tp hcm';
+  // Bình luận dài bình thường (gần 500 ký tự) vẫn bắt được giá.
+  const long = 'mình lấy bộ này nhé ' + 'đẹp quá '.repeat(50) + ' chốt 350k';
   assert.ok(long.length < 500, String(long.length));
-  assert.equal(extractProductInfo(long, 0).address, '99 trần hưng đạo phường 5 quận 5 tp hcm');
+  assert.equal(parsePrice(long, opts), 350000);
 
   assert.equal(extractProductInfo('', 0).productName, 'Sản phẩm livestream');
-  assert.equal(extractProductInfo('   ', 0).address, '');
+  assert.equal(extractProductInfo('   ', 0).productName, 'Sản phẩm livestream');
   assert.equal(extractProductInfo('x'.repeat(100000), 0).productName.length <= 500, true);
 });
 

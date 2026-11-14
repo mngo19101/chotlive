@@ -4,8 +4,7 @@
  * 1. Bắt mọi dạng giá Tiếng Việt: 150k, 1tr1, 1tr250, 150 (tự nhân 1.000), 1.100.000đ
  * 2. Nhận diện số lượng: "chốt 2 cái 150k" -> quantity = 2, tổng = 300.000đ
  * 3. Chuẩn hóa SĐT với mọi định dạng: 0988 123 456, 098.812.3456, +84988...
- * 4. Nhận diện địa chỉ giao hàng trong bình luận
- * 5. Nhận diện câu hỏi/tư vấn (tránh tạo đơn 0đ nhầm lẫn)
+ * 4. Nhận diện câu hỏi/tư vấn (tránh tạo đơn 0đ nhầm lẫn)
  */
 
 /**
@@ -124,7 +123,7 @@ export function formatPhone(p) {
 }
 
 /**
- * Trích xuất đầy đủ thông tin: Tên sản phẩm, Số lượng, Đơn giá, SĐT, Địa chỉ, Loại bình luận
+ * Trích xuất thông tin: Tên sản phẩm, Số lượng, SĐT, Loại bình luận (địa chỉ do shop tự nhập)
  */
 export function extractProductInfo(comment = '', price = 0) {
   const text = String(comment).trim().slice(0, MAX_COMMENT_CHARS);
@@ -143,21 +142,13 @@ export function extractProductInfo(comment = '', price = 0) {
   const qtyMatch = str.match(/(?:chốt|lấy|mua|cho em|cho e|cho chị|cho c)\s+(\d{1,2})\s*(?:cái|chiếc|đôi|bộ|hộp|set|kg)?\b/i);
   const quantity = qtyMatch ? Math.max(1, parseInt(qtyMatch[1], 10)) : 1;
 
-  // 3. Tìm địa chỉ nếu có. Phần trước từ chỉ địa danh có trần độ dài: để `+` thì mỗi từ khoá
-  // (vd. chữ "o") quét tới hết đoạn rồi lùi lại, chuỗi "o o o …" mất thời gian bình phương.
-  const addrMatch = str.match(/(?:địa chỉ|đ\/c|dc|giao về|giao tai|o tai|o|ship ve|tai)[:\s]*([^,;]{1,200}(?:hcm|hà nội|hn|đà nẵng|quận|huyện|phường|xã|đường|thôn|ấp|tp)[^,;]*)/i);
-  const address = addrMatch ? addrMatch[1].trim() : '';
-  if (address) {
-    str = str.replace(addrMatch[0], '');
-  }
-
-  // 4. Chỉ xoá cụm giá tiền đã nhận diện (giữ nguyên size 2, max 3)
+  // 3. Chỉ xoá cụm giá tiền đã nhận diện (giữ nguyên size 2, max 3)
   const { matchText } = parsePriceWithMatch(str);
   if (matchText) {
     str = str.replace(new RegExp(escapeRegExp(matchText), 'i'), '');
   }
 
-  // 5. Làm sạch từ khóa chốt đơn thông dụng
+  // 4. Làm sạch từ khóa chốt đơn thông dụng
   let cleaned = str
     .replace(/^([!@#.,\-_]+)/, '')
     .replace(/(?:^|\s+)(chốt|chot|lấy thêm|lấy|lay them|lay|cho em|cho e|cho chị|cho c|mua|ship|order)(?:\s+\d{1,2}\s*(?:cái|chiếc|đôi|bộ|hộp|set|kg)?)?(?=\s+|$)/gi, ' ')
@@ -176,7 +167,6 @@ export function extractProductInfo(comment = '', price = 0) {
   return {
     productName: cleaned || 'Sản phẩm livestream',
     phone,
-    address,
     quantity,
     isInquiry: isQuestion && !price,
   };
