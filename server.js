@@ -36,6 +36,8 @@ import { createLimiter, waitMessage } from './rate-limit.js';
 import { createTelegramBridge } from './telegram.js';
 import { applyRecordChanges, cleanChanges, cleanNativeUpdate, cleanState, isObject } from './validate.js';
 import {
+  MAX_COMMENT_CHARS,
+  MAX_DEVICE_COMMENTS_PER_DAY,
   MAX_STATE_BYTES,
   MAX_UNAUTHENTICATED_WS_BYTES,
   restoreState,
@@ -627,6 +629,7 @@ const loginFailuresByIp = createLimiter({ max: 100, windowMs: 15 * 60 * 1000 });
 // Dữ liệu đồng bộ do thiết bị gửi lên, tính theo từng tài khoản (xem limits.js).
 const syncMessagesByUser = createLimiter({ max: SYNC_MESSAGES_PER_MINUTE, windowMs: 60 * 1000 });
 const syncBytesByUser = createLimiter({ max: SYNC_BYTES_PER_MINUTE, windowMs: 60 * 1000 });
+const deviceCommentsByUser = createLimiter({ max: MAX_DEVICE_COMMENTS_PER_DAY, windowMs: 24 * 60 * 60 * 1000 });
 
 /** Ghi nhận một gói đồng bộ; false nghĩa là tài khoản đã gửi quá nhiều trong phút này. */
 function syncAllowed(userId, bytes) {
@@ -641,6 +644,7 @@ setInterval(() => {
   loginFailuresByIp.sweep();
   syncMessagesByUser.sweep();
   syncBytesByUser.sweep();
+  deviceCommentsByUser.sweep();
 }, 10 * 60 * 1000).unref();
 
 // 1. Đăng nhập
@@ -1511,7 +1515,37 @@ app.post('/api/print-lan', requireAuth, syncJson, (req, res) => {
    WebSocket Real-Time Sync Hub
    ============================================================ */
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: MAX_WS_MESSAGE_BYTES });
+const wss = new WebSocketServer({ noServer: true, path: '/ws', maxPayload: MAX_WS_MESSAGE_BYTES });
+// Kết nối chưa có token hợp lệ trên URL chỉ được gửi gói nhỏ. Giới hạn phải đặt ngay lúc bắt tay:
+// thư viện ws ngắt khi đọc phần đầu khung vượt maxPayload, còn kiểm tra trong 'message' thì gói đã nằm cả trong bộ nhớ.
+const guestWss = new WebSocketServer({
+  noServer: true,
+  path: '/ws',
+  maxPayload: MAX_UNAUTHENTICATED_WS_BYTES,
+  clientTracking: false
+});
+
+function wsUrlHasValidToken(req) {
+  try {
+    const tk = new URL(req.url, 'http://localhost').searchParams.get('token') || '';
+    return Boolean(tk && getUserByToken(tk));
+  } catch {
+    return false;
+  }
+}
+
+server.on('upgrade', (req, socket, head) => {
+  if (wss.shouldHandle(req) && wsUrlHasValidToken(req)) {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+    return;
+  }
+  guestWss.handleUpgrade(req, socket, head, (ws) => {
+    // Vẫn nằm trong wss.clients: đăng nhập bằng tin `auth` thì nhận tin như mọi thiết bị khác.
+    wss.clients.add(ws);
+    ws.once('close', () => wss.clients.delete(ws));
+    wss.emit('connection', ws, req);
+  });
+});
 
 /**
  * Báo rồi ngắt các thiết bị đang nối của một tài khoản (trừ thiết bị đang dùng exceptToken):
@@ -1711,7 +1745,7 @@ function mergeIncomingComments(userId, st, incoming) {
         }
         continue;
       }
-      if (sqlite.insertComment(db, userId, c)) {
+      if (insertDeviceComment(userId, c)) {
         st.comments.push(c);
         byId.set(id, c);
         added = true;
@@ -1721,6 +1755,14 @@ function mergeIncomingComments(userId, st, incoming) {
     }
   });
   if (added) trimCommentWindow(st);
+}
+
+/** Ghi một bình luận thiết bị gửi lên; tài khoản đã gửi đủ số bình luận mới trong ngày thì bỏ (xem limits.js). */
+function insertDeviceComment(userId, c) {
+  if (deviceCommentsByUser.retryAfter(userId) > 0) return false;
+  if (!sqlite.insertComment(db, userId, c)) return false;
+  deviceCommentsByUser.hit(userId);
+  return true;
 }
 
 /** Bình luận trong gói đồng bộ, đã chuyển về dạng server lưu. */
@@ -1743,7 +1785,7 @@ function saveDeviceCommentsOnly(userId, msg) {
   const list = deviceCommentsOf(userId, msg);
   if (!list.length) return;
   sqlite.tx(db, () => {
-    for (const c of list) sqlite.insertComment(db, userId, c);
+    for (const c of list) insertDeviceComment(userId, c);
   });
 }
 
@@ -1908,7 +1950,7 @@ function priceOptionsOf(st) {
 /** Đủ các trường web cần để hiện bình luận. */
 function toServerComment(st, c) {
   const ts = Number(c.ts) || Date.now();
-  const text = c.comment || '';
+  const text = String(c.comment || '').slice(0, MAX_COMMENT_CHARS);
   const price = parsePrice(text, priceOptionsOf(st)) || 0;
   const info = extractProductInfo(text, price);
   return {

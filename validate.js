@@ -2,11 +2,42 @@
  * Làm sạch dữ liệu thiết bị gửi lên trước khi đưa vào server.
  * Một phần tử sai kiểu (null, số...) không được làm hỏng cả danh sách, càng không được làm sập server.
  */
+import { MAX_COMMENT_CHARS, MAX_COMMENT_RECORD_CHARS, MAX_COMMENTS_PER_MESSAGE } from './limits.js';
+
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const onlyObjects = (list) => (Array.isArray(list) ? list.filter(isObject) : []);
 const onlyIds = (list) => (Array.isArray(list) ? list.filter((v) => typeof v === 'string' || typeof v === 'number') : []);
 
 export { isObject };
+
+const tooLong = (v) => typeof v === 'string' && v.length > MAX_COMMENT_CHARS;
+
+/**
+ * Bình luận gửi lên được lưu mãi và còn được đem đi nhận diện giá/địa chỉ: cắt nội dung dài,
+ * bỏ bình luận vẫn quá lớn (tên, trường lạ...), và chỉ nhận số lượng có hạn mỗi gói.
+ */
+function cleanComments(list) {
+  const out = [];
+  for (const c of onlyObjects(list)) {
+    if (out.length >= MAX_COMMENTS_PER_MESSAGE) break;
+    const cut =
+      tooLong(c.comment) || tooLong(c.text)
+        ? {
+            ...c,
+            ...(tooLong(c.comment) ? { comment: c.comment.slice(0, MAX_COMMENT_CHARS) } : {}),
+            ...(tooLong(c.text) ? { text: c.text.slice(0, MAX_COMMENT_CHARS) } : {})
+          }
+        : c;
+    let size;
+    try {
+      size = JSON.stringify(cut).length;
+    } catch {
+      continue;
+    }
+    if (size <= MAX_COMMENT_RECORD_CHARS) out.push(cut);
+  }
+  return out;
+}
 
 function cleanOrders(list) {
   return onlyObjects(list).map((o) => {
@@ -19,7 +50,7 @@ function cleanOrders(list) {
 const CLEANERS = {
   orders: cleanOrders,
   customers: onlyObjects,
-  comments: onlyObjects,
+  comments: cleanComments,
   sessions: onlyObjects,
   accounts: onlyObjects
 };
@@ -75,9 +106,10 @@ export function applyRecordChanges(list, change, { append = false } = {}) {
 /** Dữ liệu `native_update` từ app iOS. */
 export function cleanNativeUpdate(update) {
   const out = { ...update };
-  for (const key of ['comments', 'sessions', 'accounts']) {
+  for (const key of ['sessions', 'accounts']) {
     if (out[key] !== undefined) out[key] = onlyObjects(out[key]);
   }
+  if (out.comments !== undefined) out.comments = cleanComments(out.comments);
   for (const key of ['deletedItemIds', 'deletedAccountIds', 'printedCommentIds']) {
     if (out[key] !== undefined) out[key] = onlyIds(out[key]);
   }

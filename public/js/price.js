@@ -8,6 +8,12 @@
  * 5. Nhận diện câu hỏi/tư vấn (tránh tạo đơn 0đ nhầm lẫn)
  */
 
+/**
+ * Độ dài tối đa của một bình luận được xử lý và lưu (TikTok cho khoảng 150 ký tự).
+ * Một số regex bên dưới chạy chậm theo bình phương độ dài, nên phải cắt trước khi chạy.
+ */
+export const MAX_COMMENT_CHARS = 500;
+
 export const stripAccents = (s) =>
   String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
 
@@ -121,7 +127,8 @@ export function formatPhone(p) {
  * Trích xuất đầy đủ thông tin: Tên sản phẩm, Số lượng, Đơn giá, SĐT, Địa chỉ, Loại bình luận
  */
 export function extractProductInfo(comment = '', price = 0) {
-  let str = String(comment).trim();
+  const text = String(comment).trim().slice(0, MAX_COMMENT_CHARS);
+  let str = text;
   const isQuestion = isInquiry(str);
 
   // 1. Tìm số điện thoại (hỗ trợ dấu cách, dấu chấm, +84)
@@ -136,8 +143,9 @@ export function extractProductInfo(comment = '', price = 0) {
   const qtyMatch = str.match(/(?:chốt|lấy|mua|cho em|cho e|cho chị|cho c)\s+(\d{1,2})\s*(?:cái|chiếc|đôi|bộ|hộp|set|kg)?\b/i);
   const quantity = qtyMatch ? Math.max(1, parseInt(qtyMatch[1], 10)) : 1;
 
-  // 3. Tìm địa chỉ nếu có
-  const addrMatch = str.match(/(?:địa chỉ|đ\/c|dc|giao về|giao tai|o tai|o|ship ve|tai)[:\s]*([^,;]+(?:hcm|hà nội|hn|đà nẵng|quận|huyện|phường|xã|đường|thôn|ấp|tp)[^,;]*)/i);
+  // 3. Tìm địa chỉ nếu có. Phần trước từ chỉ địa danh có trần độ dài: để `+` thì mỗi từ khoá
+  // (vd. chữ "o") quét tới hết đoạn rồi lùi lại, chuỗi "o o o …" mất thời gian bình phương.
+  const addrMatch = str.match(/(?:địa chỉ|đ\/c|dc|giao về|giao tai|o tai|o|ship ve|tai)[:\s]*([^,;]{1,200}(?:hcm|hà nội|hn|đà nẵng|quận|huyện|phường|xã|đường|thôn|ấp|tp)[^,;]*)/i);
   const address = addrMatch ? addrMatch[1].trim() : '';
   if (address) {
     str = str.replace(addrMatch[0], '');
@@ -162,7 +170,7 @@ export function extractProductInfo(comment = '', price = 0) {
   if (cleaned.length >= 2) {
     cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
   } else {
-    cleaned = comment.trim();
+    cleaned = text;
   }
 
   return {
