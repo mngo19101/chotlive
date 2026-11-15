@@ -112,8 +112,14 @@ scp -i KHOA deploy\enable-cloud-backup.sh ubuntu@IP:/tmp/enable-cloud-backup.sh
 ```
 
 ```powershell
-(Select-String -Path .env -Pattern '^BACKUP_PASSPHRASE=(.+)$').Matches[0].Groups[1].Value.Trim() | ssh -i KHOA ubuntu@IP "sed -i 's/\r$//' /tmp/enable-cloud-backup.sh && sudo bash /tmp/enable-cloud-backup.sh"
+$p = (Select-String -Path .env -Pattern '^BACKUP_PASSPHRASE=(.+)$').Matches[0].Groups[1].Value.Trim(); $b = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($p))
 ```
+
+```powershell
+ssh -i KHOA ubuntu@IP "sed -i 's/\r$//' /tmp/enable-cloud-backup.sh && echo $b | base64 -d | sudo bash /tmp/enable-cloud-backup.sh"
+```
+
+Mật khẩu được gửi dưới dạng base64 trong lệnh `ssh`, vì PowerShell 5.1 có thể chèn ký tự vô hình khi chuyền chuỗi thẳng sang `ssh`.
 
 Mật khẩu sao lưu chỉ được dùng chữ không dấu, số và dấu gạch: PowerShell 5.1 biến chữ có dấu thành `?` khi gửi qua ssh.
 

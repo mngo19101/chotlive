@@ -4,7 +4,7 @@
 # Trước đó, trên máy tính có trình duyệt: tạo kết nối rclone (đăng nhập Google), xuất riêng phần cấu hình của nó
 # ra file rồi chép lên VPS ở /tmp/rclone-vps.conf. Mật khẩu sao lưu đưa vào qua stdin (dòng đầu), để nó không
 # hiện trên màn hình hay nằm trong lịch sử lệnh:
-#   <mật khẩu> | ssh ... "sudo bash enable-cloud-backup.sh"
+#   echo <mật khẩu dạng base64> | base64 -d | sudo bash enable-cloud-backup.sh
 # Không đưa mật khẩu mà file cấu hình đã có BACKUP_PASSPHRASE thì giữ nguyên mật khẩu cũ.
 set -euo pipefail
 
@@ -27,6 +27,8 @@ as_app() { if [ "$(id -un)" = "$APP_USER" ]; then "$@"; else sudo -u "$APP_USER"
 PASS=""
 if [ ! -t 0 ]; then IFS= read -r PASS || true; fi
 PASS="${PASS%$'\r'}"
+# PowerShell có thể chèn dấu đánh dấu mã hoá (BOM) vào đầu chuỗi khi chuyền sang ssh.
+PASS="${PASS#$'\xef\xbb\xbf'}"; PASS="${PASS#$'\xff\xfe'}"; PASS="${PASS#$'\xfe\xff'}"
 # Kiểm tra mật khẩu trước khi đụng tới bất cứ thứ gì.
 if [ -n "$PASS" ]; then
   [ "${#PASS}" -ge 12 ] || die "Mật khẩu sao lưu phải dài ít nhất 12 ký tự."
