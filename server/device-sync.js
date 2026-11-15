@@ -4,7 +4,7 @@ import * as sqlite from '../db.js';
 import { parsePrice, extractProductInfo } from '../public/js/price.js';
 import { createLimiter } from '../rate-limit.js';
 import { applyRecordChanges, cleanChanges, cleanNativeUpdate, cleanState } from '../validate.js';
-import { SYNC_BYTES_PER_MINUTE, SYNC_MESSAGES_PER_MINUTE } from '../limits.js';
+import { MAX_COMMENT_CHARS, MAX_DEVICE_COMMENTS_PER_DAY, SYNC_BYTES_PER_MINUTE, SYNC_MESSAGES_PER_MINUTE } from '../limits.js';
 import { applyNativeUpdate, mergeNativeSessions, timeOf } from '../native-sync.js';
 import * as vtp from '../vtp.js';
 import { COMMENT_WINDOW } from './config.js';
@@ -16,6 +16,7 @@ import { mutateState } from './hub.js';
 // Dữ liệu đồng bộ do thiết bị gửi lên, tính theo từng tài khoản (xem limits.js).
 const syncMessagesByUser = createLimiter({ max: SYNC_MESSAGES_PER_MINUTE, windowMs: 60 * 1000 });
 const syncBytesByUser = createLimiter({ max: SYNC_BYTES_PER_MINUTE, windowMs: 60 * 1000 });
+const deviceCommentsByUser = createLimiter({ max: MAX_DEVICE_COMMENTS_PER_DAY, windowMs: 24 * 60 * 60 * 1000 });
 
 /** Ghi nhận một gói đồng bộ; false nghĩa là tài khoản đã gửi quá nhiều trong phút này. */
 export function syncAllowed(userId, bytes) {
@@ -28,6 +29,7 @@ export function syncAllowed(userId, bytes) {
 setInterval(() => {
   syncMessagesByUser.sweep();
   syncBytesByUser.sweep();
+  deviceCommentsByUser.sweep();
 }, 10 * 60 * 1000).unref();
 
 function trimCommentWindow(st) {
@@ -56,7 +58,7 @@ function mergeIncomingComments(userId, st, incoming) {
         }
         continue;
       }
-      if (sqlite.insertComment(db, userId, c)) {
+      if (insertDeviceComment(userId, c)) {
         st.comments.push(c);
         byId.set(id, c);
         added = true;
@@ -66,6 +68,14 @@ function mergeIncomingComments(userId, st, incoming) {
     }
   });
   if (added) trimCommentWindow(st);
+}
+
+/** Ghi một bình luận thiết bị gửi lên; tài khoản đã gửi đủ số bình luận mới trong ngày thì bỏ (xem limits.js). */
+function insertDeviceComment(userId, c) {
+  if (deviceCommentsByUser.retryAfter(userId) > 0) return false;
+  if (!sqlite.insertComment(db, userId, c)) return false;
+  deviceCommentsByUser.hit(userId);
+  return true;
 }
 
 /** Bình luận trong gói đồng bộ, đã chuyển về dạng server lưu. */
@@ -88,7 +98,7 @@ export function saveDeviceCommentsOnly(userId, msg) {
   const list = deviceCommentsOf(userId, msg);
   if (!list.length) return;
   sqlite.tx(db, () => {
-    for (const c of list) sqlite.insertComment(db, userId, c);
+    for (const c of list) insertDeviceComment(userId, c);
   });
 }
 
@@ -201,7 +211,7 @@ function priceOptionsOf(st) {
 /** Đủ các trường web cần để hiện bình luận. */
 export function toServerComment(st, c) {
   const ts = Number(c.ts) || Date.now();
-  const text = c.comment || '';
+  const text = String(c.comment || '').slice(0, MAX_COMMENT_CHARS);
   const price = parsePrice(text, priceOptionsOf(st)) || 0;
   const info = extractProductInfo(text, price);
   return {

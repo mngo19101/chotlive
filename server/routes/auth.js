@@ -39,8 +39,10 @@ router.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ error: 'Vui lòng nhập đầy đủ tên tài khoản và mật khẩu.' });
   }
 
-  const accountKey = `${req.ip}|${cleanName}`;
-  const wait = Math.max(loginFailuresByAccount.retryAfter(accountKey), loginFailuresByIp.retryAfter(req.ip));
+  // Gộp IPv6 theo dải /64 như phần đăng ký: một máy có cả dải địa chỉ không né được bộ đếm (AUTH-01).
+  const ip = ipKey(req.ip);
+  const accountKey = `${ip}|${cleanName}`;
+  const wait = Math.max(loginFailuresByAccount.retryAfter(accountKey), loginFailuresByIp.retryAfter(ip));
   if (wait > 0) {
     res.setHeader('Retry-After', String(wait));
     return res.status(429).json({ error: waitMessage(wait), code: 'TOO_MANY_ATTEMPTS' });
@@ -49,7 +51,7 @@ router.post('/api/auth/login', async (req, res) => {
   const user = usersDb.users.find((u) => normalizeAccountName(u.username) === cleanName);
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     loginFailuresByAccount.hit(accountKey);
-    loginFailuresByIp.hit(req.ip);
+    loginFailuresByIp.hit(ip);
     return res.status(401).json({ error: 'Tên tài khoản hoặc mật khẩu không chính xác.' });
   }
   loginFailuresByAccount.reset(accountKey);
@@ -169,8 +171,9 @@ router.post('/api/auth/change-password', requireAuth, async (req, res) => {
 // 5. Đăng xuất
 router.post('/api/auth/logout', (req, res) => {
   const token = extractToken(req);
-  if (token && usersDb.tokens[token]) {
-    delete usersDb.tokens[token];
+  const key = token ? sqlite.hashSessionToken(token) : '';
+  if (key && usersDb.tokens[key]) {
+    delete usersDb.tokens[key];
     persistUsersDb();
   }
   res.json({ ok: true });

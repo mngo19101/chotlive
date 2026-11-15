@@ -67,7 +67,9 @@ function loadUsersData() {
 
   const legacy = readLegacyJson(USERS_FILE);
   if (legacy && Array.isArray(legacy.users) && legacy.users.length) {
-    const migrated = { users: legacy.users, tokens: legacy.tokens || {} };
+    // users.json cũ giữ token rõ: đổi khoá sang sha256 như bảng session_tokens (AUTH-03).
+    const tokens = Object.fromEntries(Object.entries(legacy.tokens || {}).map(([tk, info]) => [sqlite.hashSessionToken(tk), info]));
+    const migrated = { users: legacy.users, tokens };
     sqlite.saveUsers(db, migrated);
     archiveLegacyFile(USERS_FILE);
     console.log(`[migrate] Đã chuyển ${migrated.users.length} tài khoản từ users.json sang SQLite.`);
@@ -163,7 +165,7 @@ startTrialForOldAccounts();
 export function createSessionToken(userId) {
   purgeExpiredTokens();
   const token = crypto.randomBytes(28).toString('hex');
-  usersDb.tokens[token] = {
+  usersDb.tokens[sqlite.hashSessionToken(token)] = {
     userId,
     createdAt: Date.now()
   };
@@ -172,8 +174,9 @@ export function createSessionToken(userId) {
 }
 
 export function revokeUserTokens(userId, exceptToken = null) {
+  const keep = exceptToken ? sqlite.hashSessionToken(exceptToken) : null;
   for (const [tk, info] of Object.entries(usersDb.tokens)) {
-    if (info.userId === userId && tk !== exceptToken) {
+    if (info.userId === userId && tk !== keep) {
       delete usersDb.tokens[tk];
     }
   }
@@ -183,10 +186,11 @@ export function revokeUserTokens(userId, exceptToken = null) {
 export function getUserByToken(token) {
   if (!token) return null;
   const clean = String(token).replace(/^Bearer\s+/i, '').trim();
-  const sess = usersDb.tokens[clean];
+  const key = sqlite.hashSessionToken(clean);
+  const sess = usersDb.tokens[key];
   if (!sess) return null;
   if (!sess.createdAt || Date.now() - sess.createdAt > TOKEN_TTL_MS) {
-    delete usersDb.tokens[clean];
+    delete usersDb.tokens[key];
     persistUsersDb();
     return null;
   }

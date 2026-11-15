@@ -4,16 +4,46 @@
  */
 import { WebSocketServer } from 'ws';
 import { snapCollections, diffCollections, snapScalars, diffScalars } from '../delta.js';
-import { MAX_STATE_BYTES, restoreState, stateBytes } from '../limits.js';
+import { MAX_STATE_BYTES, MAX_UNAUTHENTICATED_WS_BYTES, restoreState, stateBytes } from '../limits.js';
 import { accessOf } from '../access.js';
 import { toNativeSnapshot } from '../native-sync.js';
 import { MAX_WS_MESSAGE_BYTES } from './config.js';
 import { server } from './app.js';
-import { usersDb } from './accounts.js';
+import { getUserByToken, usersDb } from './accounts.js';
 import { getStateForUser, persistAllStates } from './states.js';
 import { safely } from './util.js';
 
-export const wss = new WebSocketServer({ server, path: '/ws', maxPayload: MAX_WS_MESSAGE_BYTES });
+export const wss = new WebSocketServer({ noServer: true, path: '/ws', maxPayload: MAX_WS_MESSAGE_BYTES });
+// Kết nối chưa có token hợp lệ trên URL chỉ được gửi gói nhỏ. Giới hạn phải đặt ngay lúc bắt tay:
+// thư viện ws ngắt khi đọc phần đầu khung vượt maxPayload, còn kiểm tra trong 'message' thì gói đã nằm cả trong bộ nhớ.
+const guestWss = new WebSocketServer({
+  noServer: true,
+  path: '/ws',
+  maxPayload: MAX_UNAUTHENTICATED_WS_BYTES,
+  clientTracking: false
+});
+
+function wsUrlHasValidToken(req) {
+  try {
+    const tk = new URL(req.url, 'http://localhost').searchParams.get('token') || '';
+    return Boolean(tk && getUserByToken(tk));
+  } catch {
+    return false;
+  }
+}
+
+server.on('upgrade', (req, socket, head) => {
+  if (wss.shouldHandle(req) && wsUrlHasValidToken(req)) {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+    return;
+  }
+  guestWss.handleUpgrade(req, socket, head, (ws) => {
+    // Vẫn nằm trong wss.clients: đăng nhập bằng tin `auth` thì nhận tin như mọi thiết bị khác.
+    wss.clients.add(ws);
+    ws.once('close', () => wss.clients.delete(ws));
+    wss.emit('connection', ws, req);
+  });
+});
 
 export function sanitizeUser(u) {
   return {
