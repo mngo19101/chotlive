@@ -205,7 +205,9 @@ function loadUsersData() {
 
   const legacy = readLegacyJson(USERS_FILE);
   if (legacy && Array.isArray(legacy.users) && legacy.users.length) {
-    const migrated = { users: legacy.users, tokens: legacy.tokens || {} };
+    // users.json cũ giữ token rõ: đổi khoá sang sha256 như bảng session_tokens (AUTH-03).
+    const tokens = Object.fromEntries(Object.entries(legacy.tokens || {}).map(([tk, info]) => [sqlite.hashSessionToken(tk), info]));
+    const migrated = { users: legacy.users, tokens };
     sqlite.saveUsers(db, migrated);
     archiveLegacyFile(USERS_FILE);
     console.log(`[migrate] Đã chuyển ${migrated.users.length} tài khoản từ users.json sang SQLite.`);
@@ -301,7 +303,7 @@ startTrialForOldAccounts();
 function createSessionToken(userId) {
   purgeExpiredTokens();
   const token = crypto.randomBytes(28).toString('hex');
-  usersDb.tokens[token] = {
+  usersDb.tokens[sqlite.hashSessionToken(token)] = {
     userId,
     createdAt: Date.now()
   };
@@ -310,8 +312,9 @@ function createSessionToken(userId) {
 }
 
 function revokeUserTokens(userId, exceptToken = null) {
+  const keep = exceptToken ? sqlite.hashSessionToken(exceptToken) : null;
   for (const [tk, info] of Object.entries(usersDb.tokens)) {
-    if (info.userId === userId && tk !== exceptToken) {
+    if (info.userId === userId && tk !== keep) {
       delete usersDb.tokens[tk];
     }
   }
@@ -321,10 +324,11 @@ function revokeUserTokens(userId, exceptToken = null) {
 function getUserByToken(token) {
   if (!token) return null;
   const clean = String(token).replace(/^Bearer\s+/i, '').trim();
-  const sess = usersDb.tokens[clean];
+  const key = sqlite.hashSessionToken(clean);
+  const sess = usersDb.tokens[key];
   if (!sess) return null;
   if (!sess.createdAt || Date.now() - sess.createdAt > TOKEN_TTL_MS) {
-    delete usersDb.tokens[clean];
+    delete usersDb.tokens[key];
     persistUsersDb();
     return null;
   }
@@ -655,8 +659,10 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ error: 'Vui lòng nhập đầy đủ tên tài khoản và mật khẩu.' });
   }
 
-  const accountKey = `${req.ip}|${cleanName}`;
-  const wait = Math.max(loginFailuresByAccount.retryAfter(accountKey), loginFailuresByIp.retryAfter(req.ip));
+  // Gộp IPv6 theo dải /64 như phần đăng ký: một máy có cả dải địa chỉ không né được bộ đếm (AUTH-01).
+  const ip = ipKey(req.ip);
+  const accountKey = `${ip}|${cleanName}`;
+  const wait = Math.max(loginFailuresByAccount.retryAfter(accountKey), loginFailuresByIp.retryAfter(ip));
   if (wait > 0) {
     res.setHeader('Retry-After', String(wait));
     return res.status(429).json({ error: waitMessage(wait), code: 'TOO_MANY_ATTEMPTS' });
@@ -665,7 +671,7 @@ app.post('/api/auth/login', async (req, res) => {
   const user = usersDb.users.find((u) => normalizeAccountName(u.username) === cleanName);
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     loginFailuresByAccount.hit(accountKey);
-    loginFailuresByIp.hit(req.ip);
+    loginFailuresByIp.hit(ip);
     return res.status(401).json({ error: 'Tên tài khoản hoặc mật khẩu không chính xác.' });
   }
   loginFailuresByAccount.reset(accountKey);
@@ -785,8 +791,9 @@ app.post('/api/auth/change-password', requireAuth, async (req, res) => {
 // 5. Đăng xuất
 app.post('/api/auth/logout', (req, res) => {
   const token = extractToken(req);
-  if (token && usersDb.tokens[token]) {
-    delete usersDb.tokens[token];
+  const key = token ? sqlite.hashSessionToken(token) : '';
+  if (key && usersDb.tokens[key]) {
+    delete usersDb.tokens[key];
     persistUsersDb();
   }
   res.json({ ok: true });

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,6 +19,7 @@ export function openDb(file) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS tokens (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS session_tokens (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS settings (user_id TEXT PRIMARY KEY, data TEXT NOT NULL);
   `);
   for (const t of Object.values(TABLE_OF)) {
@@ -47,7 +49,36 @@ export function openDb(file) {
     );
     CREATE INDEX IF NOT EXISTS idx_vtp_waybills_time ON vtp_waybills (user_id, created_at);
   `);
+  migratePlainTokens(db);
   return db;
+}
+
+/**
+ * Token phiên chỉ lưu dạng sha256 (AUTH-03): ai có bản sao lưu susu.db cũng không dùng được token trong đó.
+ * Bộ nhớ (`usersDb.tokens`) cũng giữ theo chuỗi băm; token rõ chỉ trả cho thiết bị lúc đăng nhập.
+ */
+export const hashSessionToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+
+/**
+ * Chuyển token rõ của bảng `tokens` cũ sang bảng `session_tokens` (băm), giữ nguyên phiên đang đăng nhập.
+ * Bảng cũ còn dòng nghĩa là bản code cũ ghi lần cuối (bản mới luôn để trống bảng đó), nên danh sách cũ là danh sách
+ * đúng và thay hẳn bảng băm. Xoá với secure_delete rồi dồn WAL để token rõ không còn sót trong file.
+ */
+function migratePlainTokens(db) {
+  const rows = db.prepare('SELECT token, user_id, created_at FROM tokens').all();
+  if (!rows.length) return;
+  db.exec('PRAGMA secure_delete = ON');
+  try {
+    tx(db, () => {
+      db.exec('DELETE FROM session_tokens');
+      const ins = db.prepare('INSERT OR REPLACE INTO session_tokens (token_hash, user_id, created_at) VALUES (?, ?, ?)');
+      for (const r of rows) ins.run(hashSessionToken(r.token), String(r.user_id), Number(r.created_at) || 0);
+      db.exec('DELETE FROM tokens');
+    });
+  } finally {
+    db.exec('PRAGMA secure_delete = OFF');
+  }
+  db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
 }
 
 /*
@@ -171,20 +202,21 @@ export function hasData(db) {
 export function loadUsers(db) {
   const users = db.prepare('SELECT data FROM users').all().map((r) => JSON.parse(r.data));
   const tokens = {};
-  for (const r of db.prepare('SELECT token, user_id, created_at FROM tokens').all()) {
-    tokens[r.token] = { userId: r.user_id, createdAt: r.created_at };
+  for (const r of db.prepare('SELECT token_hash, user_id, created_at FROM session_tokens').all()) {
+    tokens[r.token_hash] = { userId: r.user_id, createdAt: r.created_at };
   }
   return { users, tokens };
 }
 
 export function saveUsers(db, usersDb) {
   tx(db, () => {
-    db.exec('DELETE FROM users; DELETE FROM tokens;');
+    db.exec('DELETE FROM users; DELETE FROM tokens; DELETE FROM session_tokens;');
     const insUser = db.prepare('INSERT INTO users (id, data) VALUES (?, ?)');
     for (const u of usersDb.users) insUser.run(String(u.id), JSON.stringify(u));
-    const insTok = db.prepare('INSERT INTO tokens (token, user_id, created_at) VALUES (?, ?, ?)');
-    for (const [tk, info] of Object.entries(usersDb.tokens || {})) {
-      insTok.run(tk, String(info.userId), Number(info.createdAt) || 0);
+    // Khoá của `usersDb.tokens` đã là sha256(token).
+    const insTok = db.prepare('INSERT INTO session_tokens (token_hash, user_id, created_at) VALUES (?, ?, ?)');
+    for (const [hash, info] of Object.entries(usersDb.tokens || {})) {
+      insTok.run(hash, String(info.userId), Number(info.createdAt) || 0);
     }
   });
 }

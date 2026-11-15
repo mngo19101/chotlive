@@ -185,7 +185,7 @@ test('dữ liệu sai đã lưu từ bản cũ không làm sập server khi app 
       { id: 'u_admin', username: 'admin', displayName: 'admin', passwordHash: 'a:b', role: 'admin' },
       { id: uid, username: 'shopcu', displayName: 'shopcu', passwordHash: 'a:b', role: 'user' }
     ],
-    tokens: { [tk]: { userId: uid, createdAt: Date.now() } }
+    tokens: { [sqlite.hashSessionToken(tk)]: { userId: uid, createdAt: Date.now() } }
   });
   sqlite.saveUserState(db, uid, { rev: 1, orders: [{ id: 'hong', uniqueId: 'a', items: 5 }, { id: 'tot', uniqueId: 'b', items: [{ id: 'm', price: 1, qty: 1 }, null] }], customers: [], comments: [], sessions: [], accounts: [] }, null);
   db.close();
