@@ -556,6 +556,11 @@ fun OrderEditScreen(orderId: String) {
                         ui.notify("Đơn đã có vận đơn ${VtpTrack.pretty(code)}, tiền thu hộ đã gửi Viettel Post. Huỷ vận đơn ở chi tiết đơn rồi mới sửa món.")
                         return@PrimaryButton
                     }
+                    // Chưa rõ Viettel Post đã tạo vận đơn chưa: có thể đã tạo với số thu hộ cũ, chưa cho đổi tiền.
+                    if (VtpTrack.unknown(order) && items.sumOf { it.lineTotal } != order.total) {
+                        ui.notify("Chưa rõ vận đơn của đơn này đã tạo chưa. Kiểm tra ở chi tiết đơn xong rồi mới sửa món.")
+                        return@PrimaryButton
+                    }
                     store.updateOrder(order, items.toList())
                     ui.notify(store.takeCodResetNotice())
                 }

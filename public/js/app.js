@@ -3827,6 +3827,10 @@ $('#btn-save-order-items')?.addEventListener('click', () => {
     if (moneyChanged && ord.ship?.vtpCode && ord.status !== 'done') {
       return toast(`Đơn đã có vận đơn ${ord.ship.vtpCode}, tiền thu hộ đã gửi Viettel Post. Huỷ vận đơn rồi mới sửa món.`, '⚠️', 5000);
     }
+    // Chưa rõ Viettel Post đã tạo vận đơn chưa: có thể đã tạo với số thu hộ cũ, chưa cho đổi tiền.
+    if (moneyChanged && vtpAttemptOpen(ord)) {
+      return toast('Chưa rõ vận đơn của đơn này đã tạo chưa. Kiểm tra ở chi tiết đơn xong rồi mới sửa món.', '⚠️', 5000);
+    }
     ord.items = items;
     ord.subtotal = sum(items);
     ord.total = Math.max(0, ord.subtotal + (Number(ord.shippingFee) || 0) - (Number(ord.discount) || 0));

@@ -690,6 +690,11 @@ struct OrderEditView: View {
                         ui.notify("Đơn đã có vận đơn \(VtpTrack.pretty(code)), tiền thu hộ đã gửi Viettel Post. Huỷ vận đơn ở chi tiết đơn rồi mới sửa món.")
                         return
                     }
+                    // Chưa rõ Viettel Post đã tạo vận đơn chưa: có thể đã tạo với số thu hộ cũ, chưa cho đổi tiền.
+                    if VtpTrack.unknown(o), items.reduce(0, { $0 + $1.lineTotal }) != o.total {
+                        ui.notify("Chưa rõ vận đơn của đơn này đã tạo chưa. Kiểm tra ở chi tiết đơn xong rồi mới sửa món.")
+                        return
+                    }
                     store.updateOrder(o, items: items)
                     ui.notify(store.takeCodResetNotice())
                 }

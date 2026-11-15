@@ -4,6 +4,7 @@
  * và đồng bộ 2 chiều thời gian thực qua Server.
  */
 import { TRACKED, countPending, emptyPending, overlayPending, recordChanges, snapshotOf } from './pending.js';
+import { vtpAttemptOpen } from './vtp-export.js';
 
 const KEY = 'susu_chotdon.v5';
 const PENDING_KEY = `${KEY}.pending`;
@@ -676,12 +677,13 @@ export function areSameCustomer(a, b) {
 }
 
 /**
- * Đơn còn nhận thêm món: chưa huỷ, chưa giao xong và chưa gửi đi. Đơn đang giao hoặc đã có vận đơn
- * thì gói hàng đã chốt, món mới phải sang đơn khác để không bị bỏ sót khi gửi và thu tiền.
+ * Đơn còn nhận thêm món: chưa huỷ, chưa giao xong và chưa gửi đi. Đơn đang giao, đã có vận đơn, hoặc đang chờ rõ
+ * kết quả tạo vận đơn (Viettel Post có thể đã tạo với số thu hộ cũ) thì gói hàng đã chốt, món mới phải sang đơn
+ * khác để không bị bỏ sót khi gửi và thu tiền.
  */
 export function isOpenOrder(o) {
   if (!o || o.status === 'cancelled' || o.status === 'done' || o.status === 'shipping') return false;
-  return o.ship?.state !== 'exported' && !o.ship?.vtpCode;
+  return o.ship?.state !== 'exported' && !o.ship?.vtpCode && !vtpAttemptOpen(o);
 }
 
 /**

@@ -9,6 +9,7 @@
  * - Trường chỉ web mới có (mã đơn, phí ship, giảm giá...) được giữ nguyên.
  */
 import crypto from 'node:crypto';
+import { vtpAttemptOpen } from './public/js/vtp-export.js';
 
 const TIME_ZONE = 'Asia/Ho_Chi_Minh';
 const hmFormat = new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit' });
@@ -302,9 +303,12 @@ function mergeNativeItem(existing, it) {
   };
 }
 
-/** Đơn đã gửi đi, không còn nhận thêm món (cùng quy tắc với `isOpenOrder` của web). */
+/**
+ * Đơn đã gửi đi, không còn nhận thêm món (cùng quy tắc với `isOpenOrder` của web). Đơn đang chờ rõ kết quả tạo vận đơn
+ * cũng vậy: Viettel Post có thể đã tạo vận đơn với số thu hộ cũ, món chốt thêm phải sang đơn mới để được gửi và thu tiền.
+ */
 const isSentOrder = (o) =>
-  o.status === 'shipping' || o.status === 'done' || o.ship?.state === 'exported' || Boolean(o.ship?.vtpCode);
+  o.status === 'shipping' || o.status === 'done' || o.ship?.state === 'exported' || Boolean(o.ship?.vtpCode) || vtpAttemptOpen(o);
 
 function applyNativeCustomer(state, c) {
   const key = customerKey(c.uniqueId, c.userId, c.nickname) || String(c.id || '');

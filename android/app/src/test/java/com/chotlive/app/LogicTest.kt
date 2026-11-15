@@ -11,6 +11,7 @@ import com.chotlive.app.model.DeliveryAddress
 import com.chotlive.app.model.LiveComment
 import com.chotlive.app.model.OrderItem
 import com.chotlive.app.model.PriceParser
+import com.chotlive.app.model.ShipInfo
 import com.chotlive.app.model.money
 import com.chotlive.app.print.PrinterProfile
 import org.junit.Assert.assertEquals
@@ -158,6 +159,25 @@ class StoreTest {
         // Bấm in lại cùng bình luận không tạo món mới.
         assertEquals(items, store.saveToCustomer(comment("c1", "Chốt 120 với 180")))
         assertEquals(2, store.customers[0].items.size)
+    }
+
+    @Test
+    fun newItemSkipsAnOrderWhoseWaybillIsUnresolved() {
+        val store = Store(newDir(), "srv|a")
+        store.saveToCustomer(comment("c1", "150"))
+        val first = store.allOrders().single()
+        // Lần tạo vận đơn chưa rõ kết quả (máy chủ ghi): Viettel Post có thể đã tạo với số thu hộ 150.000đ.
+        store.setShip(mapOf(first.id to ShipInfo(state = "ready", pay = "cod", vtpKind = "unknown")))
+        store.saveToCustomer(comment("c2", "90"))
+        assertEquals(2, store.allOrders().size)
+        assertEquals(150000, store.allOrders().first { it.id == first.id }.total)
+        // Đơn đã về Chờ gửi sau khi huỷ vận đơn thì vẫn nhận thêm món.
+        val other = Store(newDir(), "srv|b")
+        other.saveToCustomer(comment("c1", "150"))
+        val o = other.allOrders().single()
+        other.setShip(mapOf(o.id to ShipInfo(state = "ready", pay = "cod", vtpKind = "cancelled", vtpOldCode = "VTP1")))
+        other.saveToCustomer(comment("c2", "90"))
+        assertEquals(1, other.allOrders().size)
     }
 
     @Test

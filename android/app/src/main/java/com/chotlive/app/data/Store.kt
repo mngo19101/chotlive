@@ -19,6 +19,7 @@ import com.chotlive.app.model.ShipInfo
 import com.chotlive.app.model.ShipState
 import com.chotlive.app.model.TikTokAccount
 import com.chotlive.app.model.Vtp
+import com.chotlive.app.model.VtpTrack
 import java.io.File
 import java.time.LocalDate
 import java.util.UUID
@@ -276,7 +277,8 @@ class Store(private val directory: File, account: String?) {
         sessionId ?: return null
         val mine = orders(customer).filter { o -> o.items.any { it.sessionId == sessionId && it.groupId != null } }
         if (mine.isEmpty()) return sessionId
-        val open = mine.filter { Vtp.state(it).isPending && it.ship?.vtpCode.isNullOrEmpty() }
+        // Đơn đang chờ rõ kết quả tạo vận đơn cũng coi như đã gửi: Viettel Post có thể đã tạo với số thu hộ cũ.
+        val open = mine.filter { Vtp.state(it).isPending && it.ship?.vtpCode.isNullOrEmpty() && !VtpTrack.unknown(it) }
         if (open.any { it.key == sessionId }) return sessionId
         open.firstOrNull()?.items?.firstNotNullOfOrNull { it.groupId }?.let { return it }
         return sessionId + "~" + UUID.randomUUID().toString().take(8).lowercase()

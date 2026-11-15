@@ -400,3 +400,26 @@ test('món chốt thêm sau khi đơn đã có vận đơn: sang đơn mới, đ
   applyNativeUpdate(st, customer([{ ...item('it_2'), groupId: extra.id }, { ...item('it_3'), groupId: extra.id }]));
   assert.equal(st.orders.length, 2);
 });
+
+test('món chốt thêm khi đơn đang chờ rõ kết quả tạo vận đơn: sang đơn mới, không lọt vào vận đơn có thể đã tạo', () => {
+  const customer = (items) => ({ customers: [{ id: 'linh.nguyen', uniqueId: 'Linh.Nguyen', userId: '71928419201', nickname: 'Linh', items }] });
+  const extraItem = { id: 'it_2', comment: 'chốt 90', price: 90000, ts: 1794000100000, groupId: 'o_web' };
+  for (const vtpKind of ['creating', 'unknown']) {
+    const st = baseState();
+    st.orders[0].ship = { state: 'ready', pay: 'cod', vtpKind, vtpAttempt: { id: 'a1', cod: 320000 } };
+    applyNativeUpdate(st, customer([extraItem]));
+    assert.equal(st.orders.length, 2, vtpKind);
+    const locked = st.orders.find((o) => o.id === 'o_web');
+    const extra = st.orders.find((o) => o.id !== 'o_web');
+    assert.deepEqual(locked.items.map((i) => i.id), ['it_1']);
+    assert.equal(locked.total, 320000, 'tổng đơn khớp số thu hộ có thể đã gửi Viettel Post');
+    assert.equal(locked.ship.vtpKind, vtpKind);
+    assert.deepEqual(extra.items.map((i) => i.id), ['it_2']);
+    assert.equal(extra.ship, undefined);
+  }
+  // Đơn đã rõ (vận đơn cũ đã huỷ, đơn về Chờ gửi) thì vẫn nhận thêm món như thường.
+  const st = baseState();
+  st.orders[0].ship = { state: 'ready', pay: 'cod', vtpKind: 'cancelled', vtpOldCode: 'VTP1' };
+  applyNativeUpdate(st, customer([extraItem]));
+  assert.equal(st.orders.length, 1);
+});
