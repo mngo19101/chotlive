@@ -120,6 +120,20 @@ export const maskPhone = (p) => {
   return s.length > 5 ? `${s.slice(0, 3)}•••${s.slice(-3)}` : s;
 };
 
+/** Che mọi số điện thoại Việt Nam (0… hoặc +84…, có thể viết tách) trong một chuỗi trước khi ghi log (INF-03). */
+export const maskPhones = (text) =>
+  String(text ?? '').replace(/(?<!\d)(?:\+?84|0)(?:[\s.-]?\d){8,10}(?!\d)/g, (m) => maskPhone(m.replace(/\D/g, '')));
+
+/**
+ * Tóm tắt phản hồi lỗi của Viettel Post để ghi log: chỉ HTTP, mã lỗi và lời báo (đã che SĐT), không ghi `data`
+ * vì họ trả lại tên, SĐT, địa chỉ người nhận (INF-03).
+ */
+const replyForLog = (r) => {
+  const j = r.json;
+  const msg = maskPhones(String(j ? j.message ?? '' : r.text ?? '').slice(0, 200));
+  return `HTTP ${r.http}${j ? ` status=${j.status ?? '-'} error=${j.error ?? '-'}` : ''} "${msg}"`;
+};
+
 /** Đổi token web thành token Partner. */
 export async function vtpLogin(siteToken) {
   const r = await call('POST', '/v2/user/LoginVTP', { body: { token: siteToken } });
@@ -269,8 +283,8 @@ export const VTP_UNKNOWN_MSG =
  */
 async function readCreateReply(store, userId, r, { g, ref, wards, cod, goods }) {
   if (!ok(r) || !r.json.data?.ORDER_NUMBER) {
-    // Ghi phản hồi của Viettel Post (không có token) để dò lỗi.
-    console.warn(`[vtp] Tạo vận đơn ${ref} lỗi: HTTP ${r.http} ${r.json ? JSON.stringify(r.json).slice(0, 400) : r.text}`);
+    // Ghi mã lỗi và lời báo của Viettel Post để dò lỗi, không ghi dữ liệu khách họ trả lại.
+    console.warn(`[vtp] Tạo vận đơn ${ref} lỗi: ${replyForLog(r)}`);
     return maybeCreated(r) ? { ok: false, unknown: true, error: VTP_UNKNOWN_MSG } : { ok: false, error: why(r) };
   }
   const d = r.json.data;
@@ -283,8 +297,8 @@ async function readCreateReply(store, userId, r, { g, ref, wards, cod, goods }) 
     await wards.get().catch(() => null);
     const chk = checkParsedAddress(wards, d, g);
     if (chk.checked) out.parsed = chk.parsed;
-    // Không tra được mã phường: ghi lại phần Viettel Post trả về (không có token) để dò tên trường.
-    else console.log(`[vtp] Không đối chiếu được địa chỉ vận đơn ${code}: ${JSON.stringify(d).slice(0, 500)}`);
+    // Không tra được mã phường: ghi tên các trường Viettel Post trả về (không ghi giá trị) để dò tên trường.
+    else console.log(`[vtp] Không đối chiếu được địa chỉ vận đơn ${code}: trường ${Object.keys(d).join(',').slice(0, 500)}`);
     if (chk.checked && !chk.ok) {
       const c = await vtpCancel(store, userId, code, 'Viettel Post hiểu địa chỉ khác với địa chỉ shop nhập');
       console.warn(`[vtp] Vận đơn ${code} (${ref}): Viettel Post hiểu "${chk.parsed}", app gửi "${chk.expected}" → ${c.ok ? 'đã huỷ' : 'KHÔNG huỷ được: ' + c.error}`);
@@ -487,7 +501,7 @@ export async function vtpCancel(store, userId, code, note = 'Shop huỷ đơn') 
     r = await vtpCall(store, userId, 'POST', '/v2/order/UpdateOrder', body);
   }
   if (ok(r)) return { ok: true };
-  console.warn(`[vtp] Huỷ vận đơn ${code} lỗi: HTTP ${r.http} ${r.json ? JSON.stringify(r.json).slice(0, 400) : r.text}`);
+  console.warn(`[vtp] Huỷ vận đơn ${code} lỗi: ${replyForLog(r)}`);
   // Viettel Post trả lỗi "Đơn hàng đã hủy!" khi vận đơn đã huỷ từ trước (vd. huỷ trên web Viettel Post lúc
   // chưa nối webhook): coi như huỷ xong để đơn trong app không kẹt ở Đang giao.
   if (VTP_ALREADY_CANCELLED.test(String(r.json?.message || ''))) return { ok: true, already: true };
