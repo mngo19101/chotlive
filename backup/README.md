@@ -83,32 +83,58 @@ Chưa có bot Telegram thì sao lưu vẫn chạy, nhưng cảnh báo trễ ch�
 
 ## Cài đặt trên VPS
 
-Server trên VPS chạy bằng người dùng `chotlive`, nên rclone phải được đăng nhập bằng người dùng đó.
+VPS không có trình duyệt, nên đăng nhập Google làm trên máy tính rồi chép quyền đó lên VPS. Mọi lệnh dưới đây chạy trong PowerShell trên máy tính Windows đã cài rclone (bước 1 ở trên), ở thư mục dự án, với code trên VPS đã có thư mục `backup/`. Thay `KHOA` bằng đường dẫn file `.pem` và `IP` bằng địa chỉ VPS.
 
-```bash
-curl https://rclone.org/install.sh | sudo bash
+**1. Đăng nhập Google cho VPS** (trình duyệt mở ra, bấm **Cho phép**). Thay `...` bằng mã ứng dụng riêng (bước 2 ở trên):
+
+```powershell
+rclone config create chotlive-vps drive scope=drive.file client_id=... client_secret=...
 ```
 
-```bash
-sudo -H -u chotlive rclone config
+**2. Chép quyền đó lên VPS.** File tạm này chứa quyền vào Drive, lệnh thứ ba xoá nó khỏi máy tính:
+
+```powershell
+rclone config show chotlive-vps | Out-File -Encoding ascii "$env:TEMP\rclone-vps.conf"
 ```
 
-Trong phần hỏi đáp: tạo kết nối mới tên `gdrive`, loại `drive`, điền Client ID và Client secret của riêng bạn (xem bước 2 của phần Windows), quyền truy cập chọn `drive.file`, các câu khác để mặc định. VPS không có trình duyệt nên ở câu hỏi dùng trình duyệt để đăng nhập hãy trả lời **không**; rclone sẽ in một lệnh `rclone authorize ...` để chạy trên máy tính có trình duyệt (máy đó cũng cần cài rclone), rồi dán kết quả trở lại. Chi tiết xem [hướng dẫn của rclone](https://rclone.org/remote_setup/).
-
-Thêm hai dòng `BACKUP_RCLONE_REMOTE` và `BACKUP_PASSPHRASE` như ở trên vào `/etc/chotlive.env`, rồi:
-
-```bash
-sudo chown root:chotlive /etc/chotlive.env && sudo chmod 640 /etc/chotlive.env
+```powershell
+scp -i KHOA "$env:TEMP\rclone-vps.conf" ubuntu@IP:/tmp/rclone-vps.conf
 ```
 
-```bash
-sudo systemctl restart chotlive
+```powershell
+Remove-Item "$env:TEMP\rclone-vps.conf"
 ```
+
+**3. Bật sao lưu trên VPS.** Lệnh này lấy mật khẩu sao lưu trong file `.env` của máy tính và gửi thẳng sang VPS, không hiện ra màn hình, để hai máy dùng chung một mật khẩu. Nó cài rclone trên VPS, ghi cấu hình vào `/etc/chotlive.env`, rồi sao lưu thử và khôi phục thử vào thư mục `ChotLive-VPS` trên Drive:
+
+```powershell
+scp -i KHOA deploy\enable-cloud-backup.sh ubuntu@IP:/tmp/enable-cloud-backup.sh
+```
+
+```powershell
+(Select-String -Path .env -Pattern '^BACKUP_PASSPHRASE=(.+)$').Matches[0].Groups[1].Value.Trim() | ssh -i KHOA ubuntu@IP "sed -i 's/\r$//' /tmp/enable-cloud-backup.sh && sudo bash /tmp/enable-cloud-backup.sh"
+```
+
+Mật khẩu sao lưu chỉ được dùng chữ không dấu, số và dấu gạch: PowerShell 5.1 biến chữ có dấu thành `?` khi gửi qua ssh.
+
+**4. Khởi động lại server** (vài giây gián đoạn, làm lúc không có live). Khoảng 1 phút sau, bot Telegram nhắn `đã bật sao lưu lên đám mây`:
+
+```powershell
+ssh -i KHOA ubuntu@IP "sudo systemctl restart chotlive"
+```
+
+**5. Thử lấy bản sao của VPS về máy tính** bằng mật khẩu trong `.env` của máy tính, giống như khi VPS hỏng:
+
+```powershell
+$env:BACKUP_RCLONE_REMOTE = "chotlive-vps:ChotLive-VPS"; npm.cmd run backup:test-restore; Remove-Item Env:BACKUP_RCLONE_REMOTE
+```
+
+Dòng `Dữ liệu đang dùng` lúc này là dữ liệu trên máy tính, không phải VPS, nên số liệu có thể khác. Cần thấy `Kết luận: bản sao này khôi phục được`.
 
 Các lệnh bằng tay trên VPS chạy theo mẫu sau (đổi `test-restore` thành `run`, `list`, `status`):
 
 ```bash
-cd /opt/chotlive && sudo -H -u chotlive env DATA_DIR=/var/lib/chotlive node --env-file=/etc/chotlive.env --no-warnings backup/cloud-backup.mjs test-restore
+cd /opt/chotlive && sudo -u chotlive env DATA_DIR=/var/lib/chotlive node --env-file=/etc/chotlive.env --no-warnings backup/cloud-backup.mjs test-restore
 ```
 
 Bản sao mỗi đêm trên chính VPS (xem `deploy/README.md`) vẫn chạy như cũ.
