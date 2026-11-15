@@ -121,7 +121,12 @@ Vào **Tôi › Máy in › Tìm máy in**, chọn máy rồi bấm **In thử**
 
 | Đường dẫn | Vai trò |
 |---|---|
-| `server.js` | Server Express: API, WebSocket và tài khoản |
+| `server.js` | Điểm khởi động: ghép các phần trong `server/` lại và chạy server |
+| `server/config.js`, `server/database.js` | Cấu hình từ biến môi trường và CSDL SQLite dùng chung |
+| `server/accounts.js`, `server/states.js` | Tài khoản, token đăng nhập và dữ liệu của từng tài khoản |
+| `server/hub.js`, `server/ws.js` | WebSocket: gửi tin tới thiết bị và xử lý từng kết nối |
+| `server/device-sync.js`, `server/live.js` | Nhận dữ liệu từ web và app; theo dõi TikTok Live |
+| `server/routes/` | Các API, mỗi nhóm một file: `auth` (đăng nhập), `admin`, `support` (chat hỗ trợ), `sync` (đồng bộ), `vtp` (Viettel Post), `lan` (in LAN) |
 | `access.js` | Dùng thử, gói và cách tính IP khi giới hạn tạo tài khoản |
 | `live-manager.js` | Kết nối và theo dõi các phiên TikTok Live |
 | `native-sync.js`, `delta.js` | Đồng bộ dữ liệu giữa server và các máy |
