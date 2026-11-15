@@ -268,6 +268,12 @@ class VtpTest {
         assertFalse(VtpTrack.unknown(created))
         assertFalse(Vtp.readyGroups(listOf(order("g", ship = ShipInfo(state = "ready", pay = "cod", vtpError = "Sai số điện thoại"))))[0]
             .summary.problems.contains(VtpTrack.UNKNOWN_PROBLEM))
+        // Máy chủ gợi ý mã Viettel Post vừa báo cho đơn "chưa rõ".
+        val hinted = AppJson.decodeFromString(ShipInfo.serializer(),
+            "{\"state\":\"ready\",\"vtpKind\":\"unknown\",\"vtpHint\":\"156288120099\",\"vtpHintCod\":150000}")
+        assertEquals("156288120099", hinted.vtpHint)
+        assertEquals(150_000, hinted.vtpHintCod)
+        assertTrue(VtpTrack.unknown(order("h", ship = hinted)))
 
         // Trường đã bỏ (COD nhập tay) không gửi lên: máy chủ coi trường thiếu là đã xoá.
         val back = AppJson.encodeToString(ShipInfo.serializer(), ShipInfo(state = "ready", pay = "cod"))

@@ -229,7 +229,8 @@ private fun OrderCard(o: Order, every: List<Order>, onPrint: () -> Unit) {
                 }
             }
         } else if (VtpTrack.unknown(o)) {
-            ShipTag("Chưa rõ vận đơn đã tạo chưa · mở đơn để kiểm tra", C.red, C.redSoft)
+            ShipTag(o.ship?.vtpHint?.takeIf { it.isNotEmpty() }?.let { "Viettel Post vừa báo vận đơn ${VtpTrack.pretty(it)} · mở đơn để xác nhận" }
+                ?: "Chưa rõ vận đơn đã tạo chưa · mở đơn để kiểm tra", C.red, C.redSoft)
         } else if (lastError != null) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.weight(1f, fill = false)) { ShipTag("Lỗi tạo vận đơn: $lastError", C.red, C.redSoft) }

@@ -3308,6 +3308,26 @@ function renderVtpConnect() {
     size.innerHTML = VTP_LABEL_SIZES.map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('');
   }
   if (size) size.value = S().vtpLabelSize || 'a6';
+  loadVtpLooseWaybills();
+}
+
+/** Sổ vận đơn (BL-08): vận đơn Viettel Post có mà không đơn nào trong app mang mã, để shop đối soát. */
+const VTP_LOOSE_TEXT = { orphan: 'Tạo từ app, đơn đã bị xoá hoặc đổi', unmatched: 'Viettel Post báo qua webhook' };
+async function loadVtpLooseWaybills() {
+  const box = $('#vtp-loose-box');
+  if (!box) return;
+  const get = (state) => apiFetch(`/api/vtp/waybills?state=${state}&limit=50`, { method: 'GET', cache: 'no-store' }).catch(() => null);
+  const [a, b] = await Promise.all([get('orphan'), get('unmatched')]);
+  const list = [...(a?.waybills || []), ...(b?.waybills || [])].sort((x, y) => y.createdAt - x.createdAt);
+  box.hidden = !list.length;
+  $('#vtp-loose-list').innerHTML = list
+    .map((w) => {
+      const at = new Date(w.createdAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+      const bits = [VTP_LOOSE_TEXT[w.state] || w.state, at, w.cod != null ? 'thu hộ ' + vndText(w.cod) : '', w.statusName || ''].filter(Boolean);
+      return `<div class="vtp-result-row"><span class="mark">!</span><div class="main"><a class="vtp-code" href="${esc(vtpTrackUrl(w.code))}" target="_blank" rel="noopener">${esc(w.code)}</a>
+        <div class="vtp-row-sub">${esc(bits.join(' · '))}</div></div></div>`;
+    })
+    .join('');
 }
 
 async function loadVtpSenders(list) {
@@ -3541,7 +3561,10 @@ $('#vtp-result')?.addEventListener('click', (e) => {
 function vtpTagHtml(o) {
   const code = o.ship?.vtpCode;
   if (!code) {
-    if (vtpAttemptOpen(o)) return '<span class="ship-tag ship-tag-vtp-bad">Chưa rõ vận đơn đã tạo chưa · mở đơn để kiểm tra</span>';
+    if (vtpAttemptOpen(o)) {
+      const hint = o.ship.vtpHints?.[0]?.code;
+      return `<span class="ship-tag ship-tag-vtp-bad">${hint ? `Viettel Post vừa báo vận đơn ${esc(hint)} · mở đơn để xác nhận` : 'Chưa rõ vận đơn đã tạo chưa · mở đơn để kiểm tra'}</span>`;
+    }
     if (o.ship?.vtpKind === 'cancelled' && o.ship?.vtpOldCode && isPending(o)) {
       return `<span class="ship-tag ship-tag-vtp-bad">Vận đơn ${esc(o.ship.vtpOldCode)} đã huỷ · gửi lại</span>`;
     }
@@ -3595,11 +3618,21 @@ function renderDetailVtp(ord) {
     if (vtpAttemptOpen(ord)) {
       // Lần tạo trước chưa rõ kết quả (BL-01): shop kiểm trên viettelpost.vn rồi nhập mã, hoặc xác nhận không có.
       const at = ord.ship.vtpAttempt?.at ? new Date(ord.ship.vtpAttempt.at).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+      // Webhook báo vận đơn chưa đơn nào nhận, vào khoảng lần tạo này: gợi ý, shop xem rồi bấm gắn.
+      const hints = Array.isArray(ord.ship.vtpHints) ? ord.ship.vtpHints.filter((h) => h?.code) : [];
+      const hintsHtml = hints.length
+        ? `<div class="vtp-note"><b>Viettel Post vừa báo ${hints.length > 1 ? 'các vận đơn' : 'vận đơn'} chưa gắn đơn nào.</b> Kiểm tra trên viettelpost.vn đúng là của khách này rồi mới gắn.</div>
+        <div class="vtp-actions">${hints
+          .map((h) => `<button type="button" class="btn-orange-pill" data-vtp-act="settle-hint" data-code="${esc(h.code)}">Gắn mã ${esc(h.code)}${h.cod != null ? ` · thu hộ ${esc(vndText(h.cod))}` : ''}</button>
+            <a class="btn-outline-pill" href="${esc(vtpTrackUrl(h.code))}" target="_blank" rel="noopener">Xem trên Viettel Post</a>`)
+          .join('')}</div>`
+        : '';
       box.className = 'detail-vtp-box is-bad';
       box.innerHTML = `<div class="vtp-status">Chưa rõ vận đơn đã tạo chưa</div>
         <div class="vtp-note">Viettel Post không trả lời kịp lần tạo vận đơn${at ? ` lúc ${esc(at)}` : ''}. Đơn tạm khoá để không tạo trùng. Nếu Viettel Post trả lời muộn, mã vận đơn tự hiện ở đây. Vài phút chưa có thì vào viettelpost.vn › Quản lý đơn hàng, tìm theo số điện thoại khách.</div>
+        ${hintsHtml}
         <div class="vtp-actions">
-          <button type="button" class="btn-orange-pill" data-vtp-act="settle-code">Đã có, nhập mã vận đơn</button>
+          <button type="button" class="${hints.length ? 'btn-outline-pill' : 'btn-orange-pill'}" data-vtp-act="settle-code">Đã có, nhập mã vận đơn</button>
           <button type="button" class="btn-outline-pill" data-vtp-act="settle-none">Không có, cho tạo lại</button>
         </div>`;
       box.hidden = false;
@@ -3696,7 +3729,15 @@ $('#detail-vtp-box')?.addEventListener('click', async (e) => {
 /** Lần tạo vận đơn "chưa rõ": shop đã kiểm trên viettelpost.vn, nhập mã tìm thấy hoặc xác nhận không có để tạo lại. */
 async function settleVtpUnknown(ord, btn) {
   const body = { orderIds: [ord.id] };
-  if (btn.dataset.vtpAct === 'settle-code') {
+  if (btn.dataset.vtpAct === 'settle-hint') {
+    const sure = await askConfirm({
+      title: `Gắn vận đơn ${btn.dataset.code}?`,
+      message: 'Chỉ gắn khi đã kiểm trên viettelpost.vn vận đơn này đúng là của khách này (tên, số điện thoại, tiền thu hộ). Đơn sẽ chuyển sang Đang giao với mã đó.',
+      ok: 'Gắn mã vào đơn'
+    });
+    if (!sure) return;
+    body.code = btn.dataset.code;
+  } else if (btn.dataset.vtpAct === 'settle-code') {
     const code = await askConfirm({
       title: 'Nhập mã vận đơn',
       message: 'Mã vận đơn của khách này trên viettelpost.vn › Quản lý đơn hàng. Đơn sẽ chuyển sang Đang giao với mã đó.',

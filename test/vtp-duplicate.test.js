@@ -477,3 +477,115 @@ test('chưa nối được tới Viettel Post (chưa gửi gì đi): là thất 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/* ===================== Sổ vận đơn (BL-08) và gợi ý mã từ webhook ===================== */
+
+const waybills = async (state = '') => (await api('/api/vtp/waybills' + (state ? `?state=${state}` : ''))).body.waybills;
+const waybill = async (code) => (await waybills()).find((w) => w.code === code);
+const hookPath = async () => new URL((await api('/api/vtp/status')).body.hookUrl).pathname;
+const removeOrder = async (id) => {
+  const prev = (await api('/api/state')).body;
+  const keep = ((prev.state || prev).orders || []).filter((o) => o.id !== id);
+  assert.equal((await api('/api/sync', { state: { orders: keep, customers: [] } })).status, 200);
+};
+
+test('sổ vận đơn: ghi mọi mã Viettel Post trả về, kèm đơn, số thu hộ và trạng thái huỷ', WAIT, async () => {
+  resetVtp();
+  await putOrders([order('j1', 120000)]);
+  const [r] = await create(group('j1', ['j1'], 120000));
+  assert.equal(r.ok, true, r.error);
+  let w = await waybill(r.code);
+  assert.equal(w.state, 'created');
+  assert.equal(w.source, 'create');
+  assert.deepEqual(w.orderIds, ['j1']);
+  assert.equal(w.cod, 120000);
+  assert.equal(w.service, 'VSL9');
+  assert.equal((await api('/api/vtp/cancel', { code: r.code })).status, 200);
+  w = await waybill(r.code);
+  assert.equal(w.state, 'cancelled');
+  assert.equal(w.source, 'create', 'nguồn đầu tiên giữ nguyên');
+
+  // Vận đơn tạo sai địa chỉ: cả khi tự huỷ được lẫn khi chưa huỷ được đều nằm trong sổ.
+  await putOrders([order('j2'), order('j3')]);
+  const wrong = { address: '12 Hàng Buồm, Phường Thuỷ Xuân, TP.Huế (Hà Nội)', expect: { province: 'TP.Huế', ward: 'Phường Thuỷ Xuân' } };
+  await create(group('j2', ['j2'], 150000, wrong));
+  assert.equal((await waybill(vtp.waybills.at(-1).code)).state, 'cancelled');
+  vtp.cancel = 'fail';
+  await create(group('j3', ['j3'], 150000, wrong));
+  assert.equal((await waybill(vtp.waybills.at(-1).code)).state, 'needsCancel');
+  // Gỡ khỏi app (force) cũng được ghi lại để đối soát.
+  assert.equal((await api('/api/vtp/cancel', { code: vtp.waybills.at(-1).code, force: true })).status, 200);
+  assert.equal((await waybill(vtp.waybills.at(-1).code)).state, 'detached');
+});
+
+test('sổ vận đơn: đơn bị xoá trong lúc Viettel Post trả lời muộn thì mã vẫn còn trong sổ, ghi là "orphan"', WAIT, async () => {
+  resetVtp();
+  await putOrders([order('gone')]);
+  vtp.createDelayMs = SLOW_MS;
+  const [r] = await create(group('gone', ['gone'], 150000));
+  assert.equal(r.unknown, true);
+  await removeOrder('gone');
+  const code = vtp.waybills.at(-1).code;
+  await until(async () => (await waybill(code))?.state === 'orphan', 'ghi sổ phản hồi muộn');
+  const w = await waybill(code);
+  assert.equal(w.source, 'late');
+  assert.deepEqual(w.orderIds, ['gone'], 'vẫn biết vận đơn này định cho đơn nào');
+  assert.ok((await waybills('orphan')).some((x) => x.code === code), 'lọc được các vận đơn không gắn đơn nào');
+});
+
+test('webhook báo vận đơn lạ trong lúc đơn "chưa rõ": gợi ý mã cho đơn, shop xác nhận thì đơn nhận mã', WAIT, async () => {
+  resetVtp();
+  await putOrders([order('hint', 150000), order('other', 99000)]);
+  vtp.create = 'drop';
+  await create(group('hint', ['hint'], 150000));
+  await create(group('other', ['other'], 99000));
+  vtp.create = 'ok';
+  const [codeHint, codeOther] = vtp.waybills.slice(-2).map((w) => w.code);
+  const hook = await hookPath();
+  const at = '15/11/2026 11:00:00';
+  // Viettel Post gửi kèm tiền thu hộ: chỉ gợi ý cho đơn có cùng số thu hộ.
+  await api(hook, { DATA: { ORDER_NUMBER: codeHint, ORDER_STATUS: 100, STATUS_NAME: 'Tiếp nhận đơn hàng', ORDER_STATUSDATE: at, MONEY_COLLECTION: 150000 } });
+  await until(async () => (await findOrder('hint')).ship.vtpHints?.length === 1, 'gợi ý mã');
+  let o = await findOrder('hint');
+  assert.equal(o.ship.vtpHints[0].code, codeHint);
+  assert.equal(o.ship.vtpHints[0].cod, 150000);
+  assert.equal(o.ship.vtpCode, undefined, 'KHÔNG tự gắn mã');
+  assert.equal(o.ship.vtpKind, 'unknown');
+  assert.equal((await findOrder('other')).ship.vtpHints, undefined, 'khác số thu hộ thì không gợi ý');
+  assert.equal((await waybill(codeHint)).state, 'unmatched');
+  assert.equal((await waybill(codeHint)).source, 'webhook');
+
+  // Shop bấm "Gắn mã này".
+  assert.equal((await api('/api/vtp/settle', { orderIds: ['hint'], code: codeHint })).status, 200);
+  o = await findOrder('hint');
+  assert.equal(o.ship.vtpCode, codeHint);
+  assert.equal(o.ship.vtpHints, undefined, 'gắn xong thì bỏ gợi ý');
+  const w = await waybill(codeHint);
+  assert.equal(w.state, 'created');
+  assert.deepEqual(w.orderIds, ['hint']);
+  assert.equal(w.source, 'webhook', 'nguồn đầu tiên giữ nguyên');
+
+  // Webhook không kèm tiền thu hộ: gợi ý cho mọi đơn đang chờ kiểm tra.
+  await api(hook, { DATA: { ORDER_NUMBER: codeOther, ORDER_STATUS: 100, STATUS_NAME: 'Tiếp nhận đơn hàng', ORDER_STATUSDATE: at } });
+  await until(async () => (await findOrder('other')).ship.vtpHints?.length === 1, 'gợi ý mã không kèm tiền');
+});
+
+test('webhook về mã cũ đã huỷ, mã đang gắn đơn khác, hay vận đơn lạ đã huỷ: không gợi ý', WAIT, async () => {
+  resetVtp();
+  await putOrders([order('old'), order('live'), order('wait2')]);
+  const [made] = await create(group('old', ['old'], 150000));
+  assert.equal((await api('/api/vtp/cancel', { code: made.code })).status, 200);
+  const [live] = await create(group('live', ['live'], 150000));
+  vtp.create = 'drop';
+  await create(group('wait2', ['wait2'], 150000));
+  vtp.create = 'ok';
+  const hook = await hookPath();
+  await api(hook, { DATA: { ORDER_NUMBER: made.code, ORDER_STATUS: 107, STATUS_NAME: 'Đã huỷ', ORDER_STATUSDATE: '15/11/2026 12:00:00' } });
+  await api(hook, { DATA: { ORDER_NUMBER: live.code, ORDER_STATUS: 103, STATUS_NAME: 'Giao cho bưu cục', ORDER_STATUSDATE: '15/11/2026 12:00:01' } });
+  await api(hook, { DATA: { ORDER_NUMBER: 'LA12345678', ORDER_STATUS: 107, STATUS_NAME: 'Đã huỷ', ORDER_STATUSDATE: '15/11/2026 12:00:02' } });
+  await until(async () => (await findOrder('live')).ship.vtpStatus === 103, 'webhook đã xử lý');
+  await until(async () => !!(await waybill('LA12345678')), 'ghi sổ mã lạ');
+  assert.equal((await findOrder('wait2')).ship.vtpHints, undefined);
+  assert.equal((await waybill('LA12345678')).state, 'cancelled');
+  assert.equal((await waybill(live.code)).status, 103, 'sổ ghi trạng thái mới nhất');
+});

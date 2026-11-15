@@ -154,6 +154,9 @@ struct ShipInfo: Codable, Equatable {
     /// Lý do Viettel Post từ chối lần tạo vận đơn gần nhất.
     var vtpError: String? = nil
     var vtpErrorAt: Double? = nil
+    /// Đơn "chưa rõ vận đơn": mã Viettel Post vừa báo qua webhook mà chưa đơn nào nhận (máy chủ gợi ý, shop xác nhận).
+    var vtpHint: String? = nil
+    var vtpHintCod: Int? = nil
 
     init(state: String? = nil, pay: String? = nil, payer: String? = nil, deposit: Int? = nil, shipFee: Int? = nil,
          codOverride: Int? = nil, weightG: Int? = nil, exportedAt: Double? = nil, batchId: String? = nil,
@@ -166,6 +169,7 @@ struct ShipInfo: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case state, pay, payer, deposit, shipFee, codOverride, weightG, exportedAt, batchId, lengthCm, widthCm, heightCm
         case vtpCode, vtpOldCode, vtpFee, vtpCod, vtpGoods, vtpService, vtpStatus, vtpStatusName, vtpStatusAt, vtpKind, vtpNote, vtpError, vtpErrorAt
+        case vtpHint, vtpHintCod
     }
 
     private static func text(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> String? {
@@ -210,6 +214,8 @@ struct ShipInfo: Codable, Equatable {
         vtpNote = Self.text(c, .vtpNote)
         vtpError = Self.text(c, .vtpError)
         vtpErrorAt = Self.number(c, .vtpErrorAt)
+        vtpHint = Self.text(c, .vtpHint)
+        vtpHintCod = Self.money(Self.number(c, .vtpHintCod))
     }
 
     /// Ghi cả giá trị rỗng (null) để server xoá đúng trường đã bỏ, ví dụ COD nhập tay.

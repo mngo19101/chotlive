@@ -397,6 +397,23 @@ fun VtpOrderBox(order: Order) {
     if (code == null) {
         if (VtpTrack.unknown(order)) {
             CardBox(C.badRow, C.red.copy(alpha = 0.3f), 8f, 15f) {
+                order.ship?.vtpHint?.takeIf { it.isNotEmpty() }?.let { hint ->
+                    T("Viettel Post vừa báo vận đơn chưa gắn đơn nào", 14f, BV.BOLD, C.red)
+                    T("Kiểm tra trên viettelpost.vn đúng là của khách này (tên, số điện thoại, tiền thu hộ) rồi mới gắn.", 12.5f, BV.MEDIUM, C.ink)
+                    val cod = order.ship?.vtpHintCod?.let { " · thu hộ ${money(it)}" } ?: ""
+                    OutlineButton("Gắn mã ${VtpTrack.pretty(hint)}$cod", Modifier.fillMaxWidth(), filled = true, enabled = !busy) {
+                        ui.confirm = ConfirmItem("Gắn vận đơn ${VtpTrack.pretty(hint)}?", "Chỉ gắn khi đã kiểm trên viettelpost.vn vận đơn này đúng là của khách này. Đơn sẽ chuyển sang Đang giao với mã đó.", "Gắn mã vào đơn") {
+                            busy = true
+                            app.scope.launch {
+                                val e = client.vtpSettle(order.items.map { it.id }, hint)
+                                busy = false
+                                ui.notify(e ?: "Đã gắn vận đơn ${VtpTrack.pretty(hint)} vào đơn.")
+                            }
+                        }
+                    }
+                    OutlineButton("Xem trên Viettel Post", Modifier.fillMaxWidth(), IconName.TRUCK) { VtpActions.track(hint, app, ui) }
+                    HairLine()
+                }
                 T("Chưa rõ vận đơn đã tạo chưa", 14f, BV.BOLD, C.red)
                 T("Viettel Post không trả lời kịp lần tạo vận đơn. Đơn tạm khoá để không tạo trùng. Nếu họ trả lời muộn, mã vận đơn tự hiện ở đây. Vài phút chưa có thì vào viettelpost.vn › Quản lý đơn hàng, tìm theo số điện thoại khách. Đã có vận đơn ở đó: mở ChốtLive trên web để nhập mã vào đơn.", 12.5f, BV.MEDIUM, C.ink)
                 OutlineButton(if (busy) "Đang ghi…" else "Không có, cho tạo lại", Modifier.fillMaxWidth(), color = C.red, enabled = !busy) {

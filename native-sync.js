@@ -117,6 +117,13 @@ export function nativeShipOut(ship) {
     const n = numOrNull(ship[k]);
     if (n !== null) out[k] = Math.round(n);
   }
+  // Mã vận đơn Viettel Post vừa báo mà chưa đơn nào nhận, gợi ý cho đơn đang chờ kiểm tra (mới nhất).
+  const hint = Array.isArray(ship.vtpHints) ? ship.vtpHints.find((h) => h && h.code) : null;
+  if (hint) {
+    out.vtpHint = String(hint.code).slice(0, 40);
+    const cod = numOrNull(hint.cod);
+    if (cod !== null) out.vtpHintCod = Math.round(cod);
+  }
   return out;
 }
 

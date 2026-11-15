@@ -1356,7 +1356,7 @@ async function vtpCreateHandler(req, res) {
       });
     const { late, ...out } = r;
     if (!out.ok && !out.error) out.error = 'Lỗi';
-    vtpSettle(userId, attempt, out, batchId, label);
+    vtpSettle(userId, attempt, out, batchId, label, 'create', ids);
     if (late) {
       // Viettel Post trả lời muộn: ghi kết quả thật vào đơn (mã vận đơn, hoặc bỏ khoá nếu họ từ chối).
       vtpLateWaiting.add(attempt.id);
@@ -1364,7 +1364,7 @@ async function vtpCreateHandler(req, res) {
         .then((final) => {
           // Tài khoản đã bị xoá trong lúc chờ: không dựng lại dữ liệu của tài khoản đó.
           if (!usersDb.users.some((u) => u.id === userId)) return;
-          if (!final.unknown) vtpSettle(userId, attempt, final.ok || final.error ? final : { ...final, error: 'Lỗi' }, batchId, label + ' (trả lời muộn)');
+          if (!final.unknown) vtpSettle(userId, attempt, final.ok || final.error ? final : { ...final, error: 'Lỗi' }, batchId, label + ' (trả lời muộn)', 'late', ids);
         })
         .catch((e) => console.warn(`[vtp] Lỗi ghi phản hồi muộn ${label}:`, e.message))
         .finally(() => vtpLateWaiting.delete(attempt.id));
@@ -1378,13 +1378,49 @@ async function vtpCreateHandler(req, res) {
 /** Các lần tạo "chưa rõ" mà máy chủ còn đang nghe câu trả lời muộn của Viettel Post. */
 const vtpLateWaiting = new Set();
 
+/**
+ * Sổ vận đơn (BL-08): ghi lỗi thì chỉ cảnh báo, không làm hỏng việc đang làm. Mã chưa có trong sổ (vận đơn tạo từ
+ * trước khi có sổ) được ghi với nguồn "legacy".
+ */
+function vtpJournal(userId, code, w) {
+  if (!code) return;
+  try {
+    const set = Object.fromEntries(Object.entries(w).filter(([, v]) => v !== undefined));
+    const fresh = !sqlite.getWaybill(db, userId, code);
+    sqlite.recordWaybill(db, userId, code, fresh ? { source: 'legacy', state: 'created', ...set } : set);
+  } catch (e) {
+    console.warn(`[vtp] Không ghi được sổ vận đơn ${code}:`, e.message);
+  }
+}
+
 /** Ghi kết quả một lần tạo vận đơn vào các đơn của lần tạo đó, cho mọi máy thấy. */
-function vtpSettle(userId, attempt, r, batchId, label) {
-  let n = 0;
+function vtpSettle(userId, attempt, r, batchId, label, source = 'create', ids = []) {
+  // Có mã thì ghi sổ TRƯỚC khi ghi đơn: đơn có bị đổi, xoá, hay máy chủ tắt ngay sau đó thì mã vẫn còn (BL-08).
+  if (r.code) {
+    vtpJournal(userId, r.code, {
+      source,
+      state: r.ok ? 'created' : r.needsCancel ? 'needsCancel' : r.cancelled ? 'cancelled' : 'created',
+      orderIds: ids,
+      attemptId: attempt.id || null,
+      ref: label,
+      cod: r.cod ?? attempt.cod ?? null,
+      goods: r.goods ?? attempt.goods ?? null,
+      fee: r.fee || null,
+      service: attempt.service || null,
+      note: r.cancelled ? 'Tự huỷ vì Viettel Post hiểu sai địa chỉ' : r.needsCancel ? String(r.note || '').slice(0, 300) : undefined
+    });
+  }
+  let attached = [];
   const action = r.ok ? 'vtp_created' : r.unknown ? 'vtp_unknown' : r.needsCancel ? 'vtp_needs_cancel' : 'vtp_error';
   mutateState(userId, action, '', null, (s) => {
-    n = vtp.settleVtpCreate(s, attempt, r, { batchId });
+    attached = vtp.settleVtpCreate(s, attempt, r, { batchId });
   });
+  const n = attached.length;
+  if (r.code && (r.ok || r.needsCancel)) {
+    vtpJournal(userId, r.code, n ? { orderIds: attached } : { state: 'orphan' });
+    // Ghi đơn xuống đĩa ngay, không đợi lượt ghi 150ms (BL-08).
+    flushStates();
+  }
   if (r.ok) console.log(`[vtp] Tạo vận đơn ${label} → ${r.code}${r.parsed ? ` · VTP hiểu: ${r.parsed}` : ' · chưa đối chiếu được địa chỉ'}`);
   if (r.unknown) console.warn(`[vtp] Tạo vận đơn ${label}: CHƯA RÕ kết quả, đã khoá ${n} đơn chờ kiểm tra`);
   if (r.needsCancel) console.warn(`[vtp] Vận đơn ${r.code} (${label}) sai địa chỉ, CHƯA huỷ được: gắn vào ${n} đơn với cờ cần huỷ`);
@@ -1408,6 +1444,7 @@ function scheduleVtpCancelRetry(userId, code, i = 0) {
       if (!waiting()) return;
       if (!r.ok) return scheduleVtpCancelRetry(userId, code, i + 1);
       console.log(`[vtp] Đã tự huỷ lại vận đơn sai địa chỉ ${code}`);
+      vtpJournal(userId, code, { state: 'cancelled', status: 107, statusName: 'Đã huỷ vận đơn sai địa chỉ' });
       mutateState(userId, 'vtp_cancelled', '', null, (s) =>
         vtp.applyVtpStatus(s, { code, status: 107, statusName: 'Đã huỷ vận đơn sai địa chỉ', note: '', location: '' })
       );
@@ -1436,7 +1473,8 @@ app.post('/api/vtp/settle', requireAuth, (req, res) =>
       if (all.some((o) => o.ship?.vtpCode === code || o.ship?.vtpOldCode === code)) {
         return res.status(400).json({ error: `Mã vận đơn ${code} đã gắn với một đơn khác trong app` });
       }
-      vtpSettle(userId, attempt, { ok: true, code, fee: 0, cod: attempt.cod, goods: attempt.goods }, 'vtp_' + Date.now().toString(36), 'shop nhập mã sau khi kiểm tra');
+      const ids = vtp.ordersOfAttempt(getStateForUser(userId), attempt);
+      vtpSettle(userId, attempt, { ok: true, code, fee: 0, cod: attempt.cod, goods: attempt.goods }, 'vtp_' + Date.now().toString(36), 'shop nhập mã sau khi kiểm tra', 'shop', ids);
       return res.json({ ok: true, code });
     }
     if (req.body?.none !== true) return res.status(400).json({ error: 'Nhập mã vận đơn, hoặc xác nhận Viettel Post không có vận đơn này' });
@@ -1448,6 +1486,12 @@ app.post('/api/vtp/settle', requireAuth, (req, res) =>
     res.json({ ok: true });
   })
 );
+
+// Sổ vận đơn của tài khoản (BL-08), mới nhất trước: để đối soát với viettelpost.vn. `state=orphan|unmatched|…` để lọc.
+app.get('/api/vtp/waybills', requireAuth, (req, res) => {
+  const state = String(req.query?.state || '').replace(/[^a-zA-Z]/g, '').slice(0, 20);
+  res.json({ ok: true, waybills: sqlite.listWaybills(db, req.user.id, { state, limit: Number(req.query?.limit) || 200 }) });
+});
 
 app.post('/api/vtp/print', requireAuth, async (req, res) => {
   const codes = (Array.isArray(req.body?.codes) ? req.body.codes : []).filter(vtpCodeOk).slice(0, 100);
@@ -1466,6 +1510,7 @@ app.post('/api/vtp/cancel', requireAuth, async (req, res) => {
   if (!r.ok) return res.status(400).json({ error: r.error });
   const statusName = force ? 'Shop gỡ vận đơn khỏi app' : r.already ? 'Viettel Post báo đã huỷ' : 'Shop đã huỷ vận đơn';
   if (force || r.already) console.log(`[vtp] ${statusName}: ${code}`);
+  vtpJournal(req.user.id, code, { state: force ? 'detached' : 'cancelled', status: force ? undefined : 107, statusName });
   mutateState(req.user.id, 'vtp_cancelled', '', null, (s) =>
     vtp.applyVtpStatus(s, { code, status: 107, statusName, note: '', location: '' })
   );
@@ -1506,9 +1551,36 @@ app.post('/api/vtp/webhook/:hookId', (req, res) => {
   if (vtpSeen.size > 5000) for (const k of [...vtpSeen.keys()].slice(0, 1000)) vtpSeen.delete(k);
   setImmediate(() => {
     try {
-      vtpStore.set(found.userId, { lastHookAt: Date.now() });
+      const userId = found.userId;
+      vtpStore.set(userId, { lastHookAt: Date.now() });
+      const orders = getStateForUser(userId).orders || [];
+      const holders = orders.filter((o) => o.ship?.vtpCode === ev.code).map((o) => String(o.id));
+      const known = holders.length > 0 || orders.some((o) => o.ship?.vtpOldCode === ev.code);
       let n = 0;
-      mutateState(found.userId, 'vtp_status', '', null, (s) => { n = vtp.applyVtpStatus(s, ev); });
+      mutateState(userId, 'vtp_status', '', null, (s) => { n = vtp.applyVtpStatus(s, ev); });
+      // Sổ vận đơn (BL-08): ghi trạng thái mới; mã chưa đơn nào biết thì ghi là "unmatched" để đối soát.
+      if (vtpCodeOk(ev.code)) {
+        const row = sqlite.getWaybill(db, userId, ev.code);
+        const kind = vtp.vtpStatusKind(ev.status);
+        const finalState = { delivered: 'delivered', cancelled: 'cancelled', returned: 'returned' }[kind];
+        const unmatched = !known && (!row || row.state === 'unmatched');
+        vtpJournal(userId, ev.code, {
+          source: known ? 'legacy' : 'webhook',
+          state: finalState || (unmatched ? 'unmatched' : row ? undefined : 'created'),
+          orderIds: holders,
+          status: ev.status,
+          statusName: ev.statusName.slice(0, 120),
+          ...(ev.cod != null && !row?.cod ? { cod: ev.cod } : {})
+        });
+        // Vận đơn lạ còn sống: có thể là vận đơn của lần tạo "chưa rõ" (BL-01). Gợi ý cho shop xác nhận, không tự gắn.
+        if (unmatched && kind !== 'cancelled') {
+          let hinted = [];
+          mutateState(userId, 'vtp_hint', '', null, (s) => {
+            hinted = vtp.addVtpHint(s, { code: ev.code, cod: ev.cod, statusName: ev.statusName });
+          });
+          if (hinted.length) console.log(`[vtp] webhook ${ev.code}: gợi ý cho ${hinted.length} đơn đang chờ kiểm tra vận đơn`);
+        }
+      }
       // Ghi lại mã + trạng thái để dò lỗi (không có dữ liệu cá nhân).
       console.log(`[vtp] webhook ${ev.code} → ${ev.status} ${ev.statusName}${n ? '' : ' (không có đơn nào trong app)'}`);
     } catch (e) {

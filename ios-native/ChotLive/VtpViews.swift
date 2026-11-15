@@ -445,6 +445,15 @@ struct VtpOrderBox: View {
             active(code)
         } else if VtpTrack.unknown(order) {
             VStack(alignment: .leading, spacing: 8) {
+                if let hint = order.ship?.vtpHint {
+                    T("Viettel Post vừa báo vận đơn chưa gắn đơn nào", 14, .bold, Theme.red)
+                    T("Kiểm tra trên viettelpost.vn đúng là của khách này (tên, số điện thoại, tiền thu hộ) rồi mới gắn.", 12.5, .medium, Theme.ink).fixedSize(horizontal: false, vertical: true)
+                    OutlineButton(title: "Gắn mã \(VtpTrack.pretty(hint))" + (order.ship?.vtpHintCod.map { " · thu hộ \(money($0))" } ?? ""),
+                                  filled: true) { settleHint(hint) }
+                        .disabled(busy)
+                    OutlineButton(title: "Xem trên Viettel Post", icon: .truck) { VtpActions.track(hint) }
+                    HairLine()
+                }
                 T("Chưa rõ vận đơn đã tạo chưa", 14, .bold, Theme.red)
                 T("Viettel Post không trả lời kịp lần tạo vận đơn. Đơn tạm khoá để không tạo trùng. Nếu họ trả lời muộn, mã vận đơn tự hiện ở đây. Vài phút chưa có thì vào viettelpost.vn › Quản lý đơn hàng, tìm theo số điện thoại khách. Đã có vận đơn ở đó: mở ChốtLive trên web để nhập mã vào đơn.", 12.5, .medium, Theme.ink)
                     .fixedSize(horizontal: false, vertical: true)
@@ -624,6 +633,18 @@ struct VtpOrderBox: View {
                 if let e = await client.vtpResolve(code, type: 2, note: "") { return ui.notify(e) }
                 store.applyVtpResolved(code: code, type: 2)
                 ui.notify("Đã gửi yêu cầu hoàn về shop.")
+            }
+        }
+    }
+
+    /// Gắn mã Viettel Post vừa báo (máy chủ gợi ý) vào đơn "chưa rõ", sau khi shop xác nhận.
+    private func settleHint(_ code: String) {
+        ui.confirm = ConfirmItem(title: "Gắn vận đơn \(VtpTrack.pretty(code))?", message: "Chỉ gắn khi đã kiểm trên viettelpost.vn vận đơn này đúng là của khách này. Đơn sẽ chuyển sang Đang giao với mã đó.", action: "Gắn mã vào đơn") {
+            busy = true
+            Task { @MainActor in
+                let e = await client.vtpSettle(itemIds: order.items.map(\.id), code: code)
+                busy = false
+                ui.notify(e ?? "Đã gắn vận đơn \(VtpTrack.pretty(code)) vào đơn.")
             }
         }
     }

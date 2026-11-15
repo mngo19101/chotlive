@@ -37,8 +37,104 @@ export function openDb(file) {
       ip TEXT NOT NULL, user_id TEXT NOT NULL, created_at INTEGER NOT NULL,
       PRIMARY KEY (ip, user_id)
     );
+    CREATE TABLE IF NOT EXISTS vtp_waybills (
+      user_id TEXT NOT NULL, code TEXT NOT NULL,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      source TEXT NOT NULL, state TEXT NOT NULL, order_ids TEXT NOT NULL DEFAULT '[]',
+      attempt_id TEXT, ref TEXT, cod INTEGER, goods INTEGER, fee INTEGER, service TEXT,
+      status INTEGER, status_name TEXT, note TEXT,
+      PRIMARY KEY (user_id, code)
+    );
+    CREATE INDEX IF NOT EXISTS idx_vtp_waybills_time ON vtp_waybills (user_id, created_at);
   `);
   return db;
+}
+
+/*
+ * Sổ vận đơn (BL-08): mọi mã vận đơn Viettel Post từng trả về hoặc báo qua webhook, ghi ngay lúc nhận được và độc lập
+ * với dữ liệu đơn. Đơn bị xoá, tách, gộp, hay máy chủ tắt trước khi kịp ghi đơn thì mã vẫn còn ở đây để đối soát.
+ * `state`: created · needsCancel · cancelled · detached (shop gỡ khỏi app) · delivered · returned · orphan (có mã mà
+ * không gắn được vào đơn nào) · unmatched (chỉ biết qua webhook, chưa đơn nào nhận).
+ * `source`: create (trả lời đúng hạn) · late (trả lời muộn) · shop (shop nhập mã) · webhook.
+ */
+const WAYBILL_FIELDS = ['source', 'state', 'attempt_id', 'ref', 'cod', 'goods', 'fee', 'service', 'status', 'status_name', 'note'];
+const waybillRow = (r) => ({
+  code: r.code,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+  source: r.source,
+  state: r.state,
+  orderIds: JSON.parse(r.order_ids || '[]'),
+  attemptId: r.attempt_id,
+  ref: r.ref,
+  cod: r.cod,
+  goods: r.goods,
+  fee: r.fee,
+  service: r.service,
+  status: r.status,
+  statusName: r.status_name,
+  note: r.note
+});
+
+export function getWaybill(db, userId, code) {
+  const r = db.prepare('SELECT * FROM vtp_waybills WHERE user_id = ? AND code = ?').get(userId, String(code));
+  return r ? waybillRow(r) : null;
+}
+
+/**
+ * Ghi hoặc cập nhật một mã trong sổ. Trường không truyền (undefined) thì giữ như cũ; `orderIds` rỗng không xoá danh sách
+ * đơn đã ghi. Lần đầu ghi bắt buộc có `source` và `state`.
+ */
+export function recordWaybill(db, userId, code, w = {}, now = Date.now()) {
+  const cur = db.prepare('SELECT * FROM vtp_waybills WHERE user_id = ? AND code = ?').get(userId, String(code));
+  const val = {
+    source: w.source,
+    state: w.state,
+    attempt_id: w.attemptId,
+    ref: w.ref,
+    cod: w.cod,
+    goods: w.goods,
+    fee: w.fee,
+    service: w.service,
+    status: w.status,
+    status_name: w.statusName,
+    note: w.note
+  };
+  const ids = Array.isArray(w.orderIds) ? [...new Set(w.orderIds.map(String))] : [];
+  if (!cur) {
+    db.prepare(
+      `INSERT INTO vtp_waybills (user_id, code, created_at, updated_at, order_ids, ${WAYBILL_FIELDS.join(', ')})
+       VALUES (?, ?, ?, ?, ?, ${WAYBILL_FIELDS.map(() => '?').join(', ')})`
+    ).run(userId, String(code), now, now, JSON.stringify(ids), ...WAYBILL_FIELDS.map((k) => (val[k] === undefined ? null : val[k])));
+    return;
+  }
+  const sets = ['updated_at = ?'];
+  const args = [now];
+  for (const k of WAYBILL_FIELDS) {
+    // Nguồn đầu tiên giữ nguyên: biết được mã này đến từ đâu.
+    if (val[k] === undefined || (k === 'source' && cur.source)) continue;
+    sets.push(`${k} = ?`);
+    args.push(val[k]);
+  }
+  if (ids.length) {
+    sets.push('order_ids = ?');
+    args.push(JSON.stringify(ids));
+  }
+  db.prepare(`UPDATE vtp_waybills SET ${sets.join(', ')} WHERE user_id = ? AND code = ?`).run(...args, userId, String(code));
+}
+
+/** Sổ vận đơn của một tài khoản, mới nhất trước. `state` lọc theo trạng thái trong sổ. */
+export function listWaybills(db, userId, { state = '', limit = 200 } = {}) {
+  const where = ['user_id = ?'];
+  const args = [userId];
+  if (state) {
+    where.push('state = ?');
+    args.push(state);
+  }
+  return db
+    .prepare(`SELECT * FROM vtp_waybills WHERE ${where.join(' AND ')} ORDER BY created_at DESC, code DESC LIMIT ?`)
+    .all(...args, Math.max(1, Math.min(1000, Number(limit) || 200)))
+    .map(waybillRow);
 }
 
 /* Tài khoản đã tạo từ mỗi IP. Xoá tài khoản không xoá dòng này, nếu không xoá đi tạo lại sẽ né được giới hạn. */
@@ -139,6 +235,7 @@ export function deleteUserData(db, userId) {
     db.prepare('DELETE FROM settings WHERE user_id = ?').run(userId);
     for (const t of Object.values(TABLE_OF)) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
     db.prepare('DELETE FROM live_comments WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM vtp_waybills WHERE user_id = ?').run(userId);
   });
 }
 

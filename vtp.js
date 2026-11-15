@@ -523,6 +523,10 @@ export function parseVtpWebhook(body) {
     note: String(d.NOTE || '').trim(),
     employee: [d.EMPLOYEE_NAME, d.EMPLOYEE_PHONE].filter(Boolean).join(' · '),
     fee: Number(d.MONEY_TOTAL) || 0,
+    // Tiền thu hộ của vận đơn, nếu Viettel Post gửi kèm: dùng để đoán vận đơn lạ thuộc lần tạo "chưa rõ" nào.
+    cod: d.MONEY_COLLECTION === undefined || d.MONEY_COLLECTION === null || d.MONEY_COLLECTION === '' || !Number.isFinite(Number(d.MONEY_COLLECTION))
+      ? null
+      : Math.round(Number(d.MONEY_COLLECTION)),
     secret: String(body?.TOKEN || '')
   };
 }
@@ -540,7 +544,33 @@ export function vtpEventTime(at) {
 }
 
 /** Các trường vận đơn trong order.ship chỉ máy chủ ghi (tạo đơn, huỷ, webhook). */
-const VTP_SHIP_FIELDS = ['vtpCode', 'vtpOldCode', 'vtpFee', 'vtpCod', 'vtpGoods', 'vtpService', 'vtpStatus', 'vtpStatusName', 'vtpStatusAt', 'vtpEventAt', 'vtpKind', 'vtpNote', 'vtpError', 'vtpErrorAt', 'vtpAttempt'];
+const VTP_SHIP_FIELDS = ['vtpCode', 'vtpOldCode', 'vtpFee', 'vtpCod', 'vtpGoods', 'vtpService', 'vtpStatus', 'vtpStatusName', 'vtpStatusAt', 'vtpEventAt', 'vtpKind', 'vtpNote', 'vtpError', 'vtpErrorAt', 'vtpAttempt', 'vtpHints'];
+
+/** Vận đơn lạ chỉ được gợi ý cho lần tạo "chưa rõ" bắt đầu trong khoảng này trước lúc webhook về. */
+export const VTP_HINT_WINDOW_MS = 24 * 3600 * 1000;
+const MAX_HINTS = 3;
+
+/**
+ * Webhook báo một vận đơn mà không đơn nào trong app mang mã đó: có thể chính là vận đơn của một lần tạo "chưa rõ"
+ * (BL-01). Gợi ý mã đó cho các đơn đang chờ kiểm tra: lần tạo bắt đầu trong VTP_HINT_WINDOW_MS trước đó, và nếu cả
+ * hai bên đều biết tiền thu hộ thì phải bằng nhau. KHÔNG tự gắn: shop xem rồi bấm xác nhận (webhook chưa xác thực
+ * được người gửi, và một shop có thể có nhiều lần tạo chưa rõ cùng lúc). Trả về mã các đơn được gợi ý.
+ */
+export function addVtpHint(state, hint, now = Date.now()) {
+  const out = [];
+  for (const o of state.orders || []) {
+    if (!vtpAttemptOpen(o)) continue;
+    const a = o.ship.vtpAttempt || {};
+    const at = Number(a.at) || 0;
+    if (!at || at > now + 60_000 || now - at > VTP_HINT_WINDOW_MS) continue;
+    if (hint.cod != null && a.cod != null && Number(a.cod) !== Number(hint.cod)) continue;
+    const list = (Array.isArray(o.ship.vtpHints) ? o.ship.vtpHints : []).filter((h) => h?.code !== hint.code);
+    list.unshift({ code: String(hint.code), cod: hint.cod ?? null, at: now, statusName: String(hint.statusName || '').slice(0, 80) });
+    o.ship = { ...o.ship, vtpHints: list.slice(0, MAX_HINTS) };
+    out.push(String(o.id));
+  }
+  return out;
+}
 
 /**
  * Chống tạo trùng vận đơn (BL-01, BL-02). Trạng thái ghi trong order.ship, chỉ máy chủ ghi:
@@ -566,20 +596,24 @@ export function sweepVtpCreating(state, now = Date.now()) {
   return n;
 }
 
+/** Mã các đơn còn giữ đúng lần tạo vận đơn này (chưa có mã). */
+export const ordersOfAttempt = (state, attempt) =>
+  (state.orders || []).filter((o) => attempt?.id && o?.ship?.vtpAttempt?.id === attempt.id && !o.ship.vtpCode).map((o) => String(o.id));
+
 /**
  * Ghi kết quả một lần tạo vận đơn vào mọi đơn còn giữ đúng lần tạo đó (đơn đã được xử lý theo cách khác thì bỏ qua,
- * nên câu trả lời muộn không ghi đè việc shop vừa làm). Trả về số đơn đã ghi.
+ * nên câu trả lời muộn không ghi đè việc shop vừa làm). Trả về mã các đơn đã ghi.
  */
 export function settleVtpCreate(state, attempt, r, { batchId, now = Date.now() } = {}) {
-  let n = 0;
+  const done = [];
   for (const o of state.orders || []) {
     if (!attempt?.id || o?.ship?.vtpAttempt?.id !== attempt.id || o.ship.vtpCode) continue;
-    n += 1;
+    done.push(String(o.id));
     if (r.unknown) {
       o.ship = { ...o.ship, vtpKind: 'unknown', vtpError: String(r.error || VTP_UNKNOWN_MSG).slice(0, 200), vtpErrorAt: now };
       continue;
     }
-    const { vtpAttempt, vtpKind, ...rest } = o.ship;
+    const { vtpAttempt, vtpKind, vtpHints, ...rest } = o.ship;
     if (r.ok || r.needsCancel) {
       o.ship = {
         ...rest,
@@ -608,7 +642,7 @@ export function settleVtpCreate(state, attempt, r, { batchId, now = Date.now() }
     // Đơn từng bị huỷ vận đơn thì trở lại đúng nhãn "đã huỷ · gửi lại" như trước lần tạo này.
     if (rest.vtpOldCode) o.ship.vtpKind = 'cancelled';
   }
-  return n;
+  return done;
 }
 
 /**

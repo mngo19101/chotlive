@@ -139,6 +139,9 @@ data class ShipInfo(
     /** Lý do Viettel Post từ chối lần tạo vận đơn gần nhất. */
     val vtpError: String? = null,
     val vtpErrorAt: Long? = null,
+    /** Đơn "chưa rõ vận đơn": mã Viettel Post vừa báo qua webhook mà chưa đơn nào nhận (máy chủ gợi ý, shop xác nhận). */
+    val vtpHint: String? = null,
+    val vtpHintCod: Int? = null,
 )
 
 enum class OrderStatus(val label: String) {

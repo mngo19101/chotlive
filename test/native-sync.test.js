@@ -423,3 +423,17 @@ test('món chốt thêm khi đơn đang chờ rõ kết quả tạo vận đơn:
   applyNativeUpdate(st, customer([extraItem]));
   assert.equal(st.orders.length, 1);
 });
+
+test('gợi ý mã vận đơn từ webhook: gửi xuống app mã mới nhất và số thu hộ; không gửi danh sách thô', () => {
+  const st = baseState();
+  st.orders[0].ship = {
+    state: 'ready', pay: 'cod', vtpKind: 'unknown', vtpAttempt: { id: 'a1', at: 1, cod: 320000 },
+    vtpHints: [{ code: 'VTP999', cod: 320000, at: 2 }, { code: 'VTP998', cod: null, at: 1 }]
+  };
+  const ship = toNativeSnapshot(st).customers[0].items[0].ship;
+  assert.equal(ship.vtpHint, 'VTP999');
+  assert.equal(ship.vtpHintCod, 320000);
+  assert.equal(ship.vtpKind, 'unknown');
+  assert.equal(ship.vtpHints, undefined);
+  assert.equal(ship.vtpAttempt, undefined, 'dấu lần tạo chỉ máy chủ dùng');
+});

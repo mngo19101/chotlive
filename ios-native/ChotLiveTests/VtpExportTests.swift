@@ -193,6 +193,10 @@ final class VtpExportTests: XCTestCase {
         XCTAssertNil(VtpTrack.lastError(unknown))
         XCTAssertTrue(Vtp.readyGroups([unknown])[0].summary.problems.contains(VtpTrack.unknownProblem))
         XCTAssertFalse(VtpTrack.unknown(created))
+        // Máy chủ gợi ý mã Viettel Post vừa báo cho đơn "chưa rõ".
+        let hinted = try JSONDecoder().decode(ShipInfo.self, from: Data(#"{"state":"ready","vtpKind":"unknown","vtpHint":"156288120099","vtpHintCod":150000}"#.utf8))
+        XCTAssertEqual(hinted.vtpHint, "156288120099")
+        XCTAssertEqual(hinted.vtpHintCod, 150_000)
 
         // Đơn chưa có vận đơn không gửi trường vận đơn lên máy chủ.
         let plain = try JSONSerialization.jsonObject(with: JSONEncoder().encode(ShipInfo(state: "ready"))) as? [String: Any]
