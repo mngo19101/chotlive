@@ -313,3 +313,43 @@ test('báo giá: COD sai kiểu hoặc ngoài khoảng thì báo lỗi, không h
   // 0đ (đơn đã chuyển khoản, shop trả ship) vẫn hợp lệ.
   assert.equal((await q(0)).body.results[0].ok, true);
 });
+
+/*
+ * BL-10: app bấm tạo vận đơn khi món mới chốt chưa đồng bộ lên máy chủ. Máy chủ không được tạo vận đơn cho phần nó
+ * biết với tiền thu hộ gồm cả món nó chưa có (với đơn nhỏ, phần chênh lọt qua như "cước thật"), kẻo món đó bị tách
+ * sang đơn mới và thu tiền hai lần.
+ */
+test('BL-10: app gửi mã món máy chủ chưa có: từ chối, không gọi Viettel Post, không gắn mã', async () => {
+  await putOrders([order('bl10a', [[30000]])]);
+  const before = sent.length;
+  // App tính COD cho A (30k) + M (50k) chưa đồng bộ = 80k. Máy chủ chỉ có A: phần 50k chênh từng lọt qua như
+  // "cước thật" của đơn nhỏ (A < 50k nên thu hộ = 30k + 50k).
+  const g = group('bl10', [], 80000);
+  delete g.orderIds;
+  g.itemIds = ['bl10a_it0', 'bl10m_it0'];
+  const r = await api('/api/vtp/create', { service: 'VSL9', groups: [g] });
+  assert.equal(r.body.results[0].ok, false);
+  assert.match(r.body.results[0].error, /đồng bộ/);
+  assert.equal(sent.length, before, 'không được gọi Viettel Post');
+  const a = await findOrder('bl10a');
+  assert.equal(a.ship.vtpCode, undefined);
+  assert.equal(a.ship.vtpAttempt, undefined);
+
+  // Món M lên tới máy chủ (cùng đơn A) thì tạo được, COD đủ cả hai món.
+  const both = order('bl10a', [[30000], [50000]]);
+  both.items[1].id = 'bl10m_it0';
+  await putOrders([both]);
+  const ok = await api('/api/vtp/create', { service: 'VSL9', groups: [g] });
+  assert.equal(ok.body.results[0].ok, true, ok.body.results[0].error);
+  assert.equal(sent.at(-1).MONEY_COLLECTION, 80000);
+});
+
+test('BL-10: web gửi mã đơn máy chủ chưa có: từ chối cả nhóm, không tạo vận đơn cho phần còn lại', async () => {
+  await putOrders([order('bl10b', [[300000]])]);
+  const before = sent.length;
+  const r = await api('/api/vtp/create', { service: 'VSL9', groups: [group('bl10b', ['bl10b', 'bl10ghost'], 300000)] });
+  assert.equal(r.body.results[0].ok, false);
+  assert.match(r.body.results[0].error, /đồng bộ/);
+  assert.equal(sent.length, before);
+  assert.equal((await findOrder('bl10b')).ship.vtpCode, undefined);
+});

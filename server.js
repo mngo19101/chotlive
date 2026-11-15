@@ -1288,6 +1288,8 @@ function vtpCreateTurn(userId, fn) {
 
 app.post('/api/vtp/create', requireAuth, (req, res) => vtpCreateTurn(req.user.id, () => vtpCreateHandler(req, res)));
 
+const VTP_SYNC_PENDING_MSG = 'Máy chủ chưa nhận đủ đơn/món của khách này (đang đồng bộ). Đợi đồng bộ xong rồi gửi lại.';
+
 async function vtpCreateHandler(req, res) {
   const userId = req.user.id;
   const conn = vtpStore.get(userId);
@@ -1309,7 +1311,19 @@ async function vtpCreateHandler(req, res) {
           .map((o) => String(o.id))
       ])
     ];
-    const orders = (getStateForUser(userId).orders || []).filter((o) => ids.includes(String(o.id)));
+    // Món hoặc đơn client gửi mà máy chủ chưa có: thay đổi trên máy chưa đồng bộ xong. Không tạo vận đơn cho phần máy
+    // chủ biết với tiền thu hộ tính cả phần chưa tới, kẻo món đó bị tách sang đơn mới và thu tiền hai lần (BL-10).
+    const serverOrders = getStateForUser(userId).orders || [];
+    const knownItems = new Set(
+      serverOrders.filter((o) => o.status !== 'cancelled').flatMap((o) => (o.items || []).map((it) => String(it?.id)))
+    );
+    const knownOrders = new Set(serverOrders.map((o) => String(o.id)));
+    const sentOrderIds = (Array.isArray(g?.orderIds) ? g.orderIds : []).map(String);
+    if ([...itemIds].some((id) => !knownItems.has(id)) || sentOrderIds.some((id) => !knownOrders.has(id))) {
+      results.push({ key: g?.key, ok: false, error: VTP_SYNC_PENDING_MSG });
+      continue;
+    }
+    const orders = serverOrders.filter((o) => ids.includes(String(o.id)));
     if (!orders.length) {
       results.push({ key: g?.key, ok: false, error: 'Không thấy đơn' });
       continue;
