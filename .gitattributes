@@ -1,0 +1,5 @@
+# File chạy trên Linux (VPS) phải giữ xuống dòng kiểu Linux, kể cả khi lấy code về hoặc đóng gói
+# bằng git archive trên Windows: bash không chạy được script có xuống dòng kiểu Windows.
+*.sh text eol=lf
+*.service text eol=lf
+deploy/Caddyfile text eol=lf
