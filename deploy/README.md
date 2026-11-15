@@ -101,6 +101,8 @@ Nên làm ngoài giờ live. Server tự nối lại các live đang theo dõi s
 
 Bản sao nằm ở `/var/backups/chotlive`, tạo lúc 3 giờ sáng (giờ VPS), giữ 14 bản. **Các bản này vẫn nằm trên cùng VPS**, nên VPS hỏng là mất cả. Hãy bật thêm tính năng sao lưu của nhà cung cấp VPS, hoặc định kỳ tải về máy khác.
 
+Bản sao chỉ chứa CSDL `susu.db`, không chứa token Viettel Post, nên tải bản sao về máy khác không làm lộ token. Token nằm ở `/var/lib/chotlive/vtp-connections.json`, được mã hoá bằng khoá `VTP_SECRET_KEY` trong `/etc/chotlive.env`. Khôi phục sang VPS mới mà không mang theo hai file này thì mỗi shop dán lại token Viettel Post một lần.
+
 Sao lưu ngay:
 
 ```bash

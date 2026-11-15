@@ -8,10 +8,18 @@ plugins {
 }
 
 // Địa chỉ server gắn sẵn vào app (giống CHOTLIVE_SERVER_URL của bản iPhone).
-// Đổi bằng: gradlew assembleRelease -PchotliveServerUrl=https://ten-mien.vn  (để trống = cho nhập tay ở màn đăng nhập)
+// Lấy theo thứ tự: -PchotliveServerUrl=..., biến môi trường CHOTLIVE_SERVER_URL,
+// dòng chotliveServerUrl=... trong android/local.properties (không đưa lên git).
+// Không có ở đâu cả = không gắn sẵn, màn đăng nhập cho nhập địa chỉ server bằng tay.
+// Không ghi địa chỉ thật vào file này: nó nằm trên git và lộ ra cho ai đọc được repo.
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
 val serverUrl: String = ((project.findProperty("chotliveServerUrl") as String?)
     ?: System.getenv("CHOTLIVE_SERVER_URL")
-    ?: "https://mnhtis.tail3ed304.ts.net").trim().trimEnd('/')
+    ?: localProps.getProperty("chotliveServerUrl")
+    ?: "").trim().trimEnd('/')
 
 // Số bản dựng tăng theo số commit để cài đè được bản cũ.
 val buildNumber: Int = try {

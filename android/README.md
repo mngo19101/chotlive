@@ -19,13 +19,25 @@ cd android
 
 File ra ở `android/app/build/outputs/apk/release/app-release.apk`.
 
-Địa chỉ server gắn sẵn mặc định là `https://mnhtis.tail3ed304.ts.net`. Muốn đổi:
+### Gắn sẵn địa chỉ server
 
-```powershell
-.\gradlew.bat assembleRelease -PchotliveServerUrl=https://ten-mien-cua-ban.vn
-```
+Mặc định app **không** gắn sẵn địa chỉ server, màn đăng nhập cho nhập tay. Muốn gắn sẵn, chọn một trong ba cách:
 
-Truyền `-PchotliveServerUrl=` (để trống) thì màn đăng nhập cho nhập địa chỉ server bằng tay.
+- Thêm một dòng vào `android/local.properties`. File này không đưa lên git, nên chỉ cần ghi một lần trên máy build:
+
+  ```properties
+  chotliveServerUrl=https://ten-mien-cua-ban.vn
+  ```
+
+- Truyền khi build:
+
+  ```powershell
+  .\gradlew.bat assembleRelease -PchotliveServerUrl=https://ten-mien-cua-ban.vn
+  ```
+
+- Đặt biến môi trường `CHOTLIVE_SERVER_URL`, giống bản iPhone.
+
+Đừng ghi địa chỉ thật vào `app/build.gradle.kts` hay file nào khác nằm trên git, vì ai đọc được repo cũng sẽ thấy địa chỉ máy của bạn. Ai có file APK cũng đọc được địa chỉ gắn sẵn, nên chỉ gửi APK có gắn sẵn địa chỉ cho người bạn tin.
 
 ## Khoá ký app
 

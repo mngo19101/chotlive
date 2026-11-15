@@ -81,6 +81,14 @@ SIGN_API_KEY=
 EOF
   )
 fi
+# Khoá mã hoá token Viettel Post. Nằm ở đây (ngoài thư mục dữ liệu) nên bản chép thư mục dữ liệu
+# không đủ để đọc token. Bản cài cũ chưa có thì thêm vào; token đã lưu được mã hoá lại khi server bật.
+if ! grep -q '^VTP_SECRET_KEY=.' "$ENV_FILE"; then
+  echo "==> Tạo khoá mã hoá token Viettel Post"
+  sed -i '/^VTP_SECRET_KEY=/d' "$ENV_FILE"
+  echo "VTP_SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '/+=')" >> "$ENV_FILE"
+fi
+chmod 600 "$ENV_FILE"
 
 echo "==> Cấu hình dịch vụ"
 sed "s|__APP_DIR__|$APP_DIR|g" "$APP_DIR/deploy/chotlive.service" > /etc/systemd/system/chotlive.service

@@ -1,7 +1,7 @@
 /**
  * Kết nối Viettel Post bằng token shop tự tạo trên viettelpost.vn (Cấu hình tài khoản › Thêm mới token).
  * Trình duyệt không gọi thẳng được partner.viettelpost.vn, nên máy chủ giữ token và gọi thay.
- * Token chỉ nằm ở máy chủ (data/vtp-connections.json), không bao giờ gửi ngược về trình duyệt.
+ * Token chỉ nằm ở máy chủ (data/vtp-connections.json, đã mã hoá), không bao giờ gửi ngược về trình duyệt.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -24,19 +24,125 @@ export const vtpStatusKind = (code) => {
   return n ? 'moving' : 'created';
 };
 
+/**
+ * Token Viettel Post được mã hoá AES-256-GCM trước khi ghi xuống đĩa, để ai cầm được riêng
+ * file vtp-connections.json (gửi nhầm, chép nhầm thư mục data) cũng không đọc được token.
+ * Khoá lấy từ biến môi trường VTP_SECRET_KEY. Không có biến này thì tự tạo file khoá
+ * vtp-secret.key cạnh dữ liệu: vẫn chặn được việc lộ riêng file kết nối, nhưng không chặn
+ * được người chép cả thư mục data. Trên VPS, deploy/setup.sh đặt sẵn khoá trong /etc/chotlive.env.
+ */
+const SECRET_FIELDS = ['siteToken', 'partnerToken'];
+const ENC_PREFIX = 'enc:v1:';
+
+const keyFrom = (secret) => crypto.createHash('sha256').update(String(secret)).digest();
+
+function loadKeys(dataDir) {
+  const keyFile = path.join(dataDir, 'vtp-secret.key');
+  const keys = [];
+  const env = String(process.env.VTP_SECRET_KEY || '').trim();
+  if (env) keys.push(keyFrom(env));
+  let fileSecret = '';
+  try {
+    fileSecret = fs.readFileSync(keyFile, 'utf8').trim();
+  } catch {}
+  if (!fileSecret && !env) {
+    fileSecret = crypto.randomBytes(32).toString('base64');
+    try {
+      fs.writeFileSync(keyFile, fileSecret + '\n', { mode: 0o600, flag: 'wx' });
+    } catch (e) {
+      // Một tiến trình khác vừa tạo trước thì đọc lại; không ghi được thì khoá chỉ sống trong RAM.
+      try {
+        fileSecret = fs.readFileSync(keyFile, 'utf8').trim() || fileSecret;
+      } catch {
+        console.warn('[vtp] Không tạo được file khoá, token sẽ phải dán lại sau khi bật lại server:', e.message);
+      }
+    }
+  }
+  // Khoá cũ trong file vẫn dùng để giải mã sau khi chuyển sang VTP_SECRET_KEY, rồi được mã hoá lại bằng khoá mới.
+  if (fileSecret) keys.push(keyFrom(fileSecret));
+  return keys;
+}
+
+function encryptWith(key, text) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const body = Buffer.concat([c.update(String(text), 'utf8'), c.final()]);
+  return ENC_PREFIX + Buffer.concat([iv, c.getAuthTag(), body]).toString('base64');
+}
+
+function decryptWith(keys, value) {
+  const raw = Buffer.from(value.slice(ENC_PREFIX.length), 'base64');
+  for (const key of keys) {
+    try {
+      const d = crypto.createDecipheriv('aes-256-gcm', key, raw.subarray(0, 12));
+      d.setAuthTag(raw.subarray(12, 28));
+      return Buffer.concat([d.update(raw.subarray(28)), d.final()]).toString('utf8');
+    } catch {}
+  }
+  return null;
+}
+
 export function createVtpStore(dataDir) {
   const file = path.join(dataDir, 'vtp-connections.json');
+  const keys = loadKeys(dataDir);
   let all = {};
+  let needsRewrite = false;
+  let text = null;
   try {
-    all = JSON.parse(fs.readFileSync(file, 'utf8')) || {};
+    text = fs.readFileSync(file, 'utf8');
   } catch {}
+  if (text != null) {
+    try {
+      all = JSON.parse(text) || {};
+    } catch (e) {
+      // Đừng ghi đè lên file hỏng: giữ lại một bản để còn cứu.
+      const broken = `${file}.broken-${Date.now()}`;
+      try {
+        fs.renameSync(file, broken);
+      } catch {}
+      console.warn(`[vtp] File kết nối bị hỏng, đã chuyển sang ${broken}:`, e.message);
+      all = {};
+    }
+  }
+  for (const [userId, conn] of Object.entries(all)) {
+    for (const f of SECRET_FIELDS) {
+      const v = conn?.[f];
+      if (typeof v !== 'string' || !v) continue;
+      if (!v.startsWith(ENC_PREFIX)) {
+        needsRewrite = true; // token cũ còn ghi nguyên văn: mã hoá lại ngay
+        continue;
+      }
+      const plain = decryptWith(keys, v);
+      if (plain == null) {
+        console.warn(`[vtp] Không giải mã được token của tài khoản ${userId} (khoá đã đổi?). Shop cần dán lại token.`);
+        delete conn[f];
+        needsRewrite = true;
+      } else {
+        conn[f] = plain;
+        if (keys.length && !decryptWith([keys[0]], v)) needsRewrite = true; // mã hoá lại bằng khoá đang dùng
+      }
+    }
+  }
+
   const persist = () => {
     try {
-      fs.writeFileSync(file, JSON.stringify(all, null, 2), { mode: 0o600 });
+      const out = {};
+      for (const [userId, conn] of Object.entries(all)) {
+        out[userId] = { ...conn };
+        for (const f of SECRET_FIELDS) {
+          if (typeof conn[f] === 'string' && conn[f] && keys.length) out[userId][f] = encryptWith(keys[0], conn[f]);
+        }
+      }
+      // Ghi ra file tạm rồi đổi tên: tắt máy giữa chừng cũng không làm hỏng file đang có.
+      const tmp = `${file}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(out, null, 2), { mode: 0o600 });
+      fs.chmodSync(tmp, 0o600);
+      fs.renameSync(tmp, file);
     } catch (e) {
       console.warn('[vtp] Không ghi được file kết nối:', e.message);
     }
   };
+  if (needsRewrite) persist();
   return {
     get: (userId) => all[userId] || null,
     set(userId, patch) {

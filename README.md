@@ -1,8 +1,8 @@
-# ChốtLive – Chốt đơn TikTok Live (Web và App iPhone)
+# ChốtLive – Chốt đơn TikTok Live (Web, App iPhone và Android)
 
 Đọc bình luận TikTok Live theo thời gian thực, tự bắt giá, chạm để in tem nhiệt 80mm (Xprinter Q80BS), gộp đơn theo khách, quản lý doanh số và xuất file CSV.
 
-Web và App iPhone đồng bộ qua server: thao tác trên máy này thì máy kia cập nhật ngay, miễn là cả hai dùng **cùng một server và cùng một tài khoản**.
+Web, App iPhone và App Android đồng bộ qua server: thao tác trên máy này thì máy kia cập nhật ngay, miễn là cả hai dùng **cùng một server và cùng một tài khoản**.
 
 ---
 
@@ -65,14 +65,34 @@ Vào **Tôi › Máy in › Tìm máy in**, chọn máy rồi bấm **In thử**
 
 ---
 
-## 4. Sao lưu
+## 4. Cài App lên Android
+
+App viết bằng Kotlin và Jetpack Compose trong thư mục `android/`, cùng màn hình và cùng tài khoản với bản iPhone. Cách build APK, khoá ký app và chạy test xem ở [android/README.md](android/README.md).
+
+### Cài vào điện thoại
+
+1. Gửi file `app-release.apk` sang điện thoại, qua Zalo, Google Drive hoặc cáp USB.
+2. Mở file APK trên điện thoại. Lần đầu Android sẽ hỏi có cho phép cài app từ nguồn này không, chọn **Cho phép**.
+3. Bản mới cài đè lên bản cũ và giữ nguyên dữ liệu, miễn là cùng khoá ký.
+
+### Kết nối App với server
+
+Mở App và đăng nhập. Nếu bản APK chưa gắn sẵn địa chỉ server, nhập địa chỉ ở màn đăng nhập, giống bản iPhone. Cách gắn sẵn địa chỉ khi build xem ở [android/README.md](android/README.md#gắn-sẵn-địa-chỉ-server).
+
+### Kết nối máy in
+
+Vào **Tôi › Máy in › Tìm máy in**, chọn máy rồi bấm **In thử**. Khác bản iPhone, app Android nối được cả máy in **Bluetooth LE** lẫn máy chỉ có **Bluetooth Classic (SPP)**. Máy Classic nên ghép đôi trước trong **Cài đặt › Bluetooth** của điện thoại.
+
+---
+
+## 5. Sao lưu
 
 - **Laptop và mini PC:** xem [sync/README.md](sync/README.md).
 - **VPS:** xem mục sao lưu trong [deploy/README.md](deploy/README.md).
 
 ---
 
-## 5. Quên mật khẩu admin
+## 6. Quên mật khẩu admin
 
 `ADMIN_PASSWORD` chỉ có tác dụng khi tạo dữ liệu lần đầu. Muốn đặt lại mật khẩu sau đó:
 
@@ -88,7 +108,7 @@ Vào **Tôi › Máy in › Tìm máy in**, chọn máy rồi bấm **In thử**
 
 ---
 
-## 6. Dùng thử và gói
+## 7. Dùng thử và gói
 
 - Tài khoản mới được **3 ngày dùng thử**. Hết hạn thì không theo dõi được live (live đang chạy cũng dừng); đơn hàng, khách hàng, in tem và lịch sử bình luận vẫn dùng bình thường.
 - **Cấp gói:** đăng nhập admin, vào **Tôi → Quản lý Tài khoản**, bấm **Cấp gói** ở tài khoản cần cấp. Gói còn hạn thì được cộng nối tiếp. Một tháng tính là 30 ngày.
@@ -97,7 +117,7 @@ Vào **Tôi › Máy in › Tìm máy in**, chọn máy rồi bấm **In thử**
 
 ---
 
-## 7. Cấu trúc dự án
+## 8. Cấu trúc dự án
 
 | Đường dẫn | Vai trò |
 |---|---|
@@ -109,6 +129,7 @@ Vào **Tôi › Máy in › Tìm máy in**, chọn máy rồi bấm **In thử**
 | `validate.js`, `rate-limit.js` | Kiểm tra dữ liệu gửi lên và giới hạn số lần gọi |
 | `public/` | Giao diện web |
 | `ios-native/` | App iPhone viết bằng SwiftUI |
+| `android/` | App Android viết bằng Kotlin và Jetpack Compose |
 | `deploy/` | Cài đặt lên VPS |
 | `sync/` | Đồng bộ dữ liệu giữa laptop và mini PC |
 | `scripts/reset-admin.mjs` | Đặt lại mật khẩu admin |

@@ -1,7 +1,7 @@
 {
-  "name": "susu-live-order",
+  "name": "chotlive",
   "version": "1.0.0",
-  "description": "Susu – đọc bình luận TikTok Live, bắt giá và in tem đơn hàng (bản web)",
+  "description": "ChốtLive – đọc bình luận TikTok Live, bắt giá, in tem và chốt đơn (server và web)",
   "main": "server.js",
   "type": "module",
   "scripts": {
