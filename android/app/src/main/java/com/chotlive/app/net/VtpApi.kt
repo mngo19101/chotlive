@@ -169,6 +169,16 @@ suspend fun LiveClient.vtpCancel(code: String, force: Boolean = false): Pair<Str
     return null to ((r.second["already"] as? JsonPrimitive)?.content == "true")
 }
 
+/** Lần tạo vận đơn "chưa rõ": shop đã kiểm trên viettelpost.vn. `code` = mã tìm thấy; null = xác nhận không có, cho tạo lại. */
+suspend fun LiveClient.vtpSettle(itemIds: List<String>, code: String?): String? {
+    val body = buildJsonObject {
+        put("itemIds", JsonArray(itemIds.map { JsonPrimitive(it) }))
+        if (code != null) put("code", code) else put("none", true)
+    }
+    val r = apiCall("/api/vtp/settle", "POST", body, 30)
+    return if (r == null || r.first != 200) errorText(r, "Không ghi được, thử lại") else null
+}
+
 /** type 3: phát lại, type 2: đồng ý hoàn về shop. */
 suspend fun LiveClient.vtpResolve(code: String, type: Int, note: String): String? {
     val r = apiCall("/api/vtp/resolve", "POST", buildJsonObject { put("code", code); put("type", type); put("note", note) }, 30)

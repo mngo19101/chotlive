@@ -252,6 +252,23 @@ class VtpTest {
         // Đã giao thì không còn cần xử lý.
         assertFalse(VtpTrack.needsAction(order("c", ship = s, delivered = true)))
 
+        // BL-02: vận đơn tạo sai địa chỉ mà máy chủ chưa huỷ được: cần xử lý, bấm huỷ lại được.
+        val stuck = order("d", ship = s.copy(vtpKind = "needsCancel", vtpStatus = 0, vtpStatusName = "Tiếp nhận đơn"), shipping = true)
+        assertTrue(VtpTrack.needsAction(stuck))
+        assertTrue(VtpTrack.canCancel(stuck))
+        assertEquals("Cần huỷ vận đơn", VtpTrack.statusName(stuck))
+
+        // BL-01: lần tạo trước chưa rõ kết quả: nháp bị khoá, không hiện như lỗi thường.
+        val msg = "Chưa rõ Viettel Post đã tạo vận đơn chưa"
+        val unknown = order("e", ship = ShipInfo(state = "ready", pay = "cod", vtpKind = "unknown", vtpError = msg))
+        assertTrue(VtpTrack.unknown(unknown))
+        assertNull(VtpTrack.lastError(unknown))
+        assertTrue(Vtp.readyGroups(listOf(unknown))[0].summary.problems.contains(VtpTrack.UNKNOWN_PROBLEM))
+        assertTrue(VtpTrack.unknown(order("f", ship = ShipInfo(state = "ready", pay = "cod", vtpKind = "creating"))))
+        assertFalse(VtpTrack.unknown(created))
+        assertFalse(Vtp.readyGroups(listOf(order("g", ship = ShipInfo(state = "ready", pay = "cod", vtpError = "Sai số điện thoại"))))[0]
+            .summary.problems.contains(VtpTrack.UNKNOWN_PROBLEM))
+
         // Trường đã bỏ (COD nhập tay) không gửi lên: máy chủ coi trường thiếu là đã xoá.
         val back = AppJson.encodeToString(ShipInfo.serializer(), ShipInfo(state = "ready", pay = "cod"))
         assertFalse(back.contains("codOverride"))

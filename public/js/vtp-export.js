@@ -46,6 +46,13 @@ export function shipStateOf(o) {
 
 export const isPending = (o) => PENDING_STATES.includes(shipStateOf(o));
 
+/**
+ * Lần tạo vận đơn trước của đơn này chưa rõ kết quả (Viettel Post trả lời chậm, đứt mạng, máy chủ tắt giữa chừng):
+ * đơn bị khoá, chưa được tạo vận đơn mới cho tới khi biết kết quả thật (BL-01).
+ */
+export const vtpAttemptOpen = (o) => !o?.ship?.vtpCode && ['creating', 'unknown'].includes(o?.ship?.vtpKind);
+export const VTP_UNKNOWN_PROBLEM = 'Chưa rõ vận đơn trước đã tạo chưa, mở đơn để kiểm tra';
+
 export function goodsTotal(o) {
   const sub = (o.items || []).reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 1), 0);
   return Math.max(0, sub - (Number(o.discount) || 0));

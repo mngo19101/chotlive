@@ -175,6 +175,25 @@ final class VtpExportTests: XCTestCase {
         // Đã giao thì không còn cần xử lý.
         XCTAssertFalse(VtpTrack.needsAction(order("c", ship: s, status: (false, true))))
 
+        // BL-02: vận đơn tạo sai địa chỉ mà máy chủ chưa huỷ được: cần xử lý, bấm huỷ lại được.
+        var wrong = fresh
+        wrong.vtpKind = "needsCancel"
+        wrong.vtpStatusName = "Tiếp nhận đơn"
+        let stuck = order("d", ship: wrong, status: (true, false))
+        XCTAssertTrue(VtpTrack.needsAction(stuck))
+        XCTAssertTrue(VtpTrack.canCancel(stuck))
+        XCTAssertEqual(VtpTrack.statusName(stuck), "Cần huỷ vận đơn")
+
+        // BL-01: lần tạo trước chưa rõ kết quả: nháp bị khoá, không hiện như lỗi thường.
+        var pending = ShipInfo(state: "ready")
+        pending.vtpKind = "unknown"
+        pending.vtpError = "Chưa rõ Viettel Post đã tạo vận đơn chưa"
+        let unknown = order("e", ship: pending, status: (false, false))
+        XCTAssertTrue(VtpTrack.unknown(unknown))
+        XCTAssertNil(VtpTrack.lastError(unknown))
+        XCTAssertTrue(Vtp.readyGroups([unknown])[0].summary.problems.contains(VtpTrack.unknownProblem))
+        XCTAssertFalse(VtpTrack.unknown(created))
+
         // Đơn chưa có vận đơn không gửi trường vận đơn lên máy chủ.
         let plain = try JSONSerialization.jsonObject(with: JSONEncoder().encode(ShipInfo(state: "ready"))) as? [String: Any]
         XCTAssertNil(plain?["vtpCode"])

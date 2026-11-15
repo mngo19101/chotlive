@@ -192,7 +192,10 @@ object Vtp {
         all.filter { state(it) == ShipState.READY }.groupBy { it.customer.id }.values.map { list ->
             val orders = list.sortedBy { it.lastTs }
             val c = orders[0].customer
-            Group(c, orders, recentExported(c.id, all, now), summarize(lines(orders), c.address, c.nickname))
+            val sum = summarize(lines(orders), c.address, c.nickname)
+            // Lần tạo vận đơn trước chưa rõ kết quả: chưa cho gửi lại, kẻo ra hai vận đơn.
+            val locked = orders.any { VtpTrack.unknown(it) }
+            Group(c, orders, recentExported(c.id, all, now), if (locked) sum.copy(problems = sum.problems + VtpTrack.UNKNOWN_PROBLEM) else sum)
         }.sortedBy { it.orders[0].lastTs }
 
     // MARK: - File Excel
@@ -403,9 +406,17 @@ object VtpTrack {
 
     fun kind(o: Order): String = o.ship?.vtpKind?.takeIf { it.isNotEmpty() } ?: if (code(o) == null) "" else "created"
 
-    /** Giao hỏng / chờ phát lại / đang hoàn: cần shop xử lý. */
+    /** Giao hỏng / chờ phát lại / đang hoàn, hoặc vận đơn tạo sai địa chỉ mà máy chủ chưa huỷ được (needsCancel): cần shop xử lý. */
     fun needsAction(o: Order): Boolean =
-        code(o) != null && kind(o) in listOf("attention", "returned") && o.status != OrderStatus.DELIVERED
+        code(o) != null && kind(o) in listOf("attention", "returned", "needsCancel") && o.status != OrderStatus.DELIVERED
+
+    /** Vận đơn tạo sai địa chỉ, máy chủ tự huỷ chưa được: còn sống bên Viettel Post, shop cần bấm huỷ lại. */
+    fun needsCancel(o: Order): Boolean = code(o) != null && kind(o) == "needsCancel"
+
+    /** Lần tạo vận đơn trước chưa rõ kết quả (Viettel Post trả lời chậm, đứt mạng): máy chủ khoá đơn, chưa tạo lại được. */
+    fun unknown(o: Order): Boolean = code(o) == null && (o.ship?.vtpKind ?: "") in listOf("creating", "unknown")
+
+    const val UNKNOWN_PROBLEM = "Chưa rõ vận đơn trước đã tạo chưa, mở đơn để kiểm tra"
 
     /** Viettel Post đã trả hàng về shop: đơn vẫn nằm ở tab Đang giao nhưng trạng thái hiện "Hoàn về". */
     fun isReturned(o: Order): Boolean = code(o) != null && kind(o) == "returned" && o.status != OrderStatus.DELIVERED
@@ -415,11 +426,12 @@ object VtpTrack {
         if (code(o) == null || o.status == OrderStatus.DELIVERED) return false
         val k = kind(o)
         val s = o.ship?.vtpStatus ?: 0
-        return k == "created" || (k == "moving" && s > 0 && s < 200)
+        return k == "created" || k == "needsCancel" || (k == "moving" && s > 0 && s < 200)
     }
 
     fun statusName(o: Order): String {
         if (o.status == OrderStatus.DELIVERED) return o.ship?.vtpStatusName ?: "Giao thành công"
+        if (needsCancel(o)) return "Cần huỷ vận đơn"
         if (isReturned(o)) return "Hoàn về"
         return o.ship?.vtpStatusName?.takeIf { it.isNotEmpty() } ?: "Chờ lấy hàng"
     }
@@ -433,7 +445,7 @@ object VtpTrack {
 
     /** Đơn chưa gửi mà lần tạo vận đơn gần nhất bị Viettel Post từ chối. */
     fun lastError(o: Order): String? =
-        if (Vtp.state(o).isPending) o.ship?.vtpError?.takeIf { it.isNotEmpty() } else null
+        if (Vtp.state(o).isPending && !unknown(o)) o.ship?.vtpError?.takeIf { it.isNotEmpty() } else null
 
     /** Đơn đã về Chờ gửi vì vận đơn cũ bị huỷ. */
     fun cancelledCode(o: Order): String? =

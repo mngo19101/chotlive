@@ -443,6 +443,17 @@ struct VtpOrderBox: View {
     var body: some View {
         if let code = VtpTrack.code(order) {
             active(code)
+        } else if VtpTrack.unknown(order) {
+            VStack(alignment: .leading, spacing: 8) {
+                T("Chưa rõ vận đơn đã tạo chưa", 14, .bold, Theme.red)
+                T("Viettel Post không trả lời kịp lần tạo vận đơn. Đơn tạm khoá để không tạo trùng. Nếu họ trả lời muộn, mã vận đơn tự hiện ở đây. Vài phút chưa có thì vào viettelpost.vn › Quản lý đơn hàng, tìm theo số điện thoại khách. Đã có vận đơn ở đó: mở ChốtLive trên web để nhập mã vào đơn.", 12.5, .medium, Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                OutlineButton(title: busy ? "Đang ghi…" : "Không có, cho tạo lại", color: Theme.red) { settleNone() }
+                    .disabled(busy)
+            }
+            .padding(15)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardStyle(20, fill: Theme.badRow, border: Theme.red.opacity(0.3))
         } else if let old = VtpTrack.cancelledCode(order) {
             VStack(alignment: .leading, spacing: 6) {
                 T("Vận đơn \(VtpTrack.pretty(old)) đã huỷ", 14, .bold, Theme.red)
@@ -548,7 +559,8 @@ struct VtpOrderBox: View {
                 OutlineButton(title: "Theo dõi", icon: .truck) { VtpActions.track(code) }
             }
 
-            if bad {
+            // Vận đơn sai địa chỉ chờ huỷ: chỉ cần nút Huỷ vận đơn ở dưới, không phải phát lại / duyệt hoàn.
+            if bad && !VtpTrack.needsCancel(order) {
                 VStack(alignment: .leading, spacing: 0) {
                     T("Gửi yêu cầu cho ViettelPost", 13, .bold, Theme.muted).padding(.bottom, 4)
                     actionRow("Yêu cầu phát lại", "Kèm ghi chú cho bưu tá") { openRedeliver(code, prefill: "") }
@@ -612,6 +624,20 @@ struct VtpOrderBox: View {
                 if let e = await client.vtpResolve(code, type: 2, note: "") { return ui.notify(e) }
                 store.applyVtpResolved(code: code, type: 2)
                 ui.notify("Đã gửi yêu cầu hoàn về shop.")
+            }
+        }
+    }
+
+    /// Lần tạo "chưa rõ": shop đã kiểm trên viettelpost.vn và không thấy vận đơn nào, bỏ khoá để tạo lại.
+    private func settleNone() {
+        ui.confirm = ConfirmItem(title: "Viettel Post không có vận đơn này?",
+                                 message: "Chỉ xác nhận sau khi đã tìm trên viettelpost.vn theo số điện thoại khách và không thấy vận đơn nào vừa tạo. Nếu có mà vẫn tạo lại, khách sẽ có hai vận đơn.",
+                                 action: "Không có, cho tạo lại") {
+            busy = true
+            Task { @MainActor in
+                let e = await client.vtpSettle(itemIds: order.items.map(\.id), code: nil)
+                busy = false
+                ui.notify(e ?? "Đã mở khoá, đơn tạo lại được.")
             }
         }
     }

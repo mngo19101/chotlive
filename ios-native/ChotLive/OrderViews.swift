@@ -167,6 +167,8 @@ struct OrdersView: View {
             }
             if let code = VtpTrack.code(o) {
                 vtpTag(o, code)
+            } else if VtpTrack.unknown(o) {
+                tag("Chưa rõ vận đơn đã tạo chưa · mở đơn để kiểm tra", Theme.red, Theme.redSoft)
             } else if let e = VtpTrack.lastError(o) {
                 HStack(spacing: 8) {
                     tag("Lỗi tạo vận đơn: \(e)", Theme.red, Theme.redSoft)

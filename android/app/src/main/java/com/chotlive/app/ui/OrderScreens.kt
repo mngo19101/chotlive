@@ -228,6 +228,8 @@ private fun OrderCard(o: Order, every: List<Order>, onPrint: () -> Unit) {
                     T(VtpTrack.statusName(o), 12f, BV.SEMIBOLD, if (bad) C.red else if (done) C.green else C.accent, shrink = true, minScale = 0.8f)
                 }
             }
+        } else if (VtpTrack.unknown(o)) {
+            ShipTag("Chưa rõ vận đơn đã tạo chưa · mở đơn để kiểm tra", C.red, C.redSoft)
         } else if (lastError != null) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.weight(1f, fill = false)) { ShipTag("Lỗi tạo vận đơn: $lastError", C.red, C.redSoft) }
