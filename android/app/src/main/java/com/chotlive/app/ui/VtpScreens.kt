@@ -53,6 +53,7 @@ import com.chotlive.app.net.vtpPrintUrl
 import com.chotlive.app.net.vtpResolve
 import com.chotlive.app.net.vtpSenders
 import com.chotlive.app.net.vtpSetSender
+import com.chotlive.app.net.vtpSettle
 import kotlinx.coroutines.launch
 
 // MARK: - In tem / theo dõi
@@ -394,7 +395,40 @@ fun VtpOrderBox(order: Order) {
     val lastError = VtpTrack.lastError(order)
 
     if (code == null) {
-        if (old != null) {
+        if (VtpTrack.unknown(order)) {
+            CardBox(C.badRow, C.red.copy(alpha = 0.3f), 8f, 15f) {
+                order.ship?.vtpHint?.takeIf { it.isNotEmpty() }?.let { hint ->
+                    T("Viettel Post vừa báo vận đơn chưa gắn đơn nào", 14f, BV.BOLD, C.red)
+                    T("Kiểm tra trên viettelpost.vn đúng là của khách này (tên, số điện thoại, tiền thu hộ) rồi mới gắn.", 12.5f, BV.MEDIUM, C.ink)
+                    val cod = order.ship?.vtpHintCod?.let { " · thu hộ ${money(it)}" } ?: ""
+                    OutlineButton("Gắn mã ${VtpTrack.pretty(hint)}$cod", Modifier.fillMaxWidth(), filled = true, enabled = !busy) {
+                        ui.confirm = ConfirmItem("Gắn vận đơn ${VtpTrack.pretty(hint)}?", "Chỉ gắn khi đã kiểm trên viettelpost.vn vận đơn này đúng là của khách này. Đơn sẽ chuyển sang Đang giao với mã đó.", "Gắn mã vào đơn") {
+                            busy = true
+                            app.scope.launch {
+                                val e = client.vtpSettle(order.items.map { it.id }, hint)
+                                busy = false
+                                ui.notify(e ?: "Đã gắn vận đơn ${VtpTrack.pretty(hint)} vào đơn.")
+                            }
+                        }
+                    }
+                    OutlineButton("Xem trên Viettel Post", Modifier.fillMaxWidth(), IconName.TRUCK) { VtpActions.track(hint, app, ui) }
+                    HairLine()
+                }
+                T("Chưa rõ vận đơn đã tạo chưa", 14f, BV.BOLD, C.red)
+                T("Viettel Post không trả lời kịp lần tạo vận đơn. Đơn tạm khoá để không tạo trùng. Nếu họ trả lời muộn, mã vận đơn tự hiện ở đây. Vài phút chưa có thì vào viettelpost.vn › Quản lý đơn hàng, tìm theo số điện thoại khách. Đã có vận đơn ở đó: mở ChốtLive trên web để nhập mã vào đơn.", 12.5f, BV.MEDIUM, C.ink)
+                OutlineButton(if (busy) "Đang ghi…" else "Không có, cho tạo lại", Modifier.fillMaxWidth(), color = C.red, enabled = !busy) {
+                    // Shop đã kiểm trên viettelpost.vn và không thấy vận đơn nào: bỏ khoá để tạo lại.
+                    ui.confirm = ConfirmItem("Viettel Post không có vận đơn này?", "Chỉ xác nhận sau khi đã tìm trên viettelpost.vn theo số điện thoại khách và không thấy vận đơn nào vừa tạo. Nếu có mà vẫn tạo lại, khách sẽ có hai vận đơn.", "Không có, cho tạo lại") {
+                        busy = true
+                        app.scope.launch {
+                            val e = client.vtpSettle(order.items.map { it.id }, null)
+                            busy = false
+                            ui.notify(e ?: "Đã mở khoá, đơn tạo lại được.")
+                        }
+                    }
+                }
+            }
+        } else if (old != null) {
             CardBox(C.badRow, C.red.copy(alpha = 0.3f), 6f, 15f) {
                 T("Vận đơn ${VtpTrack.pretty(old)} đã huỷ", 14f, BV.BOLD, C.red)
                 T("Đơn đã về Chờ gửi. Bấm Soát & tạo ở tab Đơn hàng để tạo vận đơn mới.", 12.5f, BV.MEDIUM, C.muted)
@@ -472,7 +506,8 @@ fun VtpOrderBox(order: Order) {
             OutlineButton("In tem", Modifier.weight(1f), IconName.PRINTER, filled = true) { VtpActions.printLabels(listOf(code), app, ui) }
             OutlineButton("Theo dõi", Modifier.weight(1f), IconName.TRUCK) { VtpActions.track(code, app, ui) }
         }
-        if (bad) {
+        // Vận đơn sai địa chỉ chờ huỷ: chỉ cần nút Huỷ vận đơn ở dưới, không phải phát lại / duyệt hoàn.
+        if (bad && !VtpTrack.needsCancel(order)) {
             Column {
                 T("Gửi yêu cầu cho ViettelPost", 13f, BV.BOLD, C.muted, Modifier.padding(bottom = 4.dp))
                 ActionLine("Yêu cầu phát lại", "Kèm ghi chú cho bưu tá") { openRedeliver("") }

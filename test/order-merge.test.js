@@ -61,6 +61,21 @@ test('đơn đã xuất file gửi hoặc còn mã vận đơn cũng không nh�
   assert.equal(add().isMerged, false);
 });
 
+test('đơn đang chờ rõ kết quả tạo vận đơn: món mới sang đơn riêng, gộp đơn trùng không kéo vào', async () => {
+  for (const vtpKind of ['creating', 'unknown']) {
+    await load([order({ ship: { state: 'ready', pay: 'cod', vtpKind, vtpAttempt: { id: 'a1', cod: 100000 } } })]);
+    const r = add();
+    assert.equal(r.isMerged, false, vtpKind);
+    const old = store.state.orders.find((o) => o.id === 'o1');
+    assert.equal(old.total, 100000);
+    assert.equal(store.mergeDuplicateOrders(), 0);
+    assert.equal(store.state.orders.length, 2);
+  }
+  // Vận đơn cũ đã huỷ (đơn về Chờ gửi) thì vẫn nhận thêm món.
+  await load([order({ ship: { state: 'ready', pay: 'cod', vtpKind: 'cancelled', vtpOldCode: 'VTP1' } })]);
+  assert.equal(add().isMerged, true);
+});
+
 test('thêm món vào đơn có tiền thu hộ nhập tay: bỏ số nhập tay để tính lại', async () => {
   await load([order({ ship: { state: 'ready', pay: 'cod', codOverride: 100000 } })]);
   const r = add();

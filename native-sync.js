@@ -9,6 +9,7 @@
  * - Trường chỉ web mới có (mã đơn, phí ship, giảm giá...) được giữ nguyên.
  */
 import crypto from 'node:crypto';
+import { vtpAttemptOpen } from './public/js/vtp-export.js';
 
 const TIME_ZONE = 'Asia/Ho_Chi_Minh';
 const hmFormat = new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit' });
@@ -102,7 +103,7 @@ export function nativeShip(ship) {
 }
 
 const VTP_TEXT_KEYS = ['vtpCode', 'vtpOldCode', 'vtpService', 'vtpStatusName', 'vtpKind', 'vtpNote', 'vtpError'];
-const VTP_NUM_KEYS = ['vtpFee', 'vtpStatus', 'vtpStatusAt', 'vtpErrorAt', 'vtpEventAt'];
+const VTP_NUM_KEYS = ['vtpFee', 'vtpCod', 'vtpGoods', 'vtpStatus', 'vtpStatusAt', 'vtpErrorAt', 'vtpEventAt'];
 
 /**
  * `ship` gửi xuống app: thêm mã vận đơn và trạng thái Viettel Post do máy chủ ghi.
@@ -115,6 +116,13 @@ export function nativeShipOut(ship) {
   for (const k of VTP_NUM_KEYS) {
     const n = numOrNull(ship[k]);
     if (n !== null) out[k] = Math.round(n);
+  }
+  // Mã vận đơn Viettel Post vừa báo mà chưa đơn nào nhận, gợi ý cho đơn đang chờ kiểm tra (mới nhất).
+  const hint = Array.isArray(ship.vtpHints) ? ship.vtpHints.find((h) => h && h.code) : null;
+  if (hint) {
+    out.vtpHint = String(hint.code).slice(0, 40);
+    const cod = numOrNull(hint.cod);
+    if (cod !== null) out.vtpHintCod = Math.round(cod);
   }
   return out;
 }
@@ -302,9 +310,12 @@ function mergeNativeItem(existing, it) {
   };
 }
 
-/** Đơn đã gửi đi, không còn nhận thêm món (cùng quy tắc với `isOpenOrder` của web). */
+/**
+ * Đơn đã gửi đi, không còn nhận thêm món (cùng quy tắc với `isOpenOrder` của web). Đơn đang chờ rõ kết quả tạo vận đơn
+ * cũng vậy: Viettel Post có thể đã tạo vận đơn với số thu hộ cũ, món chốt thêm phải sang đơn mới để được gửi và thu tiền.
+ */
 const isSentOrder = (o) =>
-  o.status === 'shipping' || o.status === 'done' || o.ship?.state === 'exported' || Boolean(o.ship?.vtpCode);
+  o.status === 'shipping' || o.status === 'done' || o.ship?.state === 'exported' || Boolean(o.ship?.vtpCode) || vtpAttemptOpen(o);
 
 function applyNativeCustomer(state, c) {
   const key = customerKey(c.uniqueId, c.userId, c.nickname) || String(c.id || '');

@@ -33,7 +33,7 @@ import supportRoutes, { telegram } from './server/routes/support.js';
 import adminRoutes from './server/routes/admin.js';
 import syncRoutes from './server/routes/sync.js';
 import lanRoutes from './server/routes/lan.js';
-import vtpRoutes from './server/routes/vtp.js';
+import vtpRoutes, { resumeVtpAfterRestart } from './server/routes/vtp.js';
 
 function flushAllAndExit() {
   liveManager.stopAll();
@@ -103,6 +103,7 @@ app.use(lanRoutes);
 app.use(vtpRoutes);
 
 startWebSocket();
+resumeVtpAfterRestart();
 
 server.listen(PORT, HOST, () => {
   console.log(`Susu Live Order đang chạy: http://${HOST || 'localhost'}:${PORT}`);

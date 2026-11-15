@@ -6,6 +6,47 @@ enum PriceParser {
         pattern: #"(?<![a-z\d])(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(\d{1,3})?(?![a-z\d])"#
     )
     private static let grouped = try! NSRegularExpression(pattern: #"^\d{1,3}(?:[.,]\d{3})+$"#)
+    /// Số điện thoại Việt Nam (0… hoặc +84…), kể cả viết tách: "0912 345 678", "098.812.3456".
+    /// Phải đủ 10-11 số. Giống PHONE_RE của public/js/price.js.
+    private static let phone = try! NSRegularExpression(
+        pattern: #"(?<!\d)(?:\+84[\s.-]{0,3}|0)\d{2,3}[\s.-]{0,3}\d{3,4}[\s.-]{0,3}\d{3,4}(?!\d)"#
+    )
+
+    /// Thay số điện thoại bằng "#" (giữ nguyên độ dài) để phần bắt giá không đọc nhầm thành giá.
+    private static func maskPhones(_ s: String) -> String {
+        let ns = NSMutableString(string: s)
+        for m in phone.matches(in: s, range: NSRange(location: 0, length: ns.length)) {
+            let raw = ns.substring(with: m.range)
+            let digits = raw.filter { $0.isASCII && $0.isNumber }.count - (raw.hasPrefix("+") ? 1 : 0)
+            if digits == 10 || digits == 11 {
+                ns.replaceCharacters(in: m.range, with: String(repeating: "#", count: m.range.length))
+            }
+        }
+        return ns as String
+    }
+
+    /// Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2".
+    private static let sizeQtyBefore = try! NSRegularExpression(pattern: #"(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$"#)
+    /// Số 1-2 chữ số ngay trước "cái", "đôi", "kg"... là số lượng/cân nặng: "lấy 2 cái", "50 kg".
+    private static let qtyAfter = try! NSRegularExpression(
+        pattern: #"^\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon)(?![a-z\d])"#
+    )
+    /// Có "mã" đứng trước thì vẫn là mã: "mã 99 bộ đồ".
+    private static let codeBefore = try! NSRegularExpression(pattern: #"(?<![a-z\d])ma\s*$"#)
+    private static let oneOrTwoDigits = try! NSRegularExpression(pattern: #"^\d{1,2}$"#)
+
+    private static func has(_ re: NSRegularExpression, _ s: String) -> Bool {
+        re.firstMatch(in: s, range: NSRange(location: 0, length: (s as NSString).length)) != nil
+    }
+
+    /// Số ở vị trí `range` của ns là size hoặc số lượng, không phải giá. Giống isSizeOrQty của public/js/price.js.
+    private static func isSizeOrQty(_ ns: NSString, _ range: NSRange, rawNum: String, unit: String) -> Bool {
+        if !unit.isEmpty { return false }
+        let before = ns.substring(to: range.location)
+        if has(sizeQtyBefore, before) { return true }
+        return has(oneOrTwoDigits, rawNum) && has(qtyAfter, ns.substring(from: range.location + range.length))
+            && !has(codeBefore, before)
+    }
 
     static func stripAccents(_ s: String) -> String {
         s.folding(options: .diacriticInsensitive, locale: Locale(identifier: "en"))
@@ -29,7 +70,7 @@ enum PriceParser {
 
     /// Mọi số/giá trong bình luận, theo thứ tự xuất hiện.
     static func tokens(_ text: String, multiplier: Double = 1000, minPrice: Double = 1, maxPrice: Double = 50_000_000) -> [Token] {
-        let s = folded(text)
+        let s = maskPhones(folded(text))
         let ns = s as NSString
         var found: [Token] = []
 
@@ -41,9 +82,11 @@ enum PriceParser {
             let rawNum = group(1), unit = group(2), trail = group(3)
             let digitsOnly = rawNum.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: "")
             if digitsOnly.count >= 9 { continue } // số điện thoại / mã đơn
+            if isSizeOrQty(ns, m.range, rawNum: rawNum, unit: unit) { continue }
 
             let isGrouped = grouped.firstMatch(in: rawNum, range: NSRange(location: 0, length: (rawNum as NSString).length)) != nil
-            let bigUnit = ["k", "tr", "trieu", "cu"].contains(unit)
+            // "2.500k" là 2.500 nghìn; riêng "1.500tr" vẫn đọc là 1,5 triệu.
+            let bigUnit = ["tr", "trieu", "cu"].contains(unit)
             let n: Double
             if isGrouped && !bigUnit {
                 n = Double(digitsOnly) ?? 0

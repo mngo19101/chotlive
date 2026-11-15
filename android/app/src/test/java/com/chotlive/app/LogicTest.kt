@@ -11,6 +11,7 @@ import com.chotlive.app.model.DeliveryAddress
 import com.chotlive.app.model.LiveComment
 import com.chotlive.app.model.OrderItem
 import com.chotlive.app.model.PriceParser
+import com.chotlive.app.model.ShipInfo
 import com.chotlive.app.model.money
 import com.chotlive.app.print.PrinterProfile
 import org.junit.Assert.assertEquals
@@ -33,6 +34,38 @@ class PriceParserTest {
     @Test
     fun matchesWebParser() {
         for ((text, price) in web) assertEquals(text, price, PriceParser.parse(text))
+    }
+
+    /** BL-12: cùng danh sách với PRICE_VECTORS của test/price.test.js (0 ở đây là null bên web). */
+    private val bl12 = listOf(
+        "chốt mã 150 sđt 0912 345 678" to 150000, "lấy 150 0912.345.678" to 150000, "150 sđt 0912-345-678" to 150000,
+        "sđt 098.812.3456 lấy 250" to 250000, "0988 123 456 mã 99" to 99000, "024 3826 1234 mã 120" to 120000,
+        "+84 912 345 678 mã 150" to 150000, "0912345678 150" to 150000, "0912 345 678" to 0,
+        "2.500k" to 2500000, "1,200k" to 1200000, "1.5k" to 1500, "150k" to 150000, "150 k" to 150000,
+        "1.5tr" to 1500000, "150,000" to 150000, "150.000đ" to 150000, "1.200.000" to 1200000, "1,5tr" to 1500000,
+        "Chốt 120 với 180" to 180000, "lấy 2 cái 150" to 150000, "mã 090 150 180" to 180000,
+        "cho em xin giá" to 0, "" to 0,
+    )
+
+    @Test
+    fun phoneNumbersAndGroupedThousandsBl12() {
+        for ((text, price) in bl12) assertEquals(text, price, PriceParser.parse(text))
+        for (text in listOf("0912 345 678", "0912.345.678", "150 0912 345 678")) assertFalse(text, PriceParser.isOnlyCodes(text))
+        assertTrue(PriceParser.isOnlyCodes("mã 150"))
+        assertEquals(listOf(150000), PriceParser.orderTokens("chốt mã 150 sđt 0912 345 678").map { it.price })
+    }
+
+    /** Size và số lượng không phải giá: cùng danh sách với SIZE_QTY_VECTORS của test/price.test.js. */
+    private val sizeQty = listOf(
+        "size 38 0912 345 678" to 0, "size 38" to 0, "sz 38 mã 250" to 250000, "size: 40 lấy 150" to 150000,
+        "lấy 2 cái" to 0, "chốt 2 cái 150" to 150000, "lấy 2 cái 150" to 150000, "sl 2" to 0,
+        "số lượng: 3 mã 120" to 120000, "50 kg" to 0, "nặng 50 kg mã 199" to 199000, "mã 99 bộ đồ" to 99000,
+        "150 cái" to 150000, "38" to 38000,
+    )
+
+    @Test
+    fun sizeAndQuantityAreNotPrices() {
+        for ((text, price) in sizeQty) assertEquals(text, price, PriceParser.parse(text))
     }
 
     @Test
@@ -126,6 +159,25 @@ class StoreTest {
         // Bấm in lại cùng bình luận không tạo món mới.
         assertEquals(items, store.saveToCustomer(comment("c1", "Chốt 120 với 180")))
         assertEquals(2, store.customers[0].items.size)
+    }
+
+    @Test
+    fun newItemSkipsAnOrderWhoseWaybillIsUnresolved() {
+        val store = Store(newDir(), "srv|a")
+        store.saveToCustomer(comment("c1", "150"))
+        val first = store.allOrders().single()
+        // Lần tạo vận đơn chưa rõ kết quả (máy chủ ghi): Viettel Post có thể đã tạo với số thu hộ 150.000đ.
+        store.setShip(mapOf(first.id to ShipInfo(state = "ready", pay = "cod", vtpKind = "unknown")))
+        store.saveToCustomer(comment("c2", "90"))
+        assertEquals(2, store.allOrders().size)
+        assertEquals(150000, store.allOrders().first { it.id == first.id }.total)
+        // Đơn đã về Chờ gửi sau khi huỷ vận đơn thì vẫn nhận thêm món.
+        val other = Store(newDir(), "srv|b")
+        other.saveToCustomer(comment("c1", "150"))
+        val o = other.allOrders().single()
+        other.setShip(mapOf(o.id to ShipInfo(state = "ready", pay = "cod", vtpKind = "cancelled", vtpOldCode = "VTP1")))
+        other.saveToCustomer(comment("c2", "90"))
+        assertEquals(1, other.allOrders().size)
     }
 
     @Test

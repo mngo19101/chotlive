@@ -4,9 +4,14 @@
  * 1. Bắt mọi dạng giá Tiếng Việt: 150k, 1tr1, 1tr250, 150 (tự nhân 1.000), 1.100.000đ
  * 2. Nhận diện số lượng: "chốt 2 cái 150k" -> quantity = 2, tổng = 300.000đ
  * 3. Chuẩn hóa SĐT với mọi định dạng: 0988 123 456, 098.812.3456, +84988...
- * 4. Nhận diện địa chỉ giao hàng trong bình luận
- * 5. Nhận diện câu hỏi/tư vấn (tránh tạo đơn 0đ nhầm lẫn)
+ * 4. Nhận diện câu hỏi/tư vấn (tránh tạo đơn 0đ nhầm lẫn)
  */
+
+/**
+ * Độ dài tối đa của một bình luận được xử lý và lưu (TikTok cho khoảng 150 ký tự).
+ * Một số regex bên dưới chạy chậm theo bình phương độ dài, nên phải cắt trước khi chạy.
+ */
+export const MAX_COMMENT_CHARS = 500;
 
 export const stripAccents = (s) =>
   String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
@@ -17,6 +22,36 @@ function escapeRegExp(string) {
 
 const RE =
   /(?<![a-z\d])(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(\d{1,3})?(?![a-z\d])/g;
+
+/**
+ * Số điện thoại Việt Nam (0… hoặc +84…), kể cả viết tách bằng dấu cách, chấm, gạch:
+ * "0912 345 678", "098.812.3456", "024 3826 1234". Phải đủ 10-11 số mới tính là số điện thoại.
+ * Giống PHONE của PriceParser trên app iPhone và Android.
+ */
+const PHONE_RE = /(?<!\d)(?:\+84[\s.-]{0,3}|0)\d{2,3}[\s.-]{0,3}\d{3,4}[\s.-]{0,3}\d{3,4}(?!\d)/g;
+
+/** Thay số điện thoại bằng "#" (giữ nguyên độ dài) để phần bắt giá không đọc nhầm thành giá. */
+function maskPhones(s) {
+  return s.replace(PHONE_RE, (m) => {
+    const digits = m.replace(/\D/g, '').length - (m.startsWith('+') ? 1 : 0);
+    return digits === 10 || digits === 11 ? '#'.repeat(m.length) : m;
+  });
+}
+
+/** Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2". */
+const SIZE_QTY_BEFORE = /(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$/;
+/** Số 1-2 chữ số ngay trước "cái", "đôi", "kg"... là số lượng/cân nặng: "lấy 2 cái", "50 kg". */
+const QTY_AFTER = /^\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon)(?![a-z\d])/;
+/** Có "mã" đứng trước thì vẫn là mã: "mã 99 bộ đồ". */
+const CODE_BEFORE = /(?<![a-z\d])ma\s*$/;
+
+/** Số ở vị trí [start, end) của s là size hoặc số lượng, không phải giá. Giống isSizeOrQty trên app iPhone và Android. */
+function isSizeOrQty(s, start, end, rawNum, unit) {
+  if (unit) return false;
+  const before = s.slice(0, start);
+  if (SIZE_QTY_BEFORE.test(before)) return true;
+  return /^\d{1,2}$/.test(rawNum) && QTY_AFTER.test(s.slice(end)) && !CODE_BEFORE.test(before);
+}
 
 const INQUIRY_RE =
   /(?:bao nhieu|bn\b|co duoc|khong|k a|k shop|xem lai|con size|khi nao|may ngay|ship ve|tu van|hoi |o dau|co hop k)/i;
@@ -35,7 +70,7 @@ export function isInquiry(comment = '') {
 export function parsePriceWithMatch(text, opts = {}) {
   const { multiplier = 1000, minPrice = 1, maxPrice = 50000000 } = opts;
   if (!text) return { price: null, matchText: '' };
-  const s = stripAccents(String(text).toLowerCase());
+  const s = maskPhones(stripAccents(String(text).toLowerCase()));
   let best = null;
   let bestMatch = '';
 
@@ -43,9 +78,11 @@ export function parsePriceWithMatch(text, opts = {}) {
     const [rawMatch, rawNum, unit = '', trail = ''] = m;
     const digitsOnly = rawNum.replace(/[.,]/g, '');
     if (digitsOnly.length >= 9) continue; // số điện thoại / mã đơn
+    if (isSizeOrQty(s, m.index, m.index + rawMatch.length, rawNum, unit)) continue;
 
     const isGrouped = /^\d{1,3}(?:[.,]\d{3})+$/.test(rawNum);
-    let n = isGrouped && !/^(k|tr|trieu|cu)$/.test(unit)
+    // "2.500k" là 2.500 nghìn; riêng "1.500tr" vẫn đọc là 1,5 triệu.
+    let n = isGrouped && !/^(tr|trieu|cu)$/.test(unit)
       ? Number(digitsOnly)
       : Number(rawNum.replace(',', '.'));
     if (!Number.isFinite(n)) continue;
@@ -84,7 +121,7 @@ const CODE_FILLERS = /(?<![a-z\d])(?:ma|va|voi)(?![a-z\d])|[\s,;+&/.-]/g;
  * Giống PriceParser.isOnlyCodes của app iPhone và Android.
  */
 export function isOnlyCodes(text, opts = {}) {
-  const s = stripAccents(String(text || '').toLowerCase());
+  const s = maskPhones(stripAccents(String(text || '').toLowerCase()));
   let found = false;
   const rest = s.replace(RE, (match) => {
     if (!parsePrice(match, opts)) return match;
@@ -99,6 +136,22 @@ export function parsePriceInput(text, multiplier = 1000) {
   if (text === '' || text == null) return 0;
   const v = parsePrice(String(text), { multiplier, minPrice: 1, maxPrice: 1e12 });
   return v ?? 0;
+}
+
+const MONEY_INPUT_RE = /^(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(\d{1,3})?$/;
+
+/**
+ * Ô nhập số tiền (thu hộ, tiền cọc): số thuần là đồng ("150" = 150đ), dấu chấm/phẩy là nhóm nghìn
+ * ("150.000" = 150.000đ), nhận "150k", "1.5tr". Trống hoặc không hợp lệ (số âm, "150.5") trả null.
+ */
+export function parseMoneyInput(text) {
+  const s = stripAccents(String(text ?? '').toLowerCase()).replace(/\s+/g, '');
+  const m = MONEY_INPUT_RE.exec(s);
+  if (!m) return null;
+  const [, rawNum, unit = ''] = m;
+  const bigUnit = /^(k|tr|trieu|cu|nghin|ngan)$/.test(unit);
+  if (!bigUnit && /[.,]/.test(rawNum) && !/^\d{1,3}(?:[.,]\d{3})+$/.test(rawNum)) return null;
+  return parsePriceWithMatch(s, { multiplier: 1, minPrice: 0, maxPrice: 1e12 }).price;
 }
 
 export function formatVND(n) {
@@ -118,10 +171,11 @@ export function formatPhone(p) {
 }
 
 /**
- * Trích xuất đầy đủ thông tin: Tên sản phẩm, Số lượng, Đơn giá, SĐT, Địa chỉ, Loại bình luận
+ * Trích xuất thông tin: Tên sản phẩm, Số lượng, SĐT, Loại bình luận (địa chỉ do shop tự nhập)
  */
 export function extractProductInfo(comment = '', price = 0) {
-  let str = String(comment).trim();
+  const text = String(comment).trim().slice(0, MAX_COMMENT_CHARS);
+  let str = text;
   const isQuestion = isInquiry(str);
 
   // 1. Tìm số điện thoại (hỗ trợ dấu cách, dấu chấm, +84)
@@ -136,20 +190,13 @@ export function extractProductInfo(comment = '', price = 0) {
   const qtyMatch = str.match(/(?:chốt|lấy|mua|cho em|cho e|cho chị|cho c)\s+(\d{1,2})\s*(?:cái|chiếc|đôi|bộ|hộp|set|kg)?\b/i);
   const quantity = qtyMatch ? Math.max(1, parseInt(qtyMatch[1], 10)) : 1;
 
-  // 3. Tìm địa chỉ nếu có
-  const addrMatch = str.match(/(?:địa chỉ|đ\/c|dc|giao về|giao tai|o tai|o|ship ve|tai)[:\s]*([^,;]+(?:hcm|hà nội|hn|đà nẵng|quận|huyện|phường|xã|đường|thôn|ấp|tp)[^,;]*)/i);
-  const address = addrMatch ? addrMatch[1].trim() : '';
-  if (address) {
-    str = str.replace(addrMatch[0], '');
-  }
-
-  // 4. Chỉ xoá cụm giá tiền đã nhận diện (giữ nguyên size 2, max 3)
+  // 3. Chỉ xoá cụm giá tiền đã nhận diện (giữ nguyên size 2, max 3)
   const { matchText } = parsePriceWithMatch(str);
   if (matchText) {
     str = str.replace(new RegExp(escapeRegExp(matchText), 'i'), '');
   }
 
-  // 5. Làm sạch từ khóa chốt đơn thông dụng
+  // 4. Làm sạch từ khóa chốt đơn thông dụng
   let cleaned = str
     .replace(/^([!@#.,\-_]+)/, '')
     .replace(/(?:^|\s+)(chốt|chot|lấy thêm|lấy|lay them|lay|cho em|cho e|cho chị|cho c|mua|ship|order)(?:\s+\d{1,2}\s*(?:cái|chiếc|đôi|bộ|hộp|set|kg)?)?(?=\s+|$)/gi, ' ')
@@ -162,13 +209,12 @@ export function extractProductInfo(comment = '', price = 0) {
   if (cleaned.length >= 2) {
     cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
   } else {
-    cleaned = comment.trim();
+    cleaned = text;
   }
 
   return {
     productName: cleaned || 'Sản phẩm livestream',
     phone,
-    address,
     quantity,
     isInquiry: isQuestion && !price,
   };

@@ -59,6 +59,9 @@ struct VtpCreateResult: Identifiable, Equatable {
     var ok: Bool
     var code: String
     var fee: Int
+    /// Tiền thu hộ / giá trị hàng máy chủ đã gửi Viettel Post (nil: máy chủ bản cũ chưa trả).
+    var cod: Int? = nil
+    var goods: Int? = nil
     var already: Bool
     var error: String
 
@@ -69,6 +72,8 @@ struct VtpCreateResult: Identifiable, Equatable {
         ok = (d["ok"] as? Bool) ?? false
         code = VtpConnection.string(d["code"]) ?? ""
         fee = (d["fee"] as? NSNumber)?.intValue ?? 0
+        cod = (d["cod"] as? NSNumber)?.intValue
+        goods = (d["goods"] as? NSNumber)?.intValue
         already = (d["already"] as? Bool) ?? false
         error = VtpConnection.string(d["error"]) ?? (ok ? "" : "Lỗi không rõ")
     }
@@ -133,10 +138,20 @@ enum VtpTrack {
         return code(o) == nil ? "" : "created"
     }
 
-    /// Giao hỏng / chờ phát lại / đang hoàn: cần shop xử lý.
+    /// Giao hỏng / chờ phát lại / đang hoàn, hoặc vận đơn tạo sai địa chỉ mà máy chủ chưa huỷ được (needsCancel): cần shop xử lý.
     static func needsAction(_ o: Order) -> Bool {
-        code(o) != nil && ["attention", "returned"].contains(kind(o)) && o.status != .delivered
+        code(o) != nil && ["attention", "returned", "needsCancel"].contains(kind(o)) && o.status != .delivered
     }
+
+    /// Vận đơn tạo sai địa chỉ, máy chủ tự huỷ chưa được: còn sống bên Viettel Post, shop cần bấm huỷ lại.
+    static func needsCancel(_ o: Order) -> Bool { code(o) != nil && kind(o) == "needsCancel" }
+
+    /// Lần tạo vận đơn trước chưa rõ kết quả (Viettel Post trả lời chậm, đứt mạng): máy chủ khoá đơn, chưa tạo lại được.
+    static func unknown(_ o: Order) -> Bool {
+        code(o) == nil && ["creating", "unknown"].contains(o.ship?.vtpKind ?? "")
+    }
+
+    static let unknownProblem = "Chưa rõ vận đơn trước đã tạo chưa, mở đơn để kiểm tra"
 
     /// Viettel Post đã trả hàng về shop: đơn vẫn nằm ở tab Đang giao nhưng trạng thái hiện "Hoàn về".
     static func isReturned(_ o: Order) -> Bool {
@@ -148,11 +163,12 @@ enum VtpTrack {
         guard code(o) != nil, o.status != .delivered else { return false }
         let k = kind(o)
         let s = o.ship?.vtpStatus ?? 0
-        return k == "created" || (k == "moving" && s > 0 && s < 200)
+        return k == "created" || k == "needsCancel" || (k == "moving" && s > 0 && s < 200)
     }
 
     static func statusName(_ o: Order) -> String {
         if o.status == .delivered { return o.ship?.vtpStatusName ?? "Giao thành công" }
+        if needsCancel(o) { return "Cần huỷ vận đơn" }
         if isReturned(o) { return "Hoàn về" }
         let name = o.ship?.vtpStatusName ?? ""
         return name.isEmpty ? "Chờ lấy hàng" : name
@@ -177,7 +193,7 @@ enum VtpTrack {
 
     /// Đơn chưa gửi mà lần tạo vận đơn gần nhất bị Viettel Post từ chối.
     static func lastError(_ o: Order) -> String? {
-        guard Vtp.state(o).isPending, let e = o.ship?.vtpError, !e.isEmpty else { return nil }
+        guard Vtp.state(o).isPending, !unknown(o), let e = o.ship?.vtpError, !e.isEmpty else { return nil }
         return e
     }
 
@@ -194,8 +210,10 @@ enum VtpTrack {
         return mates.isEmpty ? [o] : mates
     }
 
-    /// Tiền thu hộ của vận đơn: tính lại như lúc tạo (COD nhập tay, tiền cọc, cước thật Viettel Post báo).
+    /// Tiền thu hộ của vận đơn: đúng số máy chủ đã gửi Viettel Post. Vận đơn tạo trước khi máy chủ lưu số đó
+    /// (hoặc nháp chưa tạo) thì tính lại như lúc tạo (COD nhập tay, tiền cọc, cước thật Viettel Post báo).
     static func waybillCod(_ orders: [Order]) -> Int {
+        if let sent = orders.first(where: { code($0) != nil && $0.ship?.vtpCod != nil })?.ship?.vtpCod { return sent }
         guard let c = orders.last?.customer else { return 0 }
         let fee = orders.compactMap { $0.ship?.vtpFee }.first { $0 > 0 }
         return Vtp.summarize(Vtp.lines(orders), address: c.address, nickname: c.nickname, realFee: fee).cod
@@ -339,6 +357,15 @@ extension LiveClient {
         return (nil, (r.1["already"] as? Bool) ?? false)
     }
 
+    /// Lần tạo vận đơn "chưa rõ": shop đã kiểm trên viettelpost.vn. `code` = mã tìm thấy; nil = xác nhận không có, cho tạo lại.
+    func vtpSettle(itemIds: [String], code: String?) async -> String? {
+        var body: [String: Any] = ["itemIds": itemIds]
+        if let code { body["code"] = code } else { body["none"] = true }
+        let r = await apiCall("/api/vtp/settle", method: "POST", body: body, timeout: 30)
+        guard let r, r.0 == 200 else { return Self.errorText(r, "Không ghi được, thử lại") }
+        return nil
+    }
+
     /// type 3: phát lại, type 2: đồng ý hoàn về shop.
     func vtpResolve(_ code: String, type: Int, note: String) async -> String? {
         let r = await apiCall("/api/vtp/resolve", method: "POST", body: ["code": code, "type": type, "note": note], timeout: 30)
@@ -360,7 +387,7 @@ extension LiveClient {
 // MARK: - Ghi kết quả lên máy ngay, không chờ máy chủ đồng bộ về
 
 extension Store {
-    func applyVtpCreated(_ orders: [Order], code: String, fee: Int, service: String, at now: Date = Clock.now) {
+    func applyVtpCreated(_ orders: [Order], code: String, fee: Int, cod: Int? = nil, goods: Int? = nil, service: String, at now: Date = Clock.now) {
         let ms = (now.timeIntervalSince1970 * 1000).rounded()
         let batch = "vtp_" + String(Int64(ms), radix: 36)
         var changes: [String: ShipInfo] = [:]
@@ -371,6 +398,9 @@ extension Store {
             s.batchId = batch
             s.vtpCode = code
             s.vtpFee = fee
+            // Số máy chủ đã gửi Viettel Post; máy chủ bản cũ không trả thì giữ số đang có.
+            if let cod { s.vtpCod = cod }
+            if let goods { s.vtpGoods = goods }
             s.vtpService = service
             s.vtpStatus = 0
             s.vtpStatusName = "Chờ lấy hàng"

@@ -6,8 +6,16 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { summarizeGroup, vtpAttemptOpen } from './public/js/vtp-export.js';
 
+export { vtpAttemptOpen };
 export const VTP_BASE = process.env.VTP_BASE || 'https://partner.viettelpost.vn';
+/** Hạn chờ Viettel Post trả lời một lần gọi. */
+const TIMEOUT_MS = Number(process.env.VTP_TIMEOUT_MS) || 20000;
+/** Tạo vận đơn quá hạn chờ: còn nghe tiếp câu trả lời thêm ngần này để biết họ đã tạo hay chưa (BL-01). */
+const LATE_MS = Number(process.env.VTP_LATE_MS) || 120000;
+/** Lỗi nối mạng mà chắc chắn chưa gửi được gì tới Viettel Post. */
+const NOT_SENT = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT']);
 
 /** Trạng thái cuối hoặc cần shop xử lý, theo bảng mã trạng thái của Viettel Post. */
 export const VTP_DELIVERED = [501];
@@ -161,38 +169,75 @@ export function createVtpStore(dataDir) {
   };
 }
 
-async function call(method, p, { token, body, timeoutMs = 20000 } = {}) {
+/**
+ * Gọi Viettel Post. Quá `timeoutMs` chưa có trả lời thì bỏ cuộc gọi và trả { http: 0 }.
+ * `lateMs` > 0 (tạo vận đơn): quá hạn chờ thì KHÔNG bỏ, trả thêm `late` = lời hứa câu trả lời thật, nghe tiếp tối đa
+ * `lateMs` nữa. `unsent` = chưa nối được tới Viettel Post nên chắc chắn họ chưa nhận gì.
+ */
+async function call(method, p, { token, body, timeoutMs = TIMEOUT_MS, lateMs = 0 } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Token = token;
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), timeoutMs);
-  try {
-    const res = await fetch(VTP_BASE + p, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: ctl.signal
-    });
-    const text = await res.text();
-    let json = null;
+  const done = (async () => {
     try {
-      json = JSON.parse(text);
-    } catch {}
-    return { http: res.status, json, text: text.slice(0, 300) };
-  } catch (e) {
-    return { http: 0, json: null, text: e.name === 'AbortError' ? 'Viettel Post không phản hồi' : String(e.message || e) };
-  } finally {
-    clearTimeout(timer);
+      const res = await fetch(VTP_BASE + p, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: ctl.signal
+      });
+      const text = await res.text();
+      let json = null;
+      try {
+        json = JSON.parse(text);
+      } catch {}
+      return { http: res.status, json, text: text.slice(0, 300) };
+    } catch (e) {
+      const text = e.name === 'AbortError' ? 'Viettel Post không phản hồi' : String(e.message || e);
+      return { http: 0, json: null, text, ...(NOT_SENT.has(e.cause?.code) ? { unsent: true } : {}) };
+    }
+  })();
+  let timer;
+  const first = await Promise.race([done, new Promise((res) => (timer = setTimeout(res, timeoutMs, null)))]);
+  clearTimeout(timer);
+  if (first) return first;
+  const silent = { http: 0, json: null, text: 'Viettel Post không phản hồi' };
+  if (!lateMs) {
+    ctl.abort();
+    return silent;
   }
+  const hard = setTimeout(() => ctl.abort(), lateMs);
+  hard.unref?.();
+  return { ...silent, late: done.finally(() => clearTimeout(hard)) };
 }
 
 const ok = (r) => r.http === 200 && r.json && r.json.error === false;
 const why = (r) => r.json?.message || (r.http ? `Viettel Post báo lỗi (HTTP ${r.http})` : r.text);
 const looksExpired = (r) => r.http === 401 || /token/i.test(String(r.json?.message || ''));
+/**
+ * Lần gọi tạo vận đơn không ra mã: Viettel Post CÓ THỂ đã tạo, hay chắc chắn chưa (BL-01)?
+ * Chắc chắn chưa: chưa nối được tới họ, họ từ chối (HTTP 4xx) hoặc trả JSON báo lỗi.
+ * Còn lại (hết hạn chờ, đứt mạng giữa chừng, HTTP 5xx, trả lời không đọc được): chưa rõ, không được coi là thất bại.
+ */
+const maybeCreated = (r) => !(r.unsent || (r.http >= 400 && r.http < 500) || r.json?.error === true);
 
 export const maskPhone = (p) => {
   const s = String(p || '');
   return s.length > 5 ? `${s.slice(0, 3)}•••${s.slice(-3)}` : s;
+};
+
+/** Che mọi số điện thoại Việt Nam (0… hoặc +84…, có thể viết tách) trong một chuỗi trước khi ghi log (INF-03). */
+export const maskPhones = (text) =>
+  String(text ?? '').replace(/(?<!\d)(?:\+?84|0)(?:[\s.-]?\d){8,10}(?!\d)/g, (m) => maskPhone(m.replace(/\D/g, '')));
+
+/**
+ * Tóm tắt phản hồi lỗi của Viettel Post để ghi log: chỉ HTTP, mã lỗi và lời báo (đã che SĐT), không ghi `data`
+ * vì họ trả lại tên, SĐT, địa chỉ người nhận (INF-03).
+ */
+const replyForLog = (r) => {
+  const j = r.json;
+  const msg = maskPhones(String(j ? j.message ?? '' : r.text ?? '').slice(0, 200));
+  return `HTTP ${r.http}${j ? ` status=${j.status ?? '-'} error=${j.error ?? '-'}` : ''} "${msg}"`;
 };
 
 /** Đổi token web thành token Partner. */
@@ -203,15 +248,15 @@ export async function vtpLogin(siteToken) {
 }
 
 /** Gọi API bằng token Partner đang lưu; hết hạn thì đăng nhập lại bằng token web một lần. */
-export async function vtpCall(store, userId, method, p, body) {
+export async function vtpCall(store, userId, method, p, body, opts = {}) {
   const conn = store.get(userId);
-  if (!conn?.siteToken) return { http: 0, json: null, text: 'Chưa kết nối Viettel Post' };
-  let r = await call(method, p, { token: conn.partnerToken, body });
+  if (!conn?.siteToken) return { http: 0, json: null, unsent: true, text: 'Chưa kết nối Viettel Post' };
+  let r = await call(method, p, { ...opts, token: conn.partnerToken, body });
   if (looksExpired(r) && !ok(r)) {
     const lg = await vtpLogin(conn.siteToken);
     if (!lg.ok) return { http: 401, json: { error: true, message: 'Token Viettel Post đã hết hạn hoặc bị xoá. Kết nối lại.' }, text: '' };
     store.set(userId, { partnerToken: lg.token });
-    r = await call(method, p, { token: lg.token, body });
+    r = await call(method, p, { ...opts, token: lg.token, body });
   }
   return r;
 }
@@ -245,6 +290,38 @@ export function clipBytes(s, maxBytes = 150) {
     out += ch;
   }
   return out;
+}
+
+/** Trần tiền thu hộ một vận đơn; trần cước dùng để suy ra cước client đã báo giá. */
+export const MAX_COD = 100_000_000;
+export const MAX_SHIP_FEE = 2_000_000;
+const vnd = (n) => Number(n).toLocaleString('vi-VN') + 'đ';
+const BAD_COD = 'Tiền thu hộ không hợp lệ. Cập nhật app rồi gửi lại.';
+/** COD hợp lệ: số nguyên 0..MAX_COD. Chuỗi "450.000", null, số âm, số lẻ: không hợp lệ (không ép về 0). */
+const codOk = (cod) => typeof cod === 'number' && Number.isInteger(cod) && cod >= 0 && cod <= MAX_COD;
+
+/**
+ * Đối chiếu tiền thu hộ client gửi (`cod`) với số tính từ các đơn trên máy chủ, cùng công thức với web/app
+ * (summarizeGroup). `cod` phải là số nguyên 0..MAX_COD (chuỗi "450.000", null, số âm, số lẻ: từ chối, không ép về 0).
+ * Client tính theo cước thật vừa báo giá mà máy chủ không giữ: suy ra cước đó từ `cod` rồi tính lại cho khớp.
+ * Trả { ok, cod, goods, senderPays } hoặc { ok: false, error }.
+ */
+export function checkGroupCod(orders, cod) {
+  if (!codOk(cod)) return { ok: false, error: BAD_COD };
+  // Cũ nhất trước, như web/app: cài đặt (COD sửa tay, người trả cước…) của đơn mới nhất thắng.
+  const list = [...orders].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
+  const pick = (s) => ({ ok: true, cod: s.cod, goods: s.goods, senderPays: s.senderPays });
+  const base = summarizeGroup({ orders: list });
+  if (base.cod === cod) return pick(base);
+  const fee = cod - (base.cod - base.shipFee);
+  if (fee > 0 && fee <= MAX_SHIP_FEE) {
+    const real = summarizeGroup({ orders: list }, { realFee: fee });
+    if (real.cod === cod) return pick(real);
+  }
+  return {
+    ok: false,
+    error: `Tiền thu hộ ${vnd(cod)} khác số tính từ đơn trên máy chủ (${vnd(base.cod)}${base.shipFee ? ' tạm tính ship' : ''}). Đợi đồng bộ xong rồi gửi lại.`
+  };
 }
 
 /**
@@ -290,33 +367,60 @@ export async function vtpCreateOrder(store, userId, g, service, wards = null) {
   };
   // Thu hộ 0đ: shop trả cước thì "không thu hộ" (1), khách trả cước thì chỉ thu cước (4).
   if (!body.MONEY_COLLECTION) body.ORDER_PAYMENT = g.senderPays ? 1 : 4;
-  const r = await vtpCall(store, userId, 'POST', '/v2/order/createOrderNlp', body);
+  const sent = { cod: body.MONEY_COLLECTION, goods: product.PRODUCT_PRICE };
+  const read = (r) => readCreateReply(store, userId, r, { g, ref, wards, ...sent });
+  const r = await vtpCall(store, userId, 'POST', '/v2/order/createOrderNlp', body, { lateMs: LATE_MS });
+  // Quá hạn chờ: chưa biết Viettel Post đã tạo hay chưa. Trả "chưa rõ" kèm `late` = kết quả thật khi họ trả lời muộn.
+  if (r.late) {
+    console.warn(`[vtp] Tạo vận đơn ${ref}: Viettel Post chưa trả lời sau ${TIMEOUT_MS}ms, nghe tiếp thêm ${LATE_MS}ms`);
+    return { ok: false, unknown: true, error: VTP_UNKNOWN_MSG, late: r.late.then(read) };
+  }
+  return read(r);
+}
+
+export const VTP_UNKNOWN_MSG =
+  'Chưa rõ Viettel Post đã tạo vận đơn chưa (họ không trả lời kịp). Đơn tạm khoá để khỏi tạo trùng. Đợi vài phút; chưa tự có mã thì mở chi tiết đơn để kiểm tra.';
+
+/**
+ * Đọc câu trả lời của createOrderNlp (đúng hạn hoặc về muộn) thành kết quả tạo vận đơn:
+ * { ok, code, fee, cod, goods } · { ok:false, error } chắc chắn chưa tạo · { ok:false, unknown:true } chưa rõ (BL-01) ·
+ * { ok:false, code, cancelled:true } tạo rồi đã huỷ vì sai địa chỉ · { ok:false, code, needsCancel:true } tạo rồi, sai địa
+ * chỉ mà CHƯA huỷ được: vận đơn còn sống, máy chủ phải giữ mã (BL-02).
+ */
+async function readCreateReply(store, userId, r, { g, ref, wards, cod, goods }) {
   if (!ok(r) || !r.json.data?.ORDER_NUMBER) {
-    // Ghi phản hồi của Viettel Post (không có token) để dò lỗi.
-    console.warn(`[vtp] Tạo vận đơn ${ref} lỗi: HTTP ${r.http} ${r.json ? JSON.stringify(r.json).slice(0, 400) : r.text}`);
-    return { ok: false, error: why(r) };
+    // Ghi mã lỗi và lời báo của Viettel Post để dò lỗi, không ghi dữ liệu khách họ trả lại.
+    console.warn(`[vtp] Tạo vận đơn ${ref} lỗi: ${replyForLog(r)}`);
+    return maybeCreated(r) ? { ok: false, unknown: true, error: VTP_UNKNOWN_MSG } : { ok: false, error: why(r) };
   }
   const d = r.json.data;
   const code = String(d.ORDER_NUMBER);
-  const out = { ok: true, code, fee: Number(d.MONEY_TOTAL) || 0, sortCode: d.SORT_CODE || '' };
+  // `cod`/`goods`: đúng số đã gửi Viettel Post, máy chủ lưu lại để mọi máy hiện số này (không tính lại).
+  const out = { ok: true, code, fee: Number(d.MONEY_TOTAL) || 0, cod, goods, sortCode: d.SORT_CODE || '' };
   // Viettel Post đọc địa chỉ bằng NLP rồi trả về mã phường họ hiểu: đối chiếu với phường/tỉnh app gửi.
   // Hiểu sai thì huỷ ngay vận đơn vừa tạo, báo lỗi để shop sửa địa chỉ, không để hàng đi nhầm nơi.
   if (wards) {
     await wards.get().catch(() => null);
     const chk = checkParsedAddress(wards, d, g);
     if (chk.checked) out.parsed = chk.parsed;
-    // Không tra được mã phường: ghi lại phần Viettel Post trả về (không có token) để dò tên trường.
-    else console.log(`[vtp] Không đối chiếu được địa chỉ vận đơn ${code}: ${JSON.stringify(d).slice(0, 500)}`);
+    // Không tra được mã phường: ghi tên các trường Viettel Post trả về (không ghi giá trị) để dò tên trường.
+    else console.log(`[vtp] Không đối chiếu được địa chỉ vận đơn ${code}: trường ${Object.keys(d).join(',').slice(0, 500)}`);
     if (chk.checked && !chk.ok) {
       const c = await vtpCancel(store, userId, code, 'Viettel Post hiểu địa chỉ khác với địa chỉ shop nhập');
       console.warn(`[vtp] Vận đơn ${code} (${ref}): Viettel Post hiểu "${chk.parsed}", app gửi "${chk.expected}" → ${c.ok ? 'đã huỷ' : 'KHÔNG huỷ được: ' + c.error}`);
+      const misread = `Viettel Post hiểu địa chỉ là "${chk.parsed}", khác với "${chk.expected}" trong app.`;
+      if (c.ok) return { ok: false, code, cancelled: true, error: `${misread} Đã huỷ vận đơn ${code}. Kiểm tra lại địa chỉ rồi gửi lại.` };
+      // Chưa huỷ được: vận đơn còn sống bên Viettel Post. Trả đủ mã và số tiền để máy chủ gắn vào đơn với cờ "cần huỷ".
       return {
         ok: false,
         code,
-        cancelled: c.ok,
-        error: `Viettel Post hiểu địa chỉ là "${chk.parsed}", khác với "${chk.expected}" trong app. ${
-          c.ok ? `Đã huỷ vận đơn ${code}.` : `Chưa huỷ được vận đơn ${code}, huỷ trên viettelpost.vn.`
-        } Kiểm tra lại địa chỉ rồi gửi lại.`
+        cancelled: false,
+        needsCancel: true,
+        fee: out.fee,
+        cod,
+        goods,
+        note: `${misread} Chưa huỷ được vận đơn này, bấm Huỷ vận đơn để thử lại.`,
+        error: `Vận đơn ${code} tạo sai địa chỉ và chưa huỷ được. ${misread} Huỷ vận đơn ${code} ở chi tiết đơn rồi mới gửi lại.`
       };
     }
   }
@@ -332,7 +436,9 @@ export async function vtpQuote(store, userId, g, service, wards = null) {
   const conn = store.get(userId);
   const s = conn?.sender;
   if (!s?.address) return { ok: false, error: 'Chưa chọn điểm lấy hàng' };
-  const cod = Math.max(0, Math.round(Number(g.cod) || 0));
+  // Cước báo giá được cộng vào COD của đơn nhỏ: hỏi với COD sai (ép về 0đ/450đ) là cước sai theo.
+  if (!codOk(g.cod)) return { ok: false, error: BAD_COD };
+  const cod = g.cod;
   const base = {
     SENDER_ADDRESS: clipBytes(s.address, 150),
     RECEIVER_ADDRESS: clipBytes(g.address, 150),
@@ -501,7 +607,7 @@ export async function vtpCancel(store, userId, code, note = 'Shop huỷ đơn') 
     r = await vtpCall(store, userId, 'POST', '/v2/order/UpdateOrder', body);
   }
   if (ok(r)) return { ok: true };
-  console.warn(`[vtp] Huỷ vận đơn ${code} lỗi: HTTP ${r.http} ${r.json ? JSON.stringify(r.json).slice(0, 400) : r.text}`);
+  console.warn(`[vtp] Huỷ vận đơn ${code} lỗi: ${replyForLog(r)}`);
   // Viettel Post trả lỗi "Đơn hàng đã hủy!" khi vận đơn đã huỷ từ trước (vd. huỷ trên web Viettel Post lúc
   // chưa nối webhook): coi như huỷ xong để đơn trong app không kẹt ở Đang giao.
   if (VTP_ALREADY_CANCELLED.test(String(r.json?.message || ''))) return { ok: true, already: true };
@@ -537,6 +643,10 @@ export function parseVtpWebhook(body) {
     note: String(d.NOTE || '').trim(),
     employee: [d.EMPLOYEE_NAME, d.EMPLOYEE_PHONE].filter(Boolean).join(' · '),
     fee: Number(d.MONEY_TOTAL) || 0,
+    // Tiền thu hộ của vận đơn, nếu Viettel Post gửi kèm: dùng để đoán vận đơn lạ thuộc lần tạo "chưa rõ" nào.
+    cod: d.MONEY_COLLECTION === undefined || d.MONEY_COLLECTION === null || d.MONEY_COLLECTION === '' || !Number.isFinite(Number(d.MONEY_COLLECTION))
+      ? null
+      : Math.round(Number(d.MONEY_COLLECTION)),
     secret: String(body?.TOKEN || '')
   };
 }
@@ -554,7 +664,106 @@ export function vtpEventTime(at) {
 }
 
 /** Các trường vận đơn trong order.ship chỉ máy chủ ghi (tạo đơn, huỷ, webhook). */
-const VTP_SHIP_FIELDS = ['vtpCode', 'vtpOldCode', 'vtpFee', 'vtpService', 'vtpStatus', 'vtpStatusName', 'vtpStatusAt', 'vtpEventAt', 'vtpKind', 'vtpNote', 'vtpError', 'vtpErrorAt'];
+const VTP_SHIP_FIELDS = ['vtpCode', 'vtpOldCode', 'vtpFee', 'vtpCod', 'vtpGoods', 'vtpService', 'vtpStatus', 'vtpStatusName', 'vtpStatusAt', 'vtpEventAt', 'vtpKind', 'vtpNote', 'vtpError', 'vtpErrorAt', 'vtpAttempt', 'vtpHints'];
+
+/** Vận đơn lạ chỉ được gợi ý cho lần tạo "chưa rõ" bắt đầu trong khoảng này trước lúc webhook về. */
+export const VTP_HINT_WINDOW_MS = 24 * 3600 * 1000;
+const MAX_HINTS = 3;
+
+/**
+ * Webhook báo một vận đơn mà không đơn nào trong app mang mã đó: có thể chính là vận đơn của một lần tạo "chưa rõ"
+ * (BL-01). Gợi ý mã đó cho các đơn đang chờ kiểm tra: lần tạo bắt đầu trong VTP_HINT_WINDOW_MS trước đó, và nếu cả
+ * hai bên đều biết tiền thu hộ thì phải bằng nhau. KHÔNG tự gắn: shop xem rồi bấm xác nhận (webhook chưa xác thực
+ * được người gửi, và một shop có thể có nhiều lần tạo chưa rõ cùng lúc). Trả về mã các đơn được gợi ý.
+ */
+export function addVtpHint(state, hint, now = Date.now()) {
+  const out = [];
+  for (const o of state.orders || []) {
+    if (!vtpAttemptOpen(o)) continue;
+    const a = o.ship.vtpAttempt || {};
+    const at = Number(a.at) || 0;
+    if (!at || at > now + 60_000 || now - at > VTP_HINT_WINDOW_MS) continue;
+    if (hint.cod != null && a.cod != null && Number(a.cod) !== Number(hint.cod)) continue;
+    const list = (Array.isArray(o.ship.vtpHints) ? o.ship.vtpHints : []).filter((h) => h?.code !== hint.code);
+    list.unshift({ code: String(hint.code), cod: hint.cod ?? null, at: now, statusName: String(hint.statusName || '').slice(0, 80) });
+    o.ship = { ...o.ship, vtpHints: list.slice(0, MAX_HINTS) };
+    out.push(String(o.id));
+  }
+  return out;
+}
+
+/**
+ * Chống tạo trùng vận đơn (BL-01, BL-02). Trạng thái ghi trong order.ship, chỉ máy chủ ghi:
+ * - vtpKind 'creating' + vtpAttempt { id, at, cod, goods, service }: ghi xuống đĩa TRƯỚC khi gọi Viettel Post.
+ * - vtpKind 'unknown': lần gọi đó chưa rõ kết quả (hết hạn chờ, đứt mạng, máy chủ tắt giữa chừng). Đơn bị khoá cho
+ *   tới khi câu trả lời muộn về, hoặc shop kiểm trên viettelpost.vn rồi nhập mã / xác nhận không có.
+ * - vtpKind 'needsCancel' + vtpCode: vận đơn tạo sai địa chỉ mà chưa huỷ được, còn sống bên Viettel Post.
+ */
+export function markVtpCreating(state, ids, attempt) {
+  for (const o of state.orders || []) {
+    if (ids.includes(String(o.id))) o.ship = { ...(o.ship || {}), vtpKind: 'creating', vtpAttempt: attempt };
+  }
+}
+
+/** Máy chủ vừa khởi động: lần tạo còn dang dở từ trước không biết kết quả → "chưa rõ". Trả về số đơn đã đổi. */
+export function sweepVtpCreating(state, now = Date.now()) {
+  let n = 0;
+  for (const o of state.orders || []) {
+    if (o?.ship?.vtpKind !== 'creating' || o.ship.vtpCode) continue;
+    o.ship = { ...o.ship, vtpKind: 'unknown', vtpError: VTP_UNKNOWN_MSG, vtpErrorAt: now };
+    n += 1;
+  }
+  return n;
+}
+
+/** Mã các đơn còn giữ đúng lần tạo vận đơn này (chưa có mã). */
+export const ordersOfAttempt = (state, attempt) =>
+  (state.orders || []).filter((o) => attempt?.id && o?.ship?.vtpAttempt?.id === attempt.id && !o.ship.vtpCode).map((o) => String(o.id));
+
+/**
+ * Ghi kết quả một lần tạo vận đơn vào mọi đơn còn giữ đúng lần tạo đó (đơn đã được xử lý theo cách khác thì bỏ qua,
+ * nên câu trả lời muộn không ghi đè việc shop vừa làm). Trả về mã các đơn đã ghi.
+ */
+export function settleVtpCreate(state, attempt, r, { batchId, now = Date.now() } = {}) {
+  const done = [];
+  for (const o of state.orders || []) {
+    if (!attempt?.id || o?.ship?.vtpAttempt?.id !== attempt.id || o.ship.vtpCode) continue;
+    done.push(String(o.id));
+    if (r.unknown) {
+      o.ship = { ...o.ship, vtpKind: 'unknown', vtpError: String(r.error || VTP_UNKNOWN_MSG).slice(0, 200), vtpErrorAt: now };
+      continue;
+    }
+    const { vtpAttempt, vtpKind, vtpHints, ...rest } = o.ship;
+    if (r.ok || r.needsCancel) {
+      o.ship = {
+        ...rest,
+        state: 'exported',
+        exportedAt: now,
+        batchId,
+        vtpCode: r.code,
+        vtpFee: r.fee,
+        // Đúng số đã gửi Viettel Post; webhook đổi cước không đổi số này (BL-11).
+        vtpCod: r.cod,
+        vtpGoods: r.goods,
+        vtpService: attempt.service,
+        vtpStatus: 0,
+        vtpStatusName: r.needsCancel ? 'Cần huỷ vận đơn' : 'Chờ lấy hàng',
+        vtpStatusAt: now,
+        vtpKind: r.needsCancel ? 'needsCancel' : 'created',
+        vtpNote: r.needsCancel ? String(r.note || r.error || '').slice(0, 300) : '',
+        vtpError: '',
+        vtpErrorAt: null
+      };
+      o.status = 'shipping';
+      continue;
+    }
+    // Chắc chắn chưa tạo: bỏ khoá. Ghi lý do vào đơn để thẻ đơn (web và app) hiện "Lỗi tạo vận đơn: …" cho tới lần gửi sau.
+    o.ship = { ...rest, vtpError: String(r.error || '').slice(0, 200), vtpErrorAt: r.error ? now : null };
+    // Đơn từng bị huỷ vận đơn thì trở lại đúng nhãn "đã huỷ · gửi lại" như trước lần tạo này.
+    if (rest.vtpOldCode) o.ship.vtpKind = 'cancelled';
+  }
+  return done;
+}
 
 /**
  * Web gửi lên cả danh sách đơn, có thể là bản chụp từ trước khi máy chủ ghi mã vận đơn hoặc trạng thái
@@ -603,6 +812,7 @@ export function applyVtpStatus(state, ev) {
       n += 1;
       continue;
     }
+    const prev = o.ship;
     o.ship = {
       ...o.ship,
       vtpStatus: ev.status,
@@ -612,6 +822,8 @@ export function applyVtpStatus(state, ev) {
       vtpNote: [ev.note, ev.location].filter(Boolean).join(' · ').slice(0, 200),
       vtpKind: kind
     };
+    // Vận đơn sai địa chỉ đang chờ huỷ (BL-02): bản tin hành trình thường ("đã tiếp nhận"…) không được xoá cờ và lý do.
+    if (prev.vtpKind === 'needsCancel' && kind === 'moving') Object.assign(o.ship, { vtpKind: 'needsCancel', vtpStatusName: prev.vtpStatusName, vtpNote: prev.vtpNote });
     if (ev.fee) o.ship.vtpFee = ev.fee;
     if (kind === 'delivered') o.status = 'done';
     else if (o.status !== 'done') o.status = 'shipping';

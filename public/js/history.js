@@ -4,6 +4,8 @@
  * - comments: mọi bình luận, gắn sessionId
  * - Giao diện: nhóm theo ngày → phiên, tìm theo tên/nội dung, lọc khung giờ, chỉ tin chốt đơn
  */
+import { csvCell } from './export.js';
+
 const DB_NAME = 'susu_history';
 const DB_VER = 1;
 let dbPromise = null;
@@ -318,7 +320,7 @@ function renderResults() {
 function exportCSV() {
   const list = applyFilters();
   if (!list.length) return;
-  const q = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const q = csvCell;
   const rows = [['Ngày', 'Giờ', 'Tên', 'Username', 'Bình luận', 'Giá', 'Sản phẩm', 'SĐT'].map(q).join(',')];
   list.forEach((c) => rows.push([dayLabel(dayKey(c.ts)), timeStr(c.ts), c.nickname, c.uniqueId, c.comment, c.price || '', c.productName, c.phone].map(q).join(',')));
   const blob = new Blob(['\ufeff' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' });

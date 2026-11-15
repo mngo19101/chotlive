@@ -11,10 +11,36 @@ object PriceParser {
     private val grouped = Regex("""^\d{1,3}(?:[.,]\d{3})+$""")
     private val marks = Regex("""\p{Mn}+""")
 
+    /** Số điện thoại Việt Nam (0… hoặc +84…), kể cả viết tách: "0912 345 678", "098.812.3456".
+     *  Phải đủ 10-11 số. Giống PHONE_RE của public/js/price.js. */
+    private val phone = Regex("""(?<!\d)(?:\+84[\s.-]{0,3}|0)\d{2,3}[\s.-]{0,3}\d{3,4}[\s.-]{0,3}\d{3,4}(?!\d)""")
+
+    /** Thay số điện thoại bằng "#" (giữ nguyên độ dài) để phần bắt giá không đọc nhầm thành giá. */
+    private fun maskPhones(s: String): String = phone.replace(s) { m ->
+        val digits = m.value.count { it in '0'..'9' } - (if (m.value.startsWith("+")) 1 else 0)
+        if (digits == 10 || digits == 11) "#".repeat(m.value.length) else m.value
+    }
+
     fun stripAccents(s: String): String =
         marks.replace(Normalizer.normalize(s, Normalizer.Form.NFD), "")
             .replace("đ", "d").replace("Đ", "D")
             .let { Normalizer.normalize(it, Normalizer.Form.NFC) }
+
+    /** Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2". */
+    private val sizeQtyBefore = Regex("""(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$""")
+    /** Số 1-2 chữ số ngay trước "cái", "đôi", "kg"... là số lượng/cân nặng: "lấy 2 cái", "50 kg". */
+    private val qtyAfter = Regex("""^\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon)(?![a-z\d])""")
+    /** Có "mã" đứng trước thì vẫn là mã: "mã 99 bộ đồ". */
+    private val codeBefore = Regex("""(?<![a-z\d])ma\s*$""")
+    private val oneOrTwoDigits = Regex("""^\d{1,2}$""")
+
+    /** Số ở vị trí [start, end) của s là size hoặc số lượng, không phải giá. Giống isSizeOrQty của public/js/price.js. */
+    private fun isSizeOrQty(s: String, start: Int, end: Int, rawNum: String, unit: String): Boolean {
+        if (unit.isNotEmpty()) return false
+        val before = s.substring(0, start)
+        if (sizeQtyBefore.containsMatchIn(before)) return true
+        return oneOrTwoDigits.matches(rawNum) && qtyAfter.containsMatchIn(s.substring(end)) && !codeBefore.containsMatchIn(before)
+    }
 
     /** Một số/giá tìm thấy trong bình luận. `start`/`end` là vị trí trong chuỗi đã bỏ dấu. */
     data class Token(val start: Int, val end: Int, val code: String, val price: Int)
@@ -27,7 +53,7 @@ object PriceParser {
 
     /** Mọi số/giá trong bình luận, theo thứ tự xuất hiện. */
     fun tokens(text: String, multiplier: Double = 1000.0, minPrice: Double = 1.0, maxPrice: Double = 50_000_000.0): List<Token> {
-        val s = folded(text)
+        val s = maskPhones(folded(text))
         val found = mutableListOf<Token>()
         for (m in regex.findAll(s)) {
             val rawNum = m.groupValues[1]
@@ -35,9 +61,11 @@ object PriceParser {
             val trail = m.groupValues[3]
             val digitsOnly = rawNum.replace(".", "").replace(",", "")
             if (digitsOnly.length >= 9) continue // số điện thoại / mã đơn
+            if (isSizeOrQty(s, m.range.first, m.range.last + 1, rawNum, unit)) continue
 
             val isGrouped = grouped.matches(rawNum)
-            val bigUnit = unit in setOf("k", "tr", "trieu", "cu")
+            // "2.500k" là 2.500 nghìn; riêng "1.500tr" vẫn đọc là 1,5 triệu.
+            val bigUnit = unit in setOf("tr", "trieu", "cu")
             val n: Double = if (isGrouped && !bigUnit) {
                 digitsOnly.toDoubleOrNull() ?: 0.0
             } else {

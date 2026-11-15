@@ -77,6 +77,25 @@ class VtpTest {
     }
 
     @Test
+    fun waybillCodShowsTheAmountSentToViettelPost() {
+        // BL-11: đơn 10.000đ gửi COD 32.000đ (cước báo giá 22.000đ); webhook sau báo cước 30.000đ.
+        val s = AppJson.decodeFromString(ShipInfo.serializer(),
+            "{\"state\":\"exported\",\"pay\":\"cod\",\"vtpCode\":\"156288120034\",\"vtpFee\":30000,\"vtpCod\":32000,\"vtpGoods\":10000}")
+        assertEquals(32_000, s.vtpCod)
+        assertEquals(10_000, s.vtpGoods)
+        assertEquals(32_000, VtpTrack.waybillCod(listOf(order("a", 10_000, ship = s, shipping = true))))
+        // Vận đơn tạo trước khi máy chủ lưu số đã gửi: tính lại như cũ.
+        assertEquals(40_000, VtpTrack.waybillCod(listOf(order("b", 10_000, ship = s.copy(vtpCod = null), shipping = true))))
+        // Ghi kết quả tạo vận đơn lên máy: lưu số máy chủ trả về.
+        val store = newStore()
+        store.saveToCustomer(comment("c1", "chốt 10", "s1"))
+        store.approve(listOf(store.allOrders()[0].id), ShipState.READY, ShipInfo(pay = "cod"))
+        store.applyVtpCreated(store.allOrders(), "156288120034", 25_000, "VSL9", cod = 32_000, goods = 10_000)
+        assertEquals(32_000, store.allOrders()[0].ship?.vtpCod)
+        assertEquals(32_000, VtpTrack.waybillCod(store.allOrders()))
+    }
+
+    @Test
     fun codRules() {
         // Gộp 2 đơn thu tiền hàng.
         assertEquals(419_000, cod(listOf(line(120_000, ShipInfo(pay = "cod")), line(299_000, ShipInfo(pay = "cod")))).cod)
@@ -232,6 +251,29 @@ class VtpTest {
         assertTrue(VtpTrack.canCancel(created))
         // Đã giao thì không còn cần xử lý.
         assertFalse(VtpTrack.needsAction(order("c", ship = s, delivered = true)))
+
+        // BL-02: vận đơn tạo sai địa chỉ mà máy chủ chưa huỷ được: cần xử lý, bấm huỷ lại được.
+        val stuck = order("d", ship = s.copy(vtpKind = "needsCancel", vtpStatus = 0, vtpStatusName = "Tiếp nhận đơn"), shipping = true)
+        assertTrue(VtpTrack.needsAction(stuck))
+        assertTrue(VtpTrack.canCancel(stuck))
+        assertEquals("Cần huỷ vận đơn", VtpTrack.statusName(stuck))
+
+        // BL-01: lần tạo trước chưa rõ kết quả: nháp bị khoá, không hiện như lỗi thường.
+        val msg = "Chưa rõ Viettel Post đã tạo vận đơn chưa"
+        val unknown = order("e", ship = ShipInfo(state = "ready", pay = "cod", vtpKind = "unknown", vtpError = msg))
+        assertTrue(VtpTrack.unknown(unknown))
+        assertNull(VtpTrack.lastError(unknown))
+        assertTrue(Vtp.readyGroups(listOf(unknown))[0].summary.problems.contains(VtpTrack.UNKNOWN_PROBLEM))
+        assertTrue(VtpTrack.unknown(order("f", ship = ShipInfo(state = "ready", pay = "cod", vtpKind = "creating"))))
+        assertFalse(VtpTrack.unknown(created))
+        assertFalse(Vtp.readyGroups(listOf(order("g", ship = ShipInfo(state = "ready", pay = "cod", vtpError = "Sai số điện thoại"))))[0]
+            .summary.problems.contains(VtpTrack.UNKNOWN_PROBLEM))
+        // Máy chủ gợi ý mã Viettel Post vừa báo cho đơn "chưa rõ".
+        val hinted = AppJson.decodeFromString(ShipInfo.serializer(),
+            "{\"state\":\"ready\",\"vtpKind\":\"unknown\",\"vtpHint\":\"156288120099\",\"vtpHintCod\":150000}")
+        assertEquals("156288120099", hinted.vtpHint)
+        assertEquals(150_000, hinted.vtpHintCod)
+        assertTrue(VtpTrack.unknown(order("h", ship = hinted)))
 
         // Trường đã bỏ (COD nhập tay) không gửi lên: máy chủ coi trường thiếu là đã xoá.
         val back = AppJson.encodeToString(ShipInfo.serializer(), ShipInfo(state = "ready", pay = "cod"))

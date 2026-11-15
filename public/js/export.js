@@ -3,6 +3,14 @@
  * Tương thích trực tiếp với Microsoft Excel, Google Sheets, GHTK, GHN, Viettel Post
  */
 
+// Một ô chữ CSV: thoát dấu " và vô hiệu ký tự mở đầu công thức (= + - @ tab CR),
+// vì Excel/Sheets vẫn tính công thức trong ô có ngoặc kép (INJ-04).
+export function csvCell(value) {
+  let s = String(value ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
 export function exportOrdersToCSV(orders = []) {
   if (!orders || orders.length === 0) {
     throw new Error('Chưa có đơn hàng nào để xuất file.');
@@ -42,21 +50,21 @@ export function exportOrdersToCSV(orders = []) {
     const totalQty = items.reduce((s, it) => s + (it.qty || 1), 0);
 
     return [
-      `"${o.code || ''}"`,
-      `"${timeStr}"`,
-      `"${(o.nickname || '').replace(/"/g, '""')}"`,
-      `"@${(o.uniqueId || '').replace(/"/g, '""')}"`,
-      `"'\t${o.userId || ''}"`, // Thêm ký tự để Excel không làm tròn chuỗi số ID dài
-      `"'\t${o.phone || ''}"`,
-      `"${(o.address || '').replace(/"/g, '""')}"`,
-      `"${itemsDetail.replace(/"/g, '""')}"`,
+      csvCell(o.code),
+      csvCell(timeStr),
+      csvCell(o.nickname),
+      csvCell(`@${o.uniqueId || ''}`),
+      csvCell(`'\t${o.userId || ''}`), // Thêm ký tự để Excel không làm tròn chuỗi số ID dài
+      csvCell(`'\t${o.phone || ''}`),
+      csvCell(o.address),
+      csvCell(itemsDetail),
       totalQty,
       o.subtotal || o.total || 0,
       o.shippingFee || 0,
       o.discount || 0,
       o.total || 0,
-      `"${statusLabel[o.status || 'new'] || o.status}"`,
-      `"${(o.note || '').replace(/"/g, '""')}"`
+      csvCell(statusLabel[o.status || 'new'] || o.status),
+      csvCell(o.note)
     ].join(',');
   });
 

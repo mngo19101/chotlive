@@ -228,6 +228,9 @@ private fun OrderCard(o: Order, every: List<Order>, onPrint: () -> Unit) {
                     T(VtpTrack.statusName(o), 12f, BV.SEMIBOLD, if (bad) C.red else if (done) C.green else C.accent, shrink = true, minScale = 0.8f)
                 }
             }
+        } else if (VtpTrack.unknown(o)) {
+            ShipTag(o.ship?.vtpHint?.takeIf { it.isNotEmpty() }?.let { "Viettel Post vừa báo vận đơn ${VtpTrack.pretty(it)} · mở đơn để xác nhận" }
+                ?: "Chưa rõ vận đơn đã tạo chưa · mở đơn để kiểm tra", C.red, C.redSoft)
         } else if (lastError != null) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.weight(1f, fill = false)) { ShipTag("Lỗi tạo vận đơn: $lastError", C.red, C.redSoft) }
@@ -552,6 +555,11 @@ fun OrderEditScreen(orderId: String) {
                     val code = VtpTrack.code(order)
                     if (code != null && order.status != OrderStatus.DELIVERED && items.sumOf { it.lineTotal } != order.total) {
                         ui.notify("Đơn đã có vận đơn ${VtpTrack.pretty(code)}, tiền thu hộ đã gửi Viettel Post. Huỷ vận đơn ở chi tiết đơn rồi mới sửa món.")
+                        return@PrimaryButton
+                    }
+                    // Chưa rõ Viettel Post đã tạo vận đơn chưa: có thể đã tạo với số thu hộ cũ, chưa cho đổi tiền.
+                    if (VtpTrack.unknown(order) && items.sumOf { it.lineTotal } != order.total) {
+                        ui.notify("Chưa rõ vận đơn của đơn này đã tạo chưa. Kiểm tra ở chi tiết đơn xong rồi mới sửa món.")
                         return@PrimaryButton
                     }
                     store.updateOrder(order, items.toList())

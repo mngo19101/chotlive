@@ -56,6 +56,26 @@ final class StorageTests: XCTestCase {
         try Data(text.utf8).write(to: url)
     }
 
+    // MARK: - Món chốt thêm khi đơn đang chờ rõ kết quả tạo vận đơn
+
+    func testNewItemSkipsAnOrderWhoseWaybillIsUnresolved() {
+        let store = makeStore(accountA)
+        var first = comment("c1")
+        first.sessionId = "s1"
+        _ = store.saveToCustomer(first)
+        let order = store.allOrders()[0]
+        // Lần tạo vận đơn chưa rõ kết quả (máy chủ ghi): Viettel Post có thể đã tạo với số thu hộ 150.000đ.
+        var ship = ShipInfo(state: "ready")
+        ship.vtpKind = "unknown"
+        store.setShip([order.id: ship])
+        var second = comment("c2", "Mã 90 chốt")
+        second.sessionId = "s1"
+        second.price = 90_000
+        _ = store.saveToCustomer(second)
+        XCTAssertEqual(store.allOrders().count, 2)
+        XCTAssertEqual(store.allOrders().first { $0.id == order.id }?.total, 150_000)
+    }
+
     // MARK: - Tách dữ liệu theo tài khoản
 
     func testAccountsDoNotSeeEachOthersData() {

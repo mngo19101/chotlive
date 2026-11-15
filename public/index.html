@@ -610,6 +610,11 @@
                   </div>
                   <p class="ship-pay-hint" id="vtp-hook-hint"></p>
                 </div>
+                <div class="form-field-group" id="vtp-loose-box" hidden>
+                  <label>Vận đơn chưa gắn đơn nào</label>
+                  <p class="ship-pay-hint">Viettel Post có các vận đơn này nhưng không đơn nào trong app mang mã. Mở viettelpost.vn kiểm tra: vận đơn thừa thì huỷ ở đó; đúng của khách nào thì mở đơn đó, bấm "Đã có, nhập mã vận đơn".</p>
+                  <div class="vtp-result-list" id="vtp-loose-list"></div>
+                </div>
                 <div class="btn-row"><button type="button" class="btn-outline-pill btn-detail-del" id="btn-vtp-disconnect">Ngắt kết nối</button></div>
               </div>
             </div>
@@ -937,12 +942,12 @@
       </div>
       <div class="form-field-group">
         <label for="ship-deposit">Khách đã cọc / đã chuyển (trừ vào COD)</label>
-        <input type="number" class="form-field-input" id="ship-deposit" min="0" step="1000" placeholder="0" inputmode="numeric" />
+        <input type="text" class="form-field-input" id="ship-deposit" placeholder="0" inputmode="numeric" autocomplete="off" />
       </div>
       <div class="form-grid-2col">
         <div class="form-field-group">
           <label for="ship-cod">Tiền thu hộ (COD) <button type="button" class="link-btn" id="btn-ship-cod-auto" hidden>Tự tính</button></label>
-          <input type="number" class="form-field-input" id="ship-cod" min="0" step="1000" placeholder="0" inputmode="numeric" />
+          <input type="text" class="form-field-input" id="ship-cod" placeholder="0" inputmode="numeric" autocomplete="off" />
         </div>
         <div class="form-field-group">
           <label for="ship-weight">Cân nặng (kg)</label>

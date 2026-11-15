@@ -55,6 +55,8 @@ data class VtpConnection(
 /** Kết quả tạo vận đơn cho một khách. */
 data class VtpCreateResult(
     val key: String, val ok: Boolean, val code: String = "", val fee: Int = 0, val already: Boolean = false, val error: String = "",
+    /** Tiền thu hộ / giá trị hàng máy chủ đã gửi Viettel Post (null: máy chủ bản cũ chưa trả). */
+    val cod: Int? = null, val goods: Int? = null,
 ) {
     companion object {
         fun from(d: JsonObject): VtpCreateResult {
@@ -62,6 +64,7 @@ data class VtpCreateResult(
             return VtpCreateResult(
                 key = d.text("key") ?: "", ok = ok, code = d.text("code") ?: "", fee = d.num("fee")?.toInt() ?: 0,
                 already = d.bool("already") ?: false, error = d.text("error") ?: if (ok) "" else "Lỗi không rõ",
+                cod = d.num("cod")?.toInt(), goods = d.num("goods")?.toInt(),
             )
         }
     }
@@ -164,6 +167,16 @@ suspend fun LiveClient.vtpCancel(code: String, force: Boolean = false): Pair<Str
     val r = apiCall("/api/vtp/cancel", "POST", buildJsonObject { put("code", code); put("force", force) }, 30)
     if (r == null || r.first != 200) return errorText(r, "Không huỷ được vận đơn") to false
     return null to ((r.second["already"] as? JsonPrimitive)?.content == "true")
+}
+
+/** Lần tạo vận đơn "chưa rõ": shop đã kiểm trên viettelpost.vn. `code` = mã tìm thấy; null = xác nhận không có, cho tạo lại. */
+suspend fun LiveClient.vtpSettle(itemIds: List<String>, code: String?): String? {
+    val body = buildJsonObject {
+        put("itemIds", JsonArray(itemIds.map { JsonPrimitive(it) }))
+        if (code != null) put("code", code) else put("none", true)
+    }
+    val r = apiCall("/api/vtp/settle", "POST", body, 30)
+    return if (r == null || r.first != 200) errorText(r, "Không ghi được, thử lại") else null
 }
 
 /** type 3: phát lại, type 2: đồng ý hoàn về shop. */

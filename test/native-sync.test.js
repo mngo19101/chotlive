@@ -400,3 +400,40 @@ test('món chốt thêm sau khi đơn đã có vận đơn: sang đơn mới, đ
   applyNativeUpdate(st, customer([{ ...item('it_2'), groupId: extra.id }, { ...item('it_3'), groupId: extra.id }]));
   assert.equal(st.orders.length, 2);
 });
+
+test('món chốt thêm khi đơn đang chờ rõ kết quả tạo vận đơn: sang đơn mới, không lọt vào vận đơn có thể đã tạo', () => {
+  const customer = (items) => ({ customers: [{ id: 'linh.nguyen', uniqueId: 'Linh.Nguyen', userId: '71928419201', nickname: 'Linh', items }] });
+  const extraItem = { id: 'it_2', comment: 'chốt 90', price: 90000, ts: 1794000100000, groupId: 'o_web' };
+  for (const vtpKind of ['creating', 'unknown']) {
+    const st = baseState();
+    st.orders[0].ship = { state: 'ready', pay: 'cod', vtpKind, vtpAttempt: { id: 'a1', cod: 320000 } };
+    applyNativeUpdate(st, customer([extraItem]));
+    assert.equal(st.orders.length, 2, vtpKind);
+    const locked = st.orders.find((o) => o.id === 'o_web');
+    const extra = st.orders.find((o) => o.id !== 'o_web');
+    assert.deepEqual(locked.items.map((i) => i.id), ['it_1']);
+    assert.equal(locked.total, 320000, 'tổng đơn khớp số thu hộ có thể đã gửi Viettel Post');
+    assert.equal(locked.ship.vtpKind, vtpKind);
+    assert.deepEqual(extra.items.map((i) => i.id), ['it_2']);
+    assert.equal(extra.ship, undefined);
+  }
+  // Đơn đã rõ (vận đơn cũ đã huỷ, đơn về Chờ gửi) thì vẫn nhận thêm món như thường.
+  const st = baseState();
+  st.orders[0].ship = { state: 'ready', pay: 'cod', vtpKind: 'cancelled', vtpOldCode: 'VTP1' };
+  applyNativeUpdate(st, customer([extraItem]));
+  assert.equal(st.orders.length, 1);
+});
+
+test('gợi ý mã vận đơn từ webhook: gửi xuống app mã mới nhất và số thu hộ; không gửi danh sách thô', () => {
+  const st = baseState();
+  st.orders[0].ship = {
+    state: 'ready', pay: 'cod', vtpKind: 'unknown', vtpAttempt: { id: 'a1', at: 1, cod: 320000 },
+    vtpHints: [{ code: 'VTP999', cod: 320000, at: 2 }, { code: 'VTP998', cod: null, at: 1 }]
+  };
+  const ship = toNativeSnapshot(st).customers[0].items[0].ship;
+  assert.equal(ship.vtpHint, 'VTP999');
+  assert.equal(ship.vtpHintCod, 320000);
+  assert.equal(ship.vtpKind, 'unknown');
+  assert.equal(ship.vtpHints, undefined);
+  assert.equal(ship.vtpAttempt, undefined, 'dấu lần tạo chỉ máy chủ dùng');
+});

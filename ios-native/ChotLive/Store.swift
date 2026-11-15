@@ -249,7 +249,8 @@ final class Store: ObservableObject {
         guard let sessionId else { return nil }
         let mine = orders(of: customer).filter { o in o.items.contains { $0.sessionId == sessionId && $0.groupId != nil } }
         guard !mine.isEmpty else { return sessionId }
-        let open = mine.filter { Vtp.state($0).isPending && ($0.ship?.vtpCode ?? "").isEmpty }
+        // Đơn đang chờ rõ kết quả tạo vận đơn cũng coi như đã gửi: Viettel Post có thể đã tạo với số thu hộ cũ.
+        let open = mine.filter { Vtp.state($0).isPending && ($0.ship?.vtpCode ?? "").isEmpty && !VtpTrack.unknown($0) }
         if open.contains(where: { $0.key == sessionId }) { return sessionId }
         if let group = open.first?.items.compactMap(\.groupId).first { return group }
         return sessionId + "~" + UUID().uuidString.prefix(8).lowercased()

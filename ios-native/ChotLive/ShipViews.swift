@@ -1100,7 +1100,7 @@ struct VtpExportSheet: View {
             for res in r.results {
                 guard let g = chosen.first(where: { $0.id == res.key }) else { continue }
                 if res.ok && !res.code.isEmpty {
-                    store.applyVtpCreated(g.orders, code: res.code, fee: res.fee, service: svc)
+                    store.applyVtpCreated(g.orders, code: res.code, fee: res.fee, cod: res.cod, goods: res.goods, service: svc)
                 } else if !res.ok {
                     store.applyVtpError(g.orders, error: res.error)
                 }

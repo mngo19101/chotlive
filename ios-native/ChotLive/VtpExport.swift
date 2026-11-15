@@ -199,9 +199,12 @@ enum Vtp {
         return byCustomer.values.map { list -> Group in
             let orders = list.sorted { $0.lastTs < $1.lastTs }
             let c = orders[0].customer
+            var summary = summarize(lines(orders), address: c.address, nickname: c.nickname)
+            // Lần tạo vận đơn trước chưa rõ kết quả: chưa cho gửi lại, kẻo ra hai vận đơn.
+            if orders.contains(where: VtpTrack.unknown) { summary.problems.append(VtpTrack.unknownProblem) }
             return Group(customer: c, orders: orders,
                          recentExported: recentExported(of: c.id, in: all, now: now),
-                         summary: summarize(lines(orders), address: c.address, nickname: c.nickname))
+                         summary: summary)
         }
         .sorted { $0.orders[0].lastTs < $1.orders[0].lastTs }
     }
