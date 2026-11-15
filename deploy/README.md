@@ -91,11 +91,49 @@ Dùng điện thoại **tắt Wi-Fi, chỉ bật 4G**:
 
 ## Cập nhật phiên bản mới
 
+Nếu `/opt/chotlive` là thư mục git (cài theo bước 1):
+
 ```bash
 cd /opt/chotlive && sudo GIT_SSH_COMMAND="ssh -i /root/.ssh/chotlive_deploy" git pull && sudo npm ci --omit=dev && sudo chmod -R a+rX . && sudo systemctl restart chotlive
 ```
 
 Nên làm ngoài giờ live. Server tự nối lại các live đang theo dõi sau khi khởi động, nhưng có thể lỡ vài giây bình luận.
+
+### Cập nhật từ máy tính (VPS không có git)
+
+Dùng khi code trên VPS được chép lên chứ không `git clone`. Mọi lệnh chạy trong PowerShell trên máy tính, ở thư mục dự án, đúng nhánh muốn đưa lên. Thay `KHOA` bằng đường dẫn file `.pem` và `IP` bằng địa chỉ VPS.
+
+**1. Đưa code mới lên và chuẩn bị** (server vẫn chạy, không gián đoạn):
+
+```powershell
+git archive --format=tar -o "$env:TEMP\chotlive.tar" HEAD
+```
+
+```powershell
+scp -i KHOA "$env:TEMP\chotlive.tar" ubuntu@IP:/tmp/chotlive.tar
+```
+
+```powershell
+ssh -i KHOA ubuntu@IP "sudo rm -rf /opt/chotlive-new && sudo mkdir -p /opt/chotlive-new && sudo tar -xf /tmp/chotlive.tar -C /opt/chotlive-new && sudo bash /opt/chotlive-new/deploy/update.sh prepare"
+```
+
+Bước này cài thư viện vào `/opt/chotlive-new`, chụp một bản sao CSDL vào `/var/backups/chotlive`, và tạo `VTP_SECRET_KEY` nếu chưa có. Thấy `SẴN SÀNG` là xong.
+
+**2. Đổi sang code mới** (vài giây gián đoạn, làm lúc không có live):
+
+```powershell
+ssh -i KHOA ubuntu@IP "sudo bash /opt/chotlive-new/deploy/update.sh switch"
+```
+
+Script tắt server, đổi thư mục, bật lại, rồi đợi xem server có đứng vững không. Không lên thì nó tự quay về code cũ và báo lỗi.
+
+**3. Quay lại code cũ** nếu sau đó thấy có gì không ổn:
+
+```powershell
+ssh -i KHOA ubuntu@IP "sudo bash /opt/chotlive/deploy/update.sh rollback"
+```
+
+Code cũ được giữ ở `/opt/chotlive-old` cho tới lần cập nhật sau. Quay lại không làm mất dữ liệu; kết nối Viettel Post được trả về bản chưa mã hoá mà code cũ đọc được.
 
 ## Sao lưu và khôi phục
 
