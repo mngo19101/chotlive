@@ -21,19 +21,40 @@ winget install Rclone.Rclone
 
 Đóng PowerShell rồi mở lại để nhận lệnh `rclone`.
 
-**Bước 2: Đăng nhập Google Drive.**
+**Bước 2: Tạo mã ứng dụng Google của riêng bạn.** Mã dùng chung của rclone sẽ ngừng hoạt động trong năm 2026, nên phải có mã riêng thì sao lưu mới chạy lâu dài. Làm một lần, khoảng 10 phút, theo mục [Making your own client_id](https://rclone.org/drive/#making-your-own-client-id) của rclone. Tóm tắt:
+
+1. Vào [Google Cloud Console](https://console.developers.google.com/), tạo một project mới.
+2. Bấm **Enable APIs and Services**, tìm **Google Drive API** và bật.
+3. Vào **Credentials**, bấm **Configure consent screen** rồi **Get started**: đặt tên ứng dụng (ví dụ `rclone`), chọn email của bạn, Audience chọn **External**, rồi **Create**.
+4. Vào **Data Access**, thêm quyền `https://www.googleapis.com/auth/drive.file` rồi lưu.
+5. Vào **Audience**, thêm email của bạn ở **Add users**, rồi bấm **Publish app**. Không bấm bước này thì cứ một tuần phải đăng nhập lại.
+6. Vào **Overview**, bấm **Create OAuth client**, loại **Desktop app**, rồi **Create**. Chép lại **Client ID** và **Client secret**.
+
+Hai mã này là bí mật: đừng gửi cho ai và đừng dán vào chat.
+
+**Bước 3: Đăng nhập Google Drive.** Thay hai chỗ `...` bằng mã vừa tạo:
 
 ```powershell
-rclone config create gdrive drive scope=drive.file
+rclone config create gdrive drive scope=drive.file client_id=... client_secret=...
 ```
 
-Trình duyệt mở ra, chọn tài khoản Google rồi bấm **Cho phép**. Kiểm tra lại bằng lệnh dưới, không báo lỗi là được:
+Trình duyệt mở ra, chọn tài khoản Google rồi bấm **Cho phép** (Google có thể hiện màn cảnh báo ứng dụng chưa xác minh; đây là ứng dụng của chính bạn nên bấm tiếp tục). Lệnh này in ra cả mã truy cập Drive: **đừng chép kết quả của nó gửi cho ai**. Kiểm tra lại bằng lệnh dưới, không báo lỗi và không có dòng nhắc `shared Google Drive client_id` là được:
 
 ```powershell
 rclone lsd gdrive:
 ```
 
-**Bước 3: Đặt mật khẩu sao lưu.** Mở file `.env` trong thư mục dự án (chưa có thì chép từ `.env.example`), thêm hai dòng:
+Đã lỡ đăng nhập bằng mã dùng chung thì đổi sang mã riêng bằng hai lệnh sau, rồi chạy `npm.cmd run backup:now` để tạo bản sao mới (các bản tạo bằng mã cũ có thể không còn hiện trong danh sách):
+
+```powershell
+rclone config update gdrive client_id=... client_secret=...
+```
+
+```powershell
+rclone config reconnect gdrive:
+```
+
+**Bước 4: Đặt mật khẩu sao lưu.** Mở file `.env` trong thư mục dự án (chưa có thì chép từ `.env.example`), thêm hai dòng:
 
 ```
 BACKUP_RCLONE_REMOTE=gdrive:ChotLive-SaoLuu
@@ -44,7 +65,7 @@ Mật khẩu sao lưu dài ít nhất 12 ký tự, không dùng dấu cách, d�
 
 > **Ghi mật khẩu sao lưu ra một nơi ngoài máy này**: giấy cất trong nhà, ghi chú trên điện thoại, hoặc trình quản lý mật khẩu. Máy hỏng mà không còn mật khẩu này thì các bản sao trên Drive không mở được, và không ai khôi phục giúp được.
 
-**Bước 4: Sao lưu thử và khôi phục thử.**
+**Bước 5: Sao lưu thử và khôi phục thử.** Mở PowerShell trong thư mục dự án (thư mục có file `server.js`).
 
 ```powershell
 npm.cmd run backup:now
@@ -56,7 +77,7 @@ npm.cmd run backup:test-restore
 
 Lệnh thứ hai tải bản vừa đẩy lên về, giải mã, kiểm tra và in số tài khoản, đơn hàng, khách hàng trong đó. Nó không đụng tới dữ liệu đang dùng. Thấy dòng `Kết luận: bản sao này khôi phục được` là xong. Mở Google Drive sẽ thấy thư mục `ChotLive-SaoLuu`.
 
-**Bước 5: Khởi động lại máy** để server nhận cấu hình mới và tìm thấy rclone. Khoảng 1 phút sau khi server chạy, bot Telegram nhắn `đã bật sao lưu lên đám mây`. Nhận được tin này nghĩa là cả sao lưu tự động lẫn cảnh báo đều hoạt động.
+**Bước 6: Khởi động lại máy** để server nhận cấu hình mới và tìm thấy rclone. Khoảng 1 phút sau khi server chạy, bot Telegram nhắn `đã bật sao lưu lên đám mây`. Nhận được tin này nghĩa là cả sao lưu tự động lẫn cảnh báo đều hoạt động.
 
 Chưa có bot Telegram thì sao lưu vẫn chạy, nhưng cảnh báo trễ chỉ ghi vào `data\server.log`. Cách tạo bot xem phần `TELEGRAM_BOT_TOKEN` trong `.env.example`.
 
@@ -72,7 +93,7 @@ curl https://rclone.org/install.sh | sudo bash
 sudo -H -u chotlive rclone config
 ```
 
-Trong phần hỏi đáp: tạo kết nối mới tên `gdrive`, loại `drive`, quyền truy cập chọn `drive.file`, các câu khác để mặc định. VPS không có trình duyệt nên ở câu hỏi dùng trình duyệt để đăng nhập hãy trả lời **không**; rclone sẽ in một lệnh `rclone authorize ...` để chạy trên máy tính có trình duyệt (máy đó cũng cần cài rclone), rồi dán kết quả trở lại. Chi tiết xem [hướng dẫn của rclone](https://rclone.org/remote_setup/).
+Trong phần hỏi đáp: tạo kết nối mới tên `gdrive`, loại `drive`, điền Client ID và Client secret của riêng bạn (xem bước 2 của phần Windows), quyền truy cập chọn `drive.file`, các câu khác để mặc định. VPS không có trình duyệt nên ở câu hỏi dùng trình duyệt để đăng nhập hãy trả lời **không**; rclone sẽ in một lệnh `rclone authorize ...` để chạy trên máy tính có trình duyệt (máy đó cũng cần cài rclone), rồi dán kết quả trở lại. Chi tiết xem [hướng dẫn của rclone](https://rclone.org/remote_setup/).
 
 Thêm hai dòng `BACKUP_RCLONE_REMOTE` và `BACKUP_PASSPHRASE` như ở trên vào `/etc/chotlive.env`, rồi:
 
@@ -111,7 +132,7 @@ Muốn dùng một bản cũ hơn, ghi tên file lấy từ `backup:list` vào s
 ## Khi máy hỏng: khôi phục sang máy mới
 
 1. Cài [Node.js](https://nodejs.org) bản 22.13 trở lên và tải dự án về máy mới, chạy `npm install`.
-2. Làm lại bước 1 và 2 ở trên (cài rclone, đăng nhập đúng tài khoản Google cũ).
+2. Làm lại bước 1 và 3 ở trên (cài rclone, đăng nhập đúng tài khoản Google cũ bằng **đúng Client ID và Client secret cũ**; mã khác thì không thấy các bản sao cũ). Hãy giữ hai mã này cùng chỗ với mật khẩu sao lưu.
 3. Tạo file `.env` với hai dòng `BACKUP_RCLONE_REMOTE` và `BACKUP_PASSPHRASE` **giống hệt máy cũ**.
 4. Khi server chưa chạy, khôi phục rồi mới bật server:
 
