@@ -87,6 +87,7 @@ Vào **Tôi › Máy in › Tìm máy in**, chọn máy rồi bấm **In thử**
 
 ## 5. Sao lưu
 
+- **Google Drive (nên bật trên mọi máy):** mỗi ngày một bản đã mã hoá, có cảnh báo Telegram khi bị trễ. Xem [backup/README.md](backup/README.md).
 - **Laptop và mini PC:** xem [sync/README.md](sync/README.md).
 - **VPS:** xem mục sao lưu trong [deploy/README.md](deploy/README.md).
 
@@ -126,6 +127,7 @@ Vào **Tôi › Máy in › Tìm máy in**, chọn máy rồi bấm **In thử**
 | `server/accounts.js`, `server/states.js` | Tài khoản, token đăng nhập và dữ liệu của từng tài khoản |
 | `server/hub.js`, `server/ws.js` | WebSocket: gửi tin tới thiết bị và xử lý từng kết nối |
 | `server/device-sync.js`, `server/live.js` | Nhận dữ liệu từ web và app; theo dõi TikTok Live |
+| `server/backup-watch.js` | Tự sao lưu mỗi ngày và báo Telegram khi sao lưu bị trễ |
 | `server/routes/` | Các API, mỗi nhóm một file: `auth` (đăng nhập), `admin`, `support` (chat hỗ trợ), `sync` (đồng bộ), `vtp` (Viettel Post), `lan` (in LAN) |
 | `access.js` | Dùng thử, gói và cách tính IP khi giới hạn tạo tài khoản |
 | `live-manager.js` | Kết nối và theo dõi các phiên TikTok Live |
@@ -137,6 +139,7 @@ Vào **Tôi › Máy in › Tìm máy in**, chọn máy rồi bấm **In thử**
 | `android/` | App Android viết bằng Kotlin và Jetpack Compose |
 | `deploy/` | Cài đặt lên VPS |
 | `sync/` | Đồng bộ dữ liệu giữa laptop và mini PC |
+| `backup/` | Sao lưu có mã hoá lên Google Drive và khôi phục |
 | `scripts/reset-admin.mjs` | Đặt lại mật khẩu admin |
 | `test/` | Test server và logic web |
 | `.github/workflows/` | Chạy test và build IPA trên GitHub Actions |

@@ -26,6 +26,8 @@ import { liveManager, resumeLivesAfterRestart } from './server/live.js';
 import { startWebSocket } from './server/ws.js';
 import { vtpWards } from './server/vtp-stores.js';
 import { smallJsonExceptBigPaths } from './server/middleware.js';
+import { startBackupWatch } from './server/backup-watch.js';
+import { loadConfig as loadBackupConfig } from './backup/core.js';
 import authRoutes from './server/routes/auth.js';
 import supportRoutes, { telegram } from './server/routes/support.js';
 import adminRoutes from './server/routes/admin.js';
@@ -106,5 +108,10 @@ server.listen(PORT, HOST, () => {
   console.log(`Susu Live Order đang chạy: http://${HOST || 'localhost'}:${PORT}`);
   resumeLivesAfterRestart();
   telegram?.start();
+  startBackupWatch({
+    cfg: loadBackupConfig(process.env, ROOT_DIR),
+    rootDir: ROOT_DIR,
+    notifyAdmin: telegram && process.env.TELEGRAM_ADMIN_CHAT_ID ? telegram.notifyAdmin : null
+  });
   if (process.env.NODE_ENV !== 'test') setTimeout(() => vtpWards.warm(), 15000).unref();
 });

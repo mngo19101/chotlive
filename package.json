@@ -8,7 +8,12 @@
     "prestart": "node --no-warnings sync/sync.js before-start",
     "start": "node --env-file-if-exists=.env server.js",
     "dev": "node --env-file-if-exists=.env --watch server.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "backup:now": "node --env-file-if-exists=.env --no-warnings backup/cloud-backup.mjs run",
+    "backup:status": "node --env-file-if-exists=.env --no-warnings backup/cloud-backup.mjs status",
+    "backup:list": "node --env-file-if-exists=.env --no-warnings backup/cloud-backup.mjs list",
+    "backup:test-restore": "node --env-file-if-exists=.env --no-warnings backup/cloud-backup.mjs test-restore",
+    "backup:restore": "node --env-file-if-exists=.env --no-warnings backup/cloud-backup.mjs restore"
   },
   "engines": {
     "node": ">=22.13"

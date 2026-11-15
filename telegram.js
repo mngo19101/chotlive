@@ -60,6 +60,18 @@ export function createTelegramBridge({ token, adminChatId, db, onReply, fetchImp
     }
   }
 
+  /** Tin của hệ thống gửi Admin (ví dụ sao lưu bị trễ). Trả về false nếu không gửi được, để nơi gọi thử lại sau. */
+  async function notifyAdmin(text) {
+    if (!adminId) return false;
+    try {
+      await send(adminId, text);
+      return true;
+    } catch (e) {
+      log.warn?.(`[telegram] không báo được Admin: ${e.message}`);
+      return false;
+    }
+  }
+
   async function handleUpdate(update) {
     const msg = update?.message;
     if (!msg || typeof msg.text !== 'string') return;
@@ -127,6 +139,7 @@ export function createTelegramBridge({ token, adminChatId, db, onReply, fetchImp
 
   return {
     notifyUserMessage,
+    notifyAdmin,
     handleUpdate,
     start() {
       // Chỉ nhận cập nhật qua getUpdates: gỡ webhook cũ nếu có, rồi bắt đầu hỏi tin.

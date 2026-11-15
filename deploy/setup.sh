@@ -88,7 +88,9 @@ if ! grep -q '^VTP_SECRET_KEY=.' "$ENV_FILE"; then
   sed -i '/^VTP_SECRET_KEY=/d' "$ENV_FILE"
   echo "VTP_SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '/+=')" >> "$ENV_FILE"
 fi
-chmod 600 "$ENV_FILE"
+# Người dùng chotlive đọc được file này để chạy tay các lệnh sao lưu (backup/README.md); người khác thì không.
+chown root:chotlive "$ENV_FILE"
+chmod 640 "$ENV_FILE"
 
 echo "==> Cấu hình dịch vụ"
 sed "s|__APP_DIR__|$APP_DIR|g" "$APP_DIR/deploy/chotlive.service" > /etc/systemd/system/chotlive.service
