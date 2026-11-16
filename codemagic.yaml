@@ -40,3 +40,35 @@ workflows:
           zip -r9 ChotLive-Native.ipa Payload
     artifacts:
       - ios-native/ChotLive-Native.ipa
+
+  # App THỬ "VTP Nháp Test" (ios-vtp-nhap-test/), tách biệt với app thật. Chỉ có trên nhánh vtp-nhap-test.
+  vtp-nhap-test-ipa:
+    name: VTP Nháp Test IPA (app thử)
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      xcode: latest
+    scripts:
+      - name: Cài XcodeGen
+        script: brew install xcodegen
+      - name: Tạo project Xcode
+        script: cd ios-vtp-nhap-test && xcodegen generate
+      - name: Build (không ký)
+        script: |
+          cd ios-vtp-nhap-test
+          xcodebuild \
+            -project VtpNhapTest.xcodeproj \
+            -scheme VtpNhapTest \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Đóng gói IPA
+        script: |
+          cd ios-vtp-nhap-test
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/VtpNhapTest.app Payload/
+          zip -r9 VtpNhapTest.ipa Payload
+    artifacts:
+      - ios-vtp-nhap-test/VtpNhapTest.ipa
