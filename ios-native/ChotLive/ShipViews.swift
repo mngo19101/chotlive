@@ -1119,22 +1119,53 @@ struct VtpExportSheet: View {
             ui.notify("Không tạo được file Excel: \(error.localizedDescription)")
             return
         }
-        store.markExported(chosen.flatMap(\.orders), at: now)
+        let orders = chosen.flatMap(\.orders)
+        let store = store, ui = ui
         ui.dismissSheet()
         // Đợi bảng dưới trượt xuống rồi mới mở bảng chia sẻ của iOS.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { ShareFile.present(url) }
+        // Chỉ chuyển đơn sang Đang giao khi file đã được lưu hoặc gửi đi; lỡ tay đóng bảng chia sẻ thì đơn vẫn ở Chờ gửi.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            ShareFile.present(url) { done in
+                Task { @MainActor in
+                    if done {
+                        store.markExported(orders, at: now)
+                    } else {
+                        ui.notify("Chưa lưu hay gửi file Excel nên các đơn vẫn ở Chờ gửi. Xuất lại khi cần.")
+                    }
+                }
+            }
+        }
     }
 }
 
 /// Bảng chia sẻ của iOS để lưu file vào Tệp hoặc gửi đi.
 enum ShareFile {
-    static func present(_ url: URL) {
+    /// `completion(true)` khi người dùng đã lưu hoặc gửi file; `false` khi đóng bảng hoặc huỷ giữa chừng.
+    static func present(_ url: URL, completion: @escaping (Bool) -> Void = { _ in }) {
         guard let root = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
-            .flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController else { return }
+            .flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController else { return completion(false) }
         var top = root
         while let next = top.presentedViewController { top = next }
         let vc = UIActivityViewController(activityItems: [url], applicationActivities: nil)
         vc.popoverPresentationController?.sourceView = top.view
+        var finished = false
+        vc.completionWithItemsHandler = { [weak vc] _, completed, _, _ in
+            DispatchQueue.main.async {
+                guard !finished else { return }
+                if completed {
+                    finished = true
+                    return completion(true)
+                }
+                // Huỷ giữa chừng trong một mục (Mail, Zalo...) thì bảng chia sẻ có thể vẫn mở để chọn mục khác:
+                // chỉ báo chưa lưu khi bảng đã đóng hẳn.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    guard !finished else { return }
+                    if let vc, vc.viewIfLoaded?.window != nil { return }
+                    finished = true
+                    completion(false)
+                }
+            }
+        }
         top.present(vc, animated: true)
     }
 }
