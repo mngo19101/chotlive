@@ -125,7 +125,10 @@ func printComment(_ c: LiveComment, store: Store, printer: PrinterManager) async
     guard printer.isConnected else {
         return "Đã lưu đơn của \(c.nickname). Chưa kết nối máy in nên chưa in tem — vào Tôi › Máy in để kết nối." + also
     }
-    if let error = await printer.sendAndWait(TicketRenderer.liveTicketBytes(comment: c)) {
+    // Tem in tổng tiền các món vừa chốt ("30@@" -> 30.000; "120 với 180" -> 300.000).
+    var ticket = c
+    ticket.price = items.reduce(0) { $0 + $1.lineTotal }
+    if let error = await printer.sendAndWait(TicketRenderer.liveTicketBytes(comment: ticket)) {
         return "Đã lưu đơn của \(c.nickname) nhưng chưa in được tem. \(error)" + also
     }
     items.forEach { store.markPrinted(itemId: $0.id) }

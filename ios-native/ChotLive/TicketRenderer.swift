@@ -16,40 +16,37 @@ enum TicketRenderer {
         escpos(from: render(comment: comment))
     }
 
-    /// Tem in từ 1 bình luận đang live: không có giá, giờ là lúc bấm in.
+    /// Tem in từ 1 bình luận đang live: giờ là lúc bấm in. `c.price` là tổng tiền các món của bình luận
+    /// (0 thì không in dòng giá).
     static func liveTicketBytes(comment: LiveComment) -> Data {
         escpos(from: render(comment: comment, live: true))
     }
 
+    /// Tem gọn để tốn ít giấy: tên shop, tên khách, @id + giờ trên 1 dòng, bình luận, giá.
     static func render(comment c: LiveComment, live: Bool = false) -> UIImage {
         let shop = UserDefaults.standard.string(forKey: "shopName") ?? "ChốtLive"
         let f = DateFormatter()
-        f.dateFormat = "HH:mm  dd/MM/yyyy"
+        f.dateFormat = "HH:mm dd/MM/yyyy"
         let name = (c.nickname.isEmpty ? "@" + c.uniqueId : c.nickname)
+        let time = f.string(from: live ? Date() : c.ts)
 
         var blocks: [Block] = [
-            .text(shop.uppercased(), .systemFont(ofSize: 40, weight: .heavy), .center),
+            .text(shop.uppercased(), .systemFont(ofSize: 28, weight: .heavy), .center),
             .dashed,
-            .text("Tên TikTok: " + name, .systemFont(ofSize: 38, weight: .heavy), .left),
-            .text("ID TikTok: @" + c.uniqueId, .systemFont(ofSize: 28, weight: .semibold), .left),
-            .text(live ? "Giờ in: " + f.string(from: Date()) : "Giờ: " + f.string(from: c.ts),
-                  .systemFont(ofSize: 26, weight: .regular), .left),
+            .text(name, .systemFont(ofSize: 34, weight: .heavy), .left),
+            .text("@" + c.uniqueId + "  ·  " + time, .systemFont(ofSize: 22, weight: .semibold), .left),
             .dashed,
-            .text("Bình luận:", .systemFont(ofSize: 24, weight: .regular), .left),
-            .text(c.text, .systemFont(ofSize: 36, weight: .bold), .left),
-            .dashed,
+            .text(c.text, .systemFont(ofSize: 30, weight: .bold), .left),
         ]
-        if !live {
+        if c.price > 0 {
             blocks += [
-                .text(vnd(c.price), .systemFont(ofSize: 64, weight: .heavy), .center),
-                .gap(10),
                 .dashed,
+                .text(vnd(c.price), .systemFont(ofSize: 48, weight: .heavy), .center),
             ]
         }
-        blocks.append(.gap(20))
 
         let width = paperWidth
-        let margin: CGFloat = 16
+        let margin: CGFloat = 12
         let cw = width - margin * 2
 
         func style(_ a: NSTextAlignment) -> NSParagraphStyle {
@@ -64,8 +61,8 @@ enum TicketRenderer {
                 attributes: [.font: font, .paragraphStyle: style(a)], context: nil).height)
         }
 
-        let spacing: CGFloat = 8
-        var total: CGFloat = 12
+        let spacing: CGFloat = 4
+        var total: CGFloat = 6
         for b in blocks {
             switch b {
             case .text(let s, let font, let a): total += height(s, font, a) + spacing
@@ -73,7 +70,7 @@ enum TicketRenderer {
             case .gap(let g): total += g
             }
         }
-        total += 12
+        total += 6
 
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1
@@ -82,7 +79,7 @@ enum TicketRenderer {
         return renderer.image { ctx in
             UIColor.white.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: width, height: total + 8))
-            var y: CGFloat = 12
+            var y: CGFloat = 6
             for b in blocks {
                 switch b {
                 case .text(let s, let font, let a):
@@ -140,7 +137,7 @@ enum TicketRenderer {
             }
             y += rows
         }
-        out.append(contentsOf: [0x1B, 0x64, 0x04])       // feed 4 dòng
+        out.append(contentsOf: [0x1B, 0x64, 0x03])       // feed 3 dòng cho tới dao cắt
         out.append(contentsOf: [0x1D, 0x56, 0x42, 0x00]) // cắt giấy (máy không có dao sẽ bỏ qua)
         return out
     }

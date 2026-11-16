@@ -31,42 +31,39 @@ class TicketRenderer(private val context: Context, private val paperWidth: () ->
     private val extraBold by lazy { ResourcesCompat.getFont(context, R.font.bevietnampro_extrabold) ?: Typeface.DEFAULT_BOLD }
     private val bold by lazy { ResourcesCompat.getFont(context, R.font.bevietnampro_bold) ?: Typeface.DEFAULT_BOLD }
     private val semiBold by lazy { ResourcesCompat.getFont(context, R.font.bevietnampro_semibold) ?: Typeface.DEFAULT_BOLD }
-    private val medium by lazy { ResourcesCompat.getFont(context, R.font.bevietnampro_medium) ?: Typeface.DEFAULT }
 
     fun ticketBytes(c: LiveComment): ByteArray = escpos(render(c, live = false))
 
-    /** Tem in từ 1 bình luận đang live: không có giá, giờ là lúc bấm in. */
+    /** Tem in từ 1 bình luận đang live: giờ là lúc bấm in. `c.price` là tổng tiền các món của bình luận
+     *  (0 thì không in dòng giá). */
     fun liveTicketBytes(c: LiveComment): ByteArray = escpos(render(c, live = true))
 
+    /** Tem gọn để tốn ít giấy: tên shop, tên khách, @id + giờ trên 1 dòng, bình luận, giá. */
     fun render(c: LiveComment, live: Boolean): Bitmap {
         val shop = shopName().ifBlank { "ChốtLive" }
-        val f = SimpleDateFormat("HH:mm  dd/MM/yyyy", Locale.US)
+        val f = SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.US)
         val name = c.nickname.ifEmpty { "@" + c.uniqueId }
+        val time = f.format(if (live) Date() else Date(c.ts))
         val L = Layout.Alignment.ALIGN_NORMAL
         val C = Layout.Alignment.ALIGN_CENTER
 
         val blocks = mutableListOf<Block>(
-            Block.Text(shop.uppercase(), 40f, extraBold, C),
+            Block.Text(shop.uppercase(), 28f, extraBold, C),
             Block.Dashed,
-            Block.Text("Tên TikTok: $name", 38f, extraBold, L),
-            Block.Text("ID TikTok: @${c.uniqueId}", 28f, semiBold, L),
-            Block.Text(if (live) "Giờ in: " + f.format(Date()) else "Giờ: " + f.format(Date(c.ts)), 26f, medium, L),
+            Block.Text(name, 34f, extraBold, L),
+            Block.Text("@${c.uniqueId}  ·  $time", 22f, semiBold, L),
             Block.Dashed,
-            Block.Text("Bình luận:", 24f, medium, L),
-            Block.Text(c.text, 36f, bold, L),
-            Block.Dashed,
+            Block.Text(c.text, 30f, bold, L),
         )
-        if (!live) {
-            blocks += Block.Text(vnd(c.price), 64f, extraBold, C)
-            blocks += Block.Gap(10)
+        if (c.price > 0) {
             blocks += Block.Dashed
+            blocks += Block.Text(vnd(c.price), 48f, extraBold, C)
         }
-        blocks += Block.Gap(20)
 
         val width = paperWidth()
-        val margin = 16
+        val margin = 12
         val cw = width - margin * 2
-        val spacing = 8
+        val spacing = 4
 
         fun layout(b: Block.Text): StaticLayout {
             val p = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -78,7 +75,7 @@ class TicketRenderer(private val context: Context, private val paperWidth: () ->
         }
 
         val layouts = blocks.map { if (it is Block.Text) layout(it) else null }
-        var total = 12
+        var total = 6
         blocks.forEachIndexed { i, b ->
             total += when (b) {
                 is Block.Text -> layouts[i]!!.height + spacing
@@ -86,7 +83,7 @@ class TicketRenderer(private val context: Context, private val paperWidth: () ->
                 is Block.Gap -> b.h
             }
         }
-        total += 12
+        total += 6
         val height = (ceil(total / 8.0) * 8).toInt()
 
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -98,7 +95,7 @@ class TicketRenderer(private val context: Context, private val paperWidth: () ->
             style = Paint.Style.STROKE
             pathEffect = DashPathEffect(floatArrayOf(10f, 7f), 0f)
         }
-        var y = 12f
+        var y = 6f
         blocks.forEachIndexed { i, b ->
             when (b) {
                 is Block.Text -> {
@@ -151,7 +148,7 @@ class TicketRenderer(private val context: Context, private val paperWidth: () ->
                 }
                 y += rows
             }
-            out.write(byteArrayOf(0x1B, 0x64, 0x04))       // feed 4 dòng
+            out.write(byteArrayOf(0x1B, 0x64, 0x03))       // feed 3 dòng cho tới dao cắt
             out.write(byteArrayOf(0x1D, 0x56, 0x42, 0x00)) // cắt giấy (máy không có dao sẽ bỏ qua)
             return out.toByteArray()
         }

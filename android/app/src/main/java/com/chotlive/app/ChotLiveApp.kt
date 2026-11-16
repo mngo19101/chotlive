@@ -108,7 +108,9 @@ class ChotLiveApp : Application() {
         if (!printer.hasPrinter) {
             return "Đã lưu đơn của ${c.nickname}. Chưa kết nối máy in nên chưa in tem — vào Tôi › Máy in để kết nối." + also
         }
-        printer.sendAndWait(tickets.liveTicketBytes(c))?.let {
+        // Tem in tổng tiền các món vừa chốt ("30@@" -> 30.000; "120 với 180" -> 300.000).
+        val ticket = c.copy(price = items.sumOf { it.lineTotal })
+        printer.sendAndWait(tickets.liveTicketBytes(ticket))?.let {
             return "Đã lưu đơn của ${c.nickname} nhưng chưa in được tem. $it" + also
         }
         items.forEach { store.markPrinted(it.id) }
