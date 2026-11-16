@@ -42,7 +42,8 @@ struct ConnectView: View {
                 .keyboardType(.URL)
             if cl.loggedIn {
                 LabeledContent("Tài khoản", value: cl.user)
-                LabeledContent("Khách đọc được", value: "\(cl.customers.count)")
+                LabeledContent("Đọc được", value: "\(cl.orders.count) đơn · \(cl.customerCount) khách")
+                if !cl.source.isEmpty { LabeledContent("Nguồn", value: cl.source) }
                 Button(cl.busy ? "Đang tải…" : "Tải lại đơn") { Task { await cl.reload() } }
                     .disabled(cl.busy)
                 Button("Quên phiên trên máy này", role: .destructive) { cl.forget() }
@@ -129,7 +130,7 @@ struct OrdersView: View {
     @State private var results: [String: PushResult] = [:]
     @State private var pushing = false
 
-    private var groups: [DraftGroup] { DraftGroup.build(cl.customers, mode: mode) }
+    private var groups: [DraftGroup] { DraftGroup.build(cl.orders, mode: mode) }
     private var kho: VtpKho? { vtp.kho.first { $0.id == khoId } ?? vtp.kho.first }
 
     var body: some View {
@@ -168,7 +169,7 @@ struct OrdersView: View {
                 } header: {
                     Text("\(groups.count) khách · đã chọn \(selected.count)")
                 } footer: {
-                    if cl.loggedIn { Text("Trên ChotLive: " + DraftGroup.stats(cl.customers)) }
+                    if cl.loggedIn { Text("Trên ChotLive: \(cl.customerCount) khách, " + DraftGroup.stats(cl.orders)) }
                 }
             }
             .navigationTitle("Đẩy nháp")
@@ -189,8 +190,8 @@ struct OrdersView: View {
                     .foregroundStyle(g.problems.isEmpty ? Color.accentColor : Color.secondary)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
-                        Text(g.receiver.isEmpty ? g.customer.nickname : g.receiver).font(.headline)
-                        if !g.customer.uniqueId.isEmpty { Text("@" + g.customer.uniqueId).font(.caption).foregroundStyle(.secondary) }
+                        Text(g.receiver.isEmpty ? g.key : g.receiver).font(.headline)
+                        if !g.uniqueId.isEmpty { Text("@" + g.uniqueId).font(.caption).foregroundStyle(.secondary) }
                     }
                     Text(g.address.isEmpty ? "Chưa có địa chỉ" : g.address).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     Text("\(g.orders.count) đơn (\(g.states)) · \(g.qty) món · \(g.weightG)g · \(g.senderPays ? "shop trả cước" : "khách trả cước")")

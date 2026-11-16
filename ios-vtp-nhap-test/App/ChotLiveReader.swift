@@ -10,7 +10,9 @@ final class ChotLiveReader: ObservableObject {
 
     @Published var server: String { didSet { UserDefaults.standard.set(server, forKey: "cl.server") } }
     @Published private(set) var user: String
-    @Published private(set) var customers: [CLCustomer] = []
+    @Published private(set) var orders: [CLOrder] = []
+    @Published private(set) var customerCount = 0
+    @Published private(set) var source = ""
     @Published private(set) var loadedAt: Date?
     @Published var busy = false
     @Published var lastError: String?
@@ -52,7 +54,7 @@ final class ChotLiveReader: ObservableObject {
             user = J.str(J.dict(j["user"])?["username"]) ?? u
             UserDefaults.standard.set(user, forKey: "cl.user")
             apply(J.dict(j["state"]))
-            log.add("ChotLive: đăng nhập \(user)", "Đọc được \(customers.count) khách")
+            log.add("ChotLive: đăng nhập \(user)", summary)
         } catch {
             lastError = error.localizedDescription
             log.add("Lỗi: đăng nhập ChotLive", error.localizedDescription, ok: false)
@@ -71,7 +73,7 @@ final class ChotLiveReader: ObservableObject {
             }
             guard r.status == 200 else { throw VtpError.msg("Máy chủ trả HTTP \(r.status)") }
             apply(J.dict(J.dict(r.json)?["state"]))
-            log.add("ChotLive: tải lại đơn", "\(customers.count) khách")
+            log.add("ChotLive: tải lại đơn", summary)
         } catch {
             lastError = error.localizedDescription
             log.add("Lỗi: tải đơn ChotLive", error.localizedDescription, ok: false)
@@ -82,13 +84,18 @@ final class ChotLiveReader: ObservableObject {
     func forget() {
         token = nil
         Keychain.setString(nil, "cl.token")
-        customers = []
+        orders = []
+        customerCount = 0
         loadedAt = nil
     }
 
+    var summary: String { "\(orders.count) đơn, \(customerCount) khách (đọc từ \(source))" }
+
     private func apply(_ state: [String: Any]?) {
-        let list = (state?["customers"] as? [[String: Any]]) ?? []
-        customers = list.compactMap(CLCustomer.init)
+        let parsed = CLParser.parse(state)
+        orders = parsed.orders
+        customerCount = parsed.customers
+        source = parsed.source
         loadedAt = Date()
     }
 }
@@ -107,80 +114,152 @@ struct CLShip {
     }
 }
 
-struct CLItem {
-    var id: String
-    var price: Int
-    var qty: Int
-    var ts: Double
-    var delivered: Bool
-    var shipping: Bool
-    var groupId: String?
-    var ship: CLShip?
+/// Tên, SĐT, địa chỉ của khách (lấy từ hồ sơ khách, thiếu thì lấy từ đơn).
+struct CLContact {
+    var name = ""
+    var uniqueId = ""
+    var phone = ""
+    var street = ""
+    var ward = ""
+    var district = ""
+    var province = ""
+    /// Địa chỉ dạng một dòng (dữ liệu cũ / app iOS) khi không có từng phần.
+    var line = ""
+    var note = ""
 
-    init?(_ d: [String: Any]) {
-        guard let id = J.str(d["id"]) else { return nil }
-        self.id = id
-        price = J.int(d["price"]) ?? 0
-        qty = max(1, J.int(d["qty"]) ?? 1)
-        ts = J.double(d["ts"]) ?? 0
-        delivered = J.bool(d["delivered"])
-        shipping = J.bool(d["shipping"])
-        groupId = J.str(d["groupId"])
-        ship = CLShip(J.dict(d["ship"]))
+    var address: String {
+        let parts = [street, ward, district, province].map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return parts.count >= 2 ? parts.joined(separator: ", ") : line.trimmingCharacters(in: .whitespaces)
     }
-}
 
-struct CLAddress {
-    var receiver, phone, street, region, note: String
-}
+    /// Ghép: trường nào mình trống thì lấy của `other`.
+    func filled(from other: CLContact) -> CLContact {
+        func pick(_ a: String, _ b: String) -> String { a.trimmingCharacters(in: .whitespaces).isEmpty ? b : a }
+        var c = self
+        c.name = pick(name, other.name); c.uniqueId = pick(uniqueId, other.uniqueId); c.phone = pick(phone, other.phone)
+        c.street = pick(street, other.street); c.ward = pick(ward, other.ward); c.district = pick(district, other.district)
+        c.province = pick(province, other.province); c.line = pick(line, other.line); c.note = pick(note, other.note)
+        return c
+    }
 
-struct CLCustomer: Identifiable {
-    var id: String
-    var nickname: String
-    var uniqueId: String
-    var address: CLAddress?
-    var items: [CLItem]
+    init() {}
 
-    init?(_ d: [String: Any]) {
-        guard let id = J.str(d["id"]) else { return nil }
-        self.id = id
-        nickname = J.str(d["nickname"]) ?? ""
+    /// Từ một đơn / hồ sơ khách của web ChotLive (hoặc khách của app iOS có `address` lồng).
+    init(_ d: [String: Any]) {
+        name = J.str(d["receiver"]) ?? J.str(d["name"]) ?? J.str(d["nickname"]) ?? ""
         uniqueId = J.str(d["uniqueId"]) ?? ""
-        if let a = J.dict(d["address"]) {
-            address = CLAddress(receiver: J.str(a["receiver"]) ?? "", phone: J.str(a["phone"]) ?? "",
-                                street: J.str(a["street"]) ?? "", region: J.str(a["region"]) ?? "", note: J.str(a["note"]) ?? "")
+        phone = J.str(d["phone"]) ?? ""
+        street = J.str(d["street"]) ?? ""
+        ward = J.str(d["ward"]) ?? ""
+        district = J.str(d["district"]) ?? ""
+        province = J.str(d["province"]) ?? ""
+        note = J.str(d["note"]) ?? ""
+        if let s = d["address"] as? String {
+            line = s
+        } else if let a = J.dict(d["address"]) {
+            if let r = J.str(a["receiver"]), !r.isEmpty { name = r }
+            if phone.isEmpty { phone = J.str(a["phone"]) ?? "" }
+            line = [J.str(a["street"]) ?? "", J.str(a["region"]) ?? ""].filter { !$0.isEmpty }.joined(separator: ", ")
+            if note.isEmpty { note = J.str(a["note"]) ?? "" }
         }
-        items = ((d["items"] as? [[String: Any]]) ?? []).compactMap(CLItem.init)
     }
 }
 
-/// Một đơn = các món cùng nhóm (groupId) hoặc cùng ngày, giống app thật.
-struct CLOrder {
-    var key: String
-    var items: [CLItem]
+struct CLOrder: Identifiable {
+    var id: String
+    /// Khách của đơn, cùng cách nhận khách với web (uniqueId → userId → tên).
+    var customerKey: String
+    var ts: Double
+    var total: Int
+    var qty: Int
+    var ship: CLShip?
+    var done: Bool
+    var state: String
+    var contact: CLContact
 
-    var total: Int { items.reduce(0) { $0 + max(0, $1.price) * $1.qty } }
-    var qty: Int { items.reduce(0) { $0 + $1.qty } }
-    var lastTs: Double { items.map(\.ts).max() ?? 0 }
-    var ship: CLShip? { items.first { $0.ship != nil }?.ship }
-    var done: Bool { !items.isEmpty && items.allSatisfy { $0.shipping || $0.delivered } }
-    var state: String { ship?.state ?? "ask" }
     var pending: Bool { !done && ["ask", "hold", "ready"].contains(state) }
 
-    static func orders(of c: CLCustomer) -> [CLOrder] {
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = .current
-        let groups = Dictionary(grouping: c.items) { it -> String in
-            it.groupId ?? "day-\(Int(cal.startOfDay(for: Date(timeIntervalSince1970: it.ts / 1000)).timeIntervalSince1970))"
-        }
-        return groups.map { CLOrder(key: $0.key, items: $0.value.sorted { $0.ts < $1.ts }) }.sorted { $0.lastTs < $1.lastTs }
+    static func key(uniqueId: String?, userId: String?, name: String?) -> String {
+        let u = (uniqueId ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        if !u.isEmpty { return u }
+        if let id = userId, !id.isEmpty { return id }
+        let n = (name ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        return n.isEmpty ? "" : "manual-" + n
     }
 }
 
-/// Một khách = một vận đơn nháp, tính tiền thu hộ đúng cách app thật (Vtp.summarize).
+enum CLParser {
+    /// Web ChotLive lưu đơn ở `state.orders`; dữ liệu kiểu app iOS lưu món trong `state.customers[].items`.
+    static func parse(_ state: [String: Any]?) -> (orders: [CLOrder], customers: Int, source: String) {
+        let rawOrders = (state?["orders"] as? [[String: Any]]) ?? []
+        let rawCustomers = (state?["customers"] as? [[String: Any]]) ?? []
+        if !rawOrders.isEmpty {
+            // Hồ sơ khách (tên, SĐT, địa chỉ đã sửa) thắng thông tin ghi trên đơn, giống web (summarizeGroup).
+            var profiles: [String: CLContact] = [:]
+            for c in rawCustomers {
+                let p = CLContact(c)
+                let k = CLOrder.key(uniqueId: J.str(c["uniqueId"]), userId: J.str(c["userId"]), name: J.str(c["name"]) ?? p.name)
+                if !k.isEmpty { profiles[k] = p }
+            }
+            let orders = rawOrders.compactMap(webOrder).map { o -> CLOrder in
+                var o = o
+                if let p = profiles[o.customerKey] { o.contact = p.filled(from: o.contact) }
+                return o
+            }
+            return (orders, Set(orders.map(\.customerKey)).count, "state.orders")
+        }
+        let orders = rawCustomers.flatMap(nativeOrders)
+        return (orders, rawCustomers.count, "state.customers")
+    }
+
+    private static func webOrder(_ o: [String: Any]) -> CLOrder? {
+        guard let id = J.str(o["id"]) else { return nil }
+        let status = J.str(o["status"]) ?? "new"
+        if status == "cancelled" { return nil }
+        let items = (o["items"] as? [[String: Any]]) ?? []
+        let sub = items.reduce(0) { $0 + (J.int($1["price"]) ?? 0) * max(1, J.int($1["qty"]) ?? 1) }
+        let ship = CLShip(J.dict(o["ship"]))
+        let done = status == "shipping" || status == "done"
+        let state = done ? (ship?.state == "exported" ? "exported" : "gone") : (ship?.state ?? "ask")
+        let contact = CLContact(o)
+        let key = CLOrder.key(uniqueId: J.str(o["uniqueId"]), userId: J.str(o["userId"]), name: J.str(o["nickname"]) ?? contact.name)
+        guard !key.isEmpty else { return nil }
+        return CLOrder(id: id, customerKey: key, ts: J.double(o["ts"]) ?? 0, total: max(0, sub - (J.int(o["discount"]) ?? 0)),
+                       qty: items.reduce(0) { $0 + max(1, J.int($1["qty"]) ?? 1) }, ship: ship, done: done, state: state,
+                       contact: contact)
+    }
+
+    /// Dữ liệu kiểu app iOS: mỗi khách có `items`, đơn = các món cùng groupId hoặc cùng ngày.
+    private static func nativeOrders(_ c: [String: Any]) -> [CLOrder] {
+        guard let cid = J.str(c["id"]) else { return [] }
+        let contact = CLContact(c)
+        let key = CLOrder.key(uniqueId: J.str(c["uniqueId"]), userId: J.str(c["userId"]), name: contact.name).isEmpty
+            ? cid : CLOrder.key(uniqueId: J.str(c["uniqueId"]), userId: J.str(c["userId"]), name: contact.name)
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let items = (c["items"] as? [[String: Any]]) ?? []
+        let groups = Dictionary(grouping: items) { it -> String in
+            let ts = J.double(it["ts"]) ?? 0
+            return J.str(it["groupId"]) ?? "day-\(Int(cal.startOfDay(for: Date(timeIntervalSince1970: ts / 1000)).timeIntervalSince1970))"
+        }
+        return groups.map { gkey, its in
+            let ship = its.lazy.compactMap { CLShip(J.dict($0["ship"])) }.first
+            let done = !its.isEmpty && its.allSatisfy { J.bool($0["shipping"]) || J.bool($0["delivered"]) }
+            let state = done ? (ship?.state == "exported" ? "exported" : "gone") : (ship?.state ?? "ask")
+            return CLOrder(id: cid + "|" + gkey, customerKey: key, ts: its.compactMap { J.double($0["ts"]) }.max() ?? 0,
+                           total: its.reduce(0) { $0 + max(0, J.int($1["price"]) ?? 0) * max(1, J.int($1["qty"]) ?? 1) },
+                           qty: its.reduce(0) { $0 + max(1, J.int($1["qty"]) ?? 1) }, ship: ship, done: done, state: state,
+                           contact: contact)
+        }
+    }
+}
+
+/// Một khách = một vận đơn nháp, tính tiền thu hộ đúng cách app thật (summarizeGroup / Vtp.summarize).
 struct DraftGroup: Identifiable {
-    var customer: CLCustomer
+    var key: String
     var orders: [CLOrder]
+    var name = ""
+    var uniqueId = ""
     var receiver = ""
     var phone = ""
     var address = ""
@@ -193,11 +272,11 @@ struct DraftGroup: Identifiable {
     var senderPays = false
     var problems: [String] = []
 
-    var id: String { customer.id }
+    var id: String { key }
     /// Đổi khi bộ đơn đổi: dùng để nhớ khách này đã đẩy nháp chưa.
-    var pushKey: String { customer.id + "#" + orders.map(\.key).sorted().joined(separator: ",") }
+    var pushKey: String { key + "#" + orders.map(\.id).sorted().joined(separator: ",") }
     var states: String {
-        let names = ["ask": "chưa duyệt", "hold": "hẹn gom", "ready": "đã duyệt"]
+        let names = ["ask": "chưa duyệt", "hold": "hẹn gom", "ready": "đã duyệt", "exported": "đã xuất", "gone": "đã gửi"]
         return Set(orders.map(\.state)).map { names[$0] ?? $0 }.sorted().joined(separator: ", ")
     }
 
@@ -205,50 +284,39 @@ struct DraftGroup: Identifiable {
 
     /// mode 0: đã duyệt · 1: chưa gửi (trừ hẹn gom) · 2: đơn gần nhất của mỗi khách, kể cả đã gửi (chỉ để thử,
     /// vì nháp không gọi bưu tá).
-    static func build(_ customers: [CLCustomer], mode: Int) -> [DraftGroup] {
-        customers.compactMap { c -> DraftGroup? in
-            let all = CLOrder.orders(of: c)
+    static func build(_ all: [CLOrder], mode: Int) -> [DraftGroup] {
+        let byCustomer = Dictionary(grouping: all) { $0.customerKey }
+        return byCustomer.compactMap { key, list -> DraftGroup? in
+            let sorted = list.sorted { $0.ts < $1.ts }
             let orders: [CLOrder]
             switch mode {
-            case 0: orders = all.filter { $0.pending && $0.state == "ready" }
-            case 1: orders = all.filter { $0.pending && $0.state != "hold" }
-            default: orders = all.last.map { [$0] } ?? []
+            case 0: orders = sorted.filter { $0.pending && $0.state == "ready" }
+            case 1: orders = sorted.filter { $0.pending && $0.state != "hold" }
+            default: orders = sorted.last.map { [$0] } ?? []
             }
             guard !orders.isEmpty else { return nil }
-            return summarize(c, orders)
+            // Thông tin khách: đơn mới nhất trước, thiếu trường nào lấy ở đơn cũ hơn.
+            var contact = CLContact()
+            for o in sorted.reversed() { contact = contact.filled(from: o.contact) }
+            return summarize(key, orders, contact)
         }
         .sorted { (a, b) in
-            mode == 2 ? (a.orders.last?.lastTs ?? 0) > (b.orders.last?.lastTs ?? 0)
-                      : (a.orders.first?.lastTs ?? 0) < (b.orders.first?.lastTs ?? 0)
+            mode == 2 ? (a.orders.last?.ts ?? 0) > (b.orders.last?.ts ?? 0)
+                      : (a.orders.first?.ts ?? 0) < (b.orders.first?.ts ?? 0)
         }
     }
 
     /// Đếm đơn theo trạng thái để biết vì sao danh sách trống.
-    static func stats(_ customers: [CLCustomer]) -> String {
+    static func stats(_ all: [CLOrder]) -> String {
+        let names = ["ask": "chưa duyệt", "hold": "hẹn gom", "ready": "đã duyệt", "exported": "đã xuất", "gone": "đã gửi/giao"]
         var counts: [String: Int] = [:]
-        var total = 0
-        for c in customers {
-            for o in CLOrder.orders(of: c) {
-                total += 1
-                let key: String
-                if o.done { key = "đã gửi/giao" } else {
-                    switch o.state {
-                    case "ask": key = "chưa duyệt"
-                    case "hold": key = "hẹn gom"
-                    case "ready": key = "đã duyệt"
-                    case "exported": key = "đã xuất"
-                    default: key = o.state
-                    }
-                }
-                counts[key, default: 0] += 1
-            }
-        }
+        for o in all { counts[names[o.state] ?? o.state, default: 0] += 1 }
         let parts = counts.sorted { $0.value > $1.value }.map { "\($0.key) \($0.value)" }
-        return "\(customers.count) khách, \(total) đơn" + (parts.isEmpty ? "" : ": " + parts.joined(separator: " · "))
+        return "\(all.count) đơn" + (parts.isEmpty ? "" : ": " + parts.joined(separator: " · "))
     }
 
-    static func summarize(_ c: CLCustomer, _ orders: [CLOrder]) -> DraftGroup {
-        var g = DraftGroup(customer: c, orders: orders)
+    static func summarize(_ key: String, _ orders: [CLOrder], _ c: CLContact) -> DraftGroup {
+        var g = DraftGroup(key: key, orders: orders)
         func last<T>(_ f: (CLShip) -> T?) -> T? {
             for o in orders.reversed() { if let s = o.ship, let v = f(s) { return v } }
             return nil
@@ -279,17 +347,17 @@ struct DraftGroup: Identifiable {
             g.size = (l, w, h)
         }
 
-        let a = c.address
-        let name = (a?.receiver ?? "").isEmpty ? c.nickname : a!.receiver
-        g.receiver = name.replacingOccurrences(of: "[^\\p{L}\\p{N}\\s.'-]", with: " ", options: .regularExpression)
+        g.name = c.name
+        g.uniqueId = c.uniqueId
+        g.receiver = c.name.replacingOccurrences(of: "[^\\p{L}\\p{N}\\s.'-]", with: " ", options: .regularExpression)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
-        g.phone = (a?.phone ?? "").filter { $0.isNumber || $0 == "+" }
-        g.address = [a?.street ?? "", a?.region ?? ""].map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }.joined(separator: ", ")
-        g.note = a?.note ?? ""
+        g.phone = c.phone.filter { $0.isNumber || $0 == "+" }
+        g.address = c.address
+        g.note = c.note
         if g.phone.range(of: "^(\\+?84|0)\\d{9,10}$", options: .regularExpression) == nil { g.problems.append("Thiếu số điện thoại") }
-        if (a?.region ?? "").trimmingCharacters(in: .whitespaces).isEmpty { g.problems.append("Thiếu địa chỉ") }
+        if g.address.isEmpty { g.problems.append("Thiếu địa chỉ") }
+        if g.receiver.isEmpty { g.problems.append("Thiếu tên người nhận") }
         if g.weightG >= 10_000 && g.size == nil { g.problems.append("Từ 10kg phải có kích thước") }
         return g
     }
@@ -301,7 +369,7 @@ struct DraftGroup: Identifiable {
         f.dateFormat = "dd/MM/yyyy HH:mm:ss"
         let product = "Quần áo"
         let payment = cod > 0 ? (senderPays ? 3 : 2) : (senderPays ? 1 : 4)
-        let ref = "CL-" + String(customer.id.filter { $0.isLetter || $0.isNumber }.prefix(24))
+        let ref = "CL-" + String(key.filter { $0.isLetter || $0.isNumber }.prefix(24))
         let quantity = max(1, qty)
         let (len, wid, hei) = size ?? (0, 0, 0)
         // Ghép từng phần nhỏ cho trình biên dịch Swift khỏi chậm với một từ điển quá lớn.

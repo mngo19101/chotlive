@@ -175,7 +175,9 @@ const cl = {
   server: store.get('cl.server') || CL_DEFAULT,
   user: store.get('cl.user') || '',
   token: store.get('cl.token'),
-  customers: [],
+  orders: [],
+  customerCount: 0,
+  source: '',
   busy: false,
   error: ''
 };
@@ -185,7 +187,8 @@ async function clCall(method, path, body) {
   if (!/^https:\/\//.test(base)) throw new Error('Địa chỉ máy chủ phải là https://');
   return http(method, base + path, body, cl.token ? { Authorization: 'Bearer ' + cl.token } : {});
 }
-function clApply(state) { cl.customers = (state?.customers || []).map(parseCustomer).filter(Boolean); }
+function clApply(state) { const p = parseState(state); cl.orders = p.orders; cl.customerCount = p.customers; cl.source = p.source; }
+const clSummary = () => `${cl.orders.length} đơn, ${cl.customerCount} khách (đọc từ ${cl.source})`;
 async function clLogin(user, pass) {
   cl.busy = true; cl.error = ''; render();
   try {
@@ -194,7 +197,7 @@ async function clLogin(user, pass) {
     cl.token = r.json.token; store.set('cl.token', cl.token);
     cl.user = r.json.user?.username || user; store.set('cl.user', cl.user);
     clApply(r.json.state);
-    log('ChotLive: đăng nhập ' + cl.user, `Đọc được ${cl.customers.length} khách`);
+    log('ChotLive: đăng nhập ' + cl.user, clSummary());
   } catch (e) { cl.error = e.message; log('Lỗi: đăng nhập ChotLive', e.message, false); }
   cl.busy = false; render();
 }
@@ -205,11 +208,11 @@ async function clReload() {
     if (r.status === 401) { clForget(); throw new Error('Phiên ChotLive hết hạn, đăng nhập lại'); }
     if (r.status !== 200) throw new Error('Máy chủ trả HTTP ' + r.status);
     clApply(r.json?.state);
-    log('ChotLive: tải lại đơn', `${cl.customers.length} khách`);
+    log('ChotLive: tải lại đơn', clSummary());
   } catch (e) { cl.error = e.message; log('Lỗi: tải đơn ChotLive', e.message, false); }
   cl.busy = false; render();
 }
-function clForget() { cl.token = null; store.set('cl.token', null); cl.customers = []; }
+function clForget() { cl.token = null; store.set('cl.token', null); cl.orders = []; cl.customerCount = 0; }
 
 // ================= Viettel Post trên máy này =================
 let priv = store.get('vtp.key') ? fromHex(store.get('vtp.key')) : null;
@@ -348,39 +351,87 @@ async function vtpInsertDraft(body) {
 }
 
 // ================= Đơn ChotLive → nháp =================
-function parseCustomer(c) {
-  if (!c || c.id == null) return null;
-  return {
-    id: String(c.id), nickname: c.nickname || '', uniqueId: c.uniqueId || '', address: c.address || null,
-    items: (c.items || []).filter((i) => i && i.id != null).map((i) => ({
-      id: String(i.id), price: Number(i.price) || 0, qty: Math.max(1, Number(i.qty) || 1), ts: Number(i.ts) || 0,
-      delivered: !!i.delivered, shipping: !!i.shipping, groupId: i.groupId || null, ship: i.ship || null
-    }))
-  };
-}
-function ordersOf(c) {
-  const groups = new Map();
-  for (const it of c.items) {
-    const d = new Date(it.ts); d.setHours(0, 0, 0, 0);
-    const key = it.groupId || 'day-' + Math.floor(d.getTime() / 1000);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(it);
-  }
-  return [...groups].map(([key, items]) => {
-    items.sort((a, b) => a.ts - b.ts);
-    const ship = items.find((i) => i.ship)?.ship || null;
-    const done = items.length > 0 && items.every((i) => i.shipping || i.delivered);
-    const state = ship?.state || 'ask';
-    return {
-      key, items, ship, state, lastTs: Math.max(...items.map((i) => i.ts)),
-      total: items.reduce((s, i) => s + Math.max(0, i.price) * i.qty, 0), qty: items.reduce((s, i) => s + i.qty, 0),
-      pending: !done && ['ask', 'hold', 'ready'].includes(state)
-    };
-  }).sort((a, b) => a.lastTs - b.lastTs);
-}
 const num = (v) => (v == null || v === '' || !isFinite(Number(v)) ? null : Math.max(0, Math.round(Number(v))));
-/** Cách tính thu hộ giống app thật (Vtp.summarize / public/js/vtp-export.js). */
-function summarize(c, orders) {
+const custKey = (uniqueId, userId, name) => {
+  const u = String(uniqueId || '').trim().toLowerCase();
+  if (u) return u;
+  if (userId) return String(userId);
+  const n = String(name || '').trim().toLowerCase();
+  return n ? 'manual-' + n : '';
+};
+/** Tên, SĐT, địa chỉ từ một đơn / hồ sơ khách web (hoặc khách app iOS có `address` lồng). */
+function contactOf(d) {
+  const c = {
+    name: d.receiver || d.name || d.nickname || '', uniqueId: d.uniqueId || '', phone: String(d.phone || ''),
+    street: d.street || '', ward: d.ward || '', district: d.district || '', province: d.province || '', line: '', note: d.note || ''
+  };
+  if (typeof d.address === 'string') c.line = d.address;
+  else if (d.address && typeof d.address === 'object') {
+    const a = d.address;
+    if (a.receiver) c.name = a.receiver;
+    if (!c.phone) c.phone = String(a.phone || '');
+    c.line = [a.street, a.region].filter(Boolean).join(', ');
+    if (!c.note) c.note = a.note || '';
+  }
+  return c;
+}
+const fill = (a, b) => { const out = { ...a }; for (const k of Object.keys(b)) if (!String(out[k] ?? '').trim()) out[k] = b[k]; return out; };
+const addressOf = (c) => {
+  const parts = [c.street, c.ward, c.district, c.province].map((x) => String(x || '').trim()).filter(Boolean);
+  return parts.length >= 2 ? parts.join(', ') : String(c.line || '').trim();
+};
+/** Web ChotLive lưu đơn ở `state.orders`; dữ liệu kiểu app iOS lưu món trong `state.customers[].items`. */
+function parseState(state) {
+  const rawOrders = state?.orders || [], rawCustomers = state?.customers || [];
+  if (rawOrders.length) {
+    const profiles = {};
+    for (const c of rawCustomers) { const k = custKey(c.uniqueId, c.userId, c.name); if (k) profiles[k] = contactOf(c); }
+    const orders = [];
+    for (const o of rawOrders) {
+      if (!o || o.id == null || o.status === 'cancelled') continue;
+      const key = custKey(o.uniqueId, o.userId, o.nickname || o.receiver);
+      if (!key) continue;
+      const items = o.items || [];
+      const sub = items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 1), 0);
+      const done = o.status === 'shipping' || o.status === 'done';
+      const ship = o.ship || null;
+      const contact = profiles[key] ? fill(profiles[key], contactOf(o)) : contactOf(o);
+      orders.push({
+        id: String(o.id), key, ts: Number(o.ts) || 0, total: Math.max(0, sub - (Number(o.discount) || 0)),
+        qty: items.reduce((s, it) => s + (Number(it.qty) || 1), 0), ship, done,
+        state: done ? (ship?.state === 'exported' ? 'exported' : 'gone') : ship?.state || 'ask', contact
+      });
+    }
+    return { orders, customers: new Set(orders.map((o) => o.key)).size, source: 'state.orders' };
+  }
+  const orders = [];
+  for (const c of rawCustomers) {
+    if (!c || c.id == null) continue;
+    const contact = contactOf(c);
+    const key = custKey(c.uniqueId, c.userId, contact.name) || String(c.id);
+    const groups = new Map();
+    for (const it of c.items || []) {
+      const d = new Date(Number(it.ts) || 0); d.setHours(0, 0, 0, 0);
+      const g = it.groupId || 'day-' + Math.floor(d.getTime() / 1000);
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(it);
+    }
+    for (const [g, its] of groups) {
+      const ship = its.find((i) => i.ship)?.ship || null;
+      const done = its.length > 0 && its.every((i) => i.shipping || i.delivered);
+      orders.push({
+        id: c.id + '|' + g, key, ts: Math.max(...its.map((i) => Number(i.ts) || 0)),
+        total: its.reduce((s, i) => s + Math.max(0, Number(i.price) || 0) * Math.max(1, Number(i.qty) || 1), 0),
+        qty: its.reduce((s, i) => s + Math.max(1, Number(i.qty) || 1), 0), ship, done,
+        state: done ? (ship?.state === 'exported' ? 'exported' : 'gone') : ship?.state || 'ask', contact
+      });
+    }
+  }
+  return { orders, customers: rawCustomers.length, source: 'state.customers' };
+}
+const STATE_NAMES = { ask: 'chưa duyệt', hold: 'hẹn gom', ready: 'đã duyệt', exported: 'đã xuất', gone: 'đã gửi/giao' };
+/** Cách tính thu hộ giống app thật (summarizeGroup trong public/js/vtp-export.js). */
+function summarize(key, orders, c) {
   const last = (f) => { for (let i = orders.length - 1; i >= 0; i--) { const s = orders[i].ship; if (s) { const v = f(s); if (v != null) return v; } } return null; };
   const paid = (o) => o.ship?.pay === 'paid' || o.ship?.pay === 'shipOnly';
   const allPaid = orders.every(paid);
@@ -404,50 +455,50 @@ function summarize(c, orders) {
   const weightG = weights.length ? Math.max(...weights) : 1000;
   const l = last((s) => num(s.lengthCm)), w = last((s) => num(s.widthCm)), h = last((s) => num(s.heightCm));
   const size = l > 0 && w > 0 && h > 0 ? [l, w, h] : null;
-  const a = c.address || {};
-  const receiver = String(a.receiver || c.nickname || '').normalize('NFC').replace(/[^\p{L}\p{N}\s.'-]/gu, ' ').replace(/\s+/g, ' ').trim();
-  const phone = String(a.phone || '').replace(/[^\d+]/g, '');
-  const address = [a.street, a.region].map((x) => String(x || '').trim()).filter(Boolean).join(', ');
+  const receiver = String(c.name || '').normalize('NFC').replace(/[^\p{L}\p{N}\s.'-]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const phone = String(c.phone || '').replace(/[^\d+]/g, '');
+  const address = addressOf(c);
   const problems = [];
   if (!/^(\+?84|0)\d{9,10}$/.test(phone)) problems.push('Thiếu số điện thoại');
-  if (!String(a.region || '').trim()) problems.push('Thiếu địa chỉ');
+  if (!address) problems.push('Thiếu địa chỉ');
+  if (!receiver) problems.push('Thiếu tên người nhận');
   if (weightG >= 10000 && !size) problems.push('Từ 10kg phải có kích thước');
-  const names = { ask: 'chưa duyệt', hold: 'hẹn gom', ready: 'đã duyệt' };
   return {
-    id: c.id, customer: c, orders, goods, cod, senderPays, weightG, size, receiver, phone, address, note: a.note || '',
+    id: key, key, uniqueId: c.uniqueId || '', orders, goods, cod, senderPays, weightG, size, receiver, phone, address, note: c.note || '',
     qty: orders.reduce((s, o) => s + o.qty, 0), problems,
-    states: [...new Set(orders.map((o) => names[o.state] || o.state))].join(', '),
-    pushKey: c.id + '#' + orders.map((o) => o.key).sort().join(',')
+    states: [...new Set(orders.map((o) => STATE_NAMES[o.state] || o.state))].join(', '),
+    pushKey: key + '#' + orders.map((o) => o.id).sort().join(',')
   };
 }
 /** mode '1': đã duyệt · '0': chưa gửi (trừ hẹn gom) · '2': đơn gần nhất của mỗi khách, kể cả đã gửi (chỉ để thử). */
 function buildGroups(mode) {
   const latest = mode === '2';
-  return cl.customers.map((c) => {
-    const all = ordersOf(c);
-    const orders = latest ? all.slice(-1) : all.filter((o) => o.pending && (mode === '1' ? o.state === 'ready' : o.state !== 'hold'));
-    return orders.length ? summarize(c, orders) : null;
-  }).filter(Boolean).sort((a, b) => latest ? b.orders.at(-1).lastTs - a.orders.at(-1).lastTs : a.orders[0].lastTs - b.orders[0].lastTs);
+  const byKey = new Map();
+  for (const o of cl.orders) { if (!byKey.has(o.key)) byKey.set(o.key, []); byKey.get(o.key).push(o); }
+  const out = [];
+  for (const [key, list] of byKey) {
+    list.sort((a, b) => a.ts - b.ts);
+    const pending = (o) => !o.done && ['ask', 'hold', 'ready'].includes(o.state);
+    const orders = latest ? list.slice(-1) : list.filter((o) => pending(o) && (mode === '1' ? o.state === 'ready' : o.state !== 'hold'));
+    if (!orders.length) continue;
+    let contact = {};
+    for (const o of list.slice().reverse()) contact = fill(contact, o.contact);
+    out.push(summarize(key, orders, contact));
+  }
+  return out.sort((a, b) => latest ? b.orders.at(-1).ts - a.orders.at(-1).ts : a.orders[0].ts - b.orders[0].ts);
 }
 function stats() {
-  const names = { ask: 'chưa duyệt', hold: 'hẹn gom', ready: 'đã duyệt', exported: 'đã xuất' };
   const counts = {};
-  let total = 0;
-  for (const c of cl.customers) for (const o of ordersOf(c)) {
-    total++;
-    const done = o.items.every((i) => i.shipping || i.delivered);
-    const k = done ? 'đã gửi/giao' : names[o.state] || o.state;
-    counts[k] = (counts[k] || 0) + 1;
-  }
+  for (const o of cl.orders) { const k = STATE_NAMES[o.state] || o.state; counts[k] = (counts[k] || 0) + 1; }
   const parts = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`);
-  return `${cl.customers.length} khách, ${total} đơn${parts.length ? ': ' + parts.join(' · ') : ''}`;
+  return `${cl.customerCount} khách, ${cl.orders.length} đơn${parts.length ? ': ' + parts.join(' · ') : ''}`;
 }
 function draftBody(g, kho, place, service) {
   const d = new Date(), p = (n) => String(n).padStart(2, '0');
   const product = 'Quần áo';
   const qty = Math.max(1, g.qty);
   return {
-    ORDER_REFERENCE: 'CL-' + g.customer.id.replace(/[^A-Za-z0-9]/g, '').slice(0, 24), ORDER_TYPE: 1, TYPE: 12,
+    ORDER_REFERENCE: 'CL-' + g.key.replace(/[^A-Za-z0-9]/g, '').slice(0, 24), ORDER_TYPE: 1, TYPE: 12,
     DELIVERY_DATE: `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`,
     GROUPADDRESS_ID: kho.id, CUS_ID: kho.cusId,
     SENDER_FULLNAME: clipBytes(kho.name), SENDER_ADDRESS: clipBytes(kho.address), SENDER_PHONE: kho.phone, SENDER_EMAIL: '',
@@ -514,7 +565,8 @@ function render() {
     <p class="hint">Chỉ gọi 2 lệnh: đăng nhập và đọc đơn (GET /api/state). Mọi lệnh ghi bị chặn trong code.</p>
     <label>Máy chủ</label><input id="cl-server" value="${esc(cl.server)}" autocapitalize="off" autocorrect="off" inputmode="url">
     ${cl.token ? `<div class="kv"><span>Tài khoản</span><b>${esc(cl.user)}</b></div>
-      <div class="kv"><span>Khách đọc được</span><b>${cl.customers.length}</b></div>
+      <div class="kv"><span>Đọc được</span><b>${cl.orders.length} đơn · ${cl.customerCount} khách</b></div>
+      <div class="kv"><span>Nguồn</span><b>${esc(cl.source || '')}</b></div>
       <div class="row"><button class="btn ghost" id="cl-reload" ${cl.busy ? 'disabled' : ''}>${cl.busy ? 'Đang tải…' : 'Tải lại đơn'}</button>
       <button class="btn danger" id="cl-forget">Quên phiên</button></div>`
     : `<label>Tên tài khoản ChotLive</label><input id="cl-user" value="${esc(cl.user)}" autocapitalize="off" autocorrect="off">
@@ -590,7 +642,7 @@ function render() {
     return `<div class="o ${on ? 'on' : ''} ${bad ? 'dis' : ''}" data-id="${esc(g.id)}">
       <div class="ck">${on ? '✓' : ''}</div>
       <div class="m">
-        <div class="nm">${esc(g.receiver || g.customer.nickname)} ${g.customer.uniqueId ? `<i>@${esc(g.customer.uniqueId)}</i>` : ''}</div>
+        <div class="nm">${esc(g.receiver || g.key)} ${g.uniqueId ? `<i>@${esc(g.uniqueId)}</i>` : ''}</div>
         <div class="ad">${esc(g.address || 'Chưa có địa chỉ')}</div>
         <span class="pill">${g.orders.length} đơn · ${esc(g.states)}</span><span class="pill">${g.qty} món · ${g.weightG}g</span>
         <span class="pill">${g.senderPays ? 'shop trả cước' : 'khách trả cước'}</span>
