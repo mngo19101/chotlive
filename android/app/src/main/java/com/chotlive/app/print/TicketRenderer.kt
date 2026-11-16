@@ -49,21 +49,21 @@ class TicketRenderer(private val context: Context, private val paperWidth: () ->
         val shop = shopName().ifBlank { "ChốtLive" }
         val f = SimpleDateFormat("HH:mm dd/MM", Locale.US)
         val name = c.nickname.ifEmpty { "@" + c.uniqueId }
-        val small = Style(20f, semiBold)
+        val small = Style(25f, semiBold)
 
         val blocks = mutableListOf<Block>(
-            Block.Row(shop.uppercase(), Style(20f, extraBold), f.format(if (live) Date() else Date(c.ts)), small),
-            Block.Row(name, Style(28f, extraBold)),
+            Block.Row(shop.uppercase(), Style(25f, extraBold), f.format(if (live) Date() else Date(c.ts)), small),
+            Block.Row(name, Style(35f, extraBold)),
         )
         if (c.nickname.isNotEmpty()) blocks += Block.Row("@${c.uniqueId}", small)
         blocks += Block.Dashed
-        blocks += Block.Row(c.text, Style(26f, bold), if (c.price > 0) vnd(c.price) else "", Style(32f, extraBold))
+        blocks += Block.Row(c.text, Style(32f, bold), if (c.price > 0) vnd(c.price) else "", Style(40f, extraBold))
 
         val width = paperWidth()
         val margin = 12
         val cw = width - margin * 2
         val spacing = 2
-        val dashH = 10
+        val dashH = 12
 
         fun paint(s: Style) = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK

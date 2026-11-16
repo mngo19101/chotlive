@@ -33,24 +33,24 @@ enum TicketRenderer {
         let f = DateFormatter()
         f.dateFormat = "HH:mm dd/MM"
         let name = (c.nickname.isEmpty ? "@" + c.uniqueId : c.nickname)
-        let small = UIFont.systemFont(ofSize: 20, weight: .semibold)
+        let small = UIFont.systemFont(ofSize: 25, weight: .semibold)
 
         var blocks: [Block] = [
-            .row(shop.uppercased(), .systemFont(ofSize: 20, weight: .heavy), f.string(from: live ? Date() : c.ts), small),
-            .row(name, .systemFont(ofSize: 28, weight: .heavy), "", small),
+            .row(shop.uppercased(), .systemFont(ofSize: 25, weight: .heavy), f.string(from: live ? Date() : c.ts), small),
+            .row(name, .systemFont(ofSize: 35, weight: .heavy), "", small),
         ]
         if !c.nickname.isEmpty { blocks.append(.row("@" + c.uniqueId, small, "", small)) }
         blocks += [
             .dashed,
-            .row(c.text, .systemFont(ofSize: 26, weight: .bold),
-                 c.price > 0 ? vnd(c.price) : "", .systemFont(ofSize: 32, weight: .heavy)),
+            .row(c.text, .systemFont(ofSize: 32, weight: .bold),
+                 c.price > 0 ? vnd(c.price) : "", .systemFont(ofSize: 40, weight: .heavy)),
         ]
 
         let width = paperWidth
         let margin: CGFloat = 12
         let cw = width - margin * 2
         let spacing: CGFloat = 2
-        let dashH: CGFloat = 10
+        let dashH: CGFloat = 12
 
         func attrs(_ font: UIFont) -> [NSAttributedString.Key: Any] { [.font: font, .foregroundColor: UIColor.black] }
         func size(_ s: String, _ font: UIFont, _ w: CGFloat) -> CGSize {
