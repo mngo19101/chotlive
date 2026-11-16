@@ -1,0 +1,42 @@
+# Build IPA ChốtLive (SwiftUI) trên Codemagic, giống workflow .github/workflows/build-native-ipa.yml.
+# IPA không ký: ESign ký lại khi cài. Chỉ chạy khi bấm "Start new build" (không tự chạy khi push).
+workflows:
+  ios-native-ipa:
+    name: ChotLive iOS IPA (không ký)
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      xcode: latest
+      vars:
+        # Địa chỉ server gắn vào app; để trống thì màn đăng nhập bắt nhập tay.
+        CHOTLIVE_SERVER_URL: https://chotlive.52-64-216-229.sslip.io
+    scripts:
+      - name: Cài XcodeGen
+        script: brew install xcodegen
+      - name: Tạo icon 1024 từ public/img/icon-512.png
+        script: |
+          sips -z 1024 1024 public/img/icon-512.png \
+            --out ios-native/ChotLive/Assets.xcassets/AppIcon.appiconset/icon.png
+      - name: Tạo project Xcode
+        script: cd ios-native && xcodegen generate
+      - name: Build (không ký)
+        script: |
+          cd ios-native
+          echo "Gắn sẵn server: $CHOTLIVE_SERVER_URL"
+          xcodebuild \
+            -project ChotLive.xcodeproj \
+            -scheme ChotLive \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CHOTLIVE_SERVER_URL="$CHOTLIVE_SERVER_URL" \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Đóng gói IPA
+        script: |
+          cd ios-native
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/ChotLive.app Payload/
+          zip -r9 ChotLive-Native.ipa Payload
+    artifacts:
+      - ios-native/ChotLive-Native.ipa
