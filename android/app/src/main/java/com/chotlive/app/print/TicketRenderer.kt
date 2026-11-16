@@ -7,7 +7,6 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Typeface
-import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import androidx.core.content.res.ResourcesCompat
@@ -22,10 +21,12 @@ import kotlin.math.ceil
 
 /** Vẽ tem (hỗ trợ tiếng Việt có dấu) thành ảnh rồi chuyển sang lệnh raster ESC/POS. */
 class TicketRenderer(private val context: Context, private val paperWidth: () -> Int, private val shopName: () -> String) {
+    private class Style(val size: Float, val face: Typeface)
+
     private sealed class Block {
-        data class Text(val s: String, val size: Float, val face: Typeface, val align: Layout.Alignment) : Block()
+        /** Chữ bên trái (tự xuống dòng) và chữ bên phải 1 dòng, thẳng chân chữ dòng đầu. Phải rỗng thì trái chiếm hết. */
+        data class Row(val left: String, val ls: Style, val right: String = "", val rs: Style = ls) : Block()
         data object Dashed : Block()
-        data class Gap(val h: Int) : Block()
     }
 
     private val extraBold by lazy { ResourcesCompat.getFont(context, R.font.bevietnampro_extrabold) ?: Typeface.DEFAULT_BOLD }
@@ -38,49 +39,60 @@ class TicketRenderer(private val context: Context, private val paperWidth: () ->
      *  (0 thì không in dòng giá). */
     fun liveTicketBytes(c: LiveComment): ByteArray = escpos(render(c, live = true))
 
-    /** Tem gọn để tốn ít giấy: tên shop, tên khách, @id + giờ trên 1 dòng, bình luận, giá. */
+    /** Tem nhỏ gọn, 4 dòng:
+     *    CHỐTLIVE                 15:06 16/11
+     *    Tên khách
+     *    @id
+     *    - - - - - - - - - - - - - - - - - -
+     *    bình luận                    30.000đ */
     fun render(c: LiveComment, live: Boolean): Bitmap {
         val shop = shopName().ifBlank { "ChốtLive" }
-        val f = SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.US)
+        val f = SimpleDateFormat("HH:mm dd/MM", Locale.US)
         val name = c.nickname.ifEmpty { "@" + c.uniqueId }
-        val time = f.format(if (live) Date() else Date(c.ts))
-        val L = Layout.Alignment.ALIGN_NORMAL
-        val C = Layout.Alignment.ALIGN_CENTER
+        val small = Style(20f, semiBold)
 
         val blocks = mutableListOf<Block>(
-            Block.Text(shop.uppercase(), 28f, extraBold, C),
-            Block.Dashed,
-            Block.Text(name, 34f, extraBold, L),
-            Block.Text("@${c.uniqueId}  ·  $time", 22f, semiBold, L),
-            Block.Dashed,
-            Block.Text(c.text, 30f, bold, L),
+            Block.Row(shop.uppercase(), Style(20f, extraBold), f.format(if (live) Date() else Date(c.ts)), small),
+            Block.Row(name, Style(28f, extraBold)),
         )
-        if (c.price > 0) {
-            blocks += Block.Dashed
-            blocks += Block.Text(vnd(c.price), 48f, extraBold, C)
-        }
+        if (c.nickname.isNotEmpty()) blocks += Block.Row("@${c.uniqueId}", small)
+        blocks += Block.Dashed
+        blocks += Block.Row(c.text, Style(26f, bold), if (c.price > 0) vnd(c.price) else "", Style(32f, extraBold))
 
         val width = paperWidth()
         val margin = 12
         val cw = width - margin * 2
-        val spacing = 4
+        val spacing = 2
+        val dashH = 10
 
-        fun layout(b: Block.Text): StaticLayout {
-            val p = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.BLACK
-                textSize = b.size
-                typeface = b.face
-            }
-            return StaticLayout.Builder.obtain(b.s, 0, b.s.length, p, cw).setAlignment(b.align).setIncludePad(false).build()
+        fun paint(s: Style) = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            textSize = s.size
+            typeface = s.face
+        }
+        fun layout(s: String, st: Style, w: Int): StaticLayout =
+            StaticLayout.Builder.obtain(s, 0, s.length, paint(st), w).setIncludePad(false).build()
+
+        /** 1 dòng đã xếp: layout + toạ độ (so với đầu dòng) của 2 bên, và chiều cao dòng. */
+        class Placed(val left: StaticLayout, val leftTop: Int, val right: StaticLayout?, val rightX: Int,
+                     val rightTop: Int, val height: Int)
+        fun place(b: Block.Row): Placed {
+            val rw = if (b.right.isEmpty()) 0 else ceil(paint(b.rs).measureText(b.right)).toInt()
+            val lw = if (b.right.isEmpty()) cw else maxOf(cw / 3, cw - rw - 16)
+            val l = layout(b.left, b.ls, lw)
+            val r = if (b.right.isEmpty()) null else layout(b.right, b.rs, rw + 2)
+            val base = maxOf(l.getLineBaseline(0), r?.getLineBaseline(0) ?: 0)
+            val lt = base - l.getLineBaseline(0)
+            val rt = if (r == null) 0 else base - r.getLineBaseline(0)
+            return Placed(l, lt, r, width - margin - rw, rt, maxOf(lt + l.height, if (r == null) 0 else rt + r.height))
         }
 
-        val layouts = blocks.map { if (it is Block.Text) layout(it) else null }
+        val placed = blocks.map { if (it is Block.Row) place(it) else null }
         var total = 6
         blocks.forEachIndexed { i, b ->
             total += when (b) {
-                is Block.Text -> layouts[i]!!.height + spacing
-                Block.Dashed -> 14
-                is Block.Gap -> b.h
+                is Block.Row -> placed[i]!!.height + spacing
+                Block.Dashed -> dashH
             }
         }
         total += 6
@@ -95,22 +107,25 @@ class TicketRenderer(private val context: Context, private val paperWidth: () ->
             style = Paint.Style.STROKE
             pathEffect = DashPathEffect(floatArrayOf(10f, 7f), 0f)
         }
+        fun draw(l: StaticLayout, x: Int, y: Float) {
+            canvas.save()
+            canvas.translate(x.toFloat(), y)
+            l.draw(canvas)
+            canvas.restore()
+        }
         var y = 6f
         blocks.forEachIndexed { i, b ->
             when (b) {
-                is Block.Text -> {
-                    val l = layouts[i]!!
-                    canvas.save()
-                    canvas.translate(margin.toFloat(), y)
-                    l.draw(canvas)
-                    canvas.restore()
-                    y += l.height + spacing
+                is Block.Row -> {
+                    val p = placed[i]!!
+                    draw(p.left, margin, y + p.leftTop)
+                    p.right?.let { draw(it, p.rightX, y + p.rightTop) }
+                    y += p.height + spacing
                 }
                 Block.Dashed -> {
-                    canvas.drawLine(margin.toFloat(), y + 6, (width - margin).toFloat(), y + 6, dash)
-                    y += 14
+                    canvas.drawLine(margin.toFloat(), y + dashH / 2f, (width - margin).toFloat(), y + dashH / 2f, dash)
+                    y += dashH
                 }
-                is Block.Gap -> y += b.h
             }
         }
         return bmp

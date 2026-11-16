@@ -3,9 +3,9 @@ import UIKit
 /// Vẽ tem (hỗ trợ tiếng Việt có dấu) thành ảnh rồi chuyển sang lệnh raster ESC/POS.
 enum TicketRenderer {
     private enum Block {
-        case text(String, UIFont, NSTextAlignment)
+        /// Chữ bên trái (tự xuống dòng) và chữ bên phải 1 dòng, thẳng chân chữ dòng đầu. Phải rỗng thì trái chiếm hết.
+        case row(String, UIFont, String, UIFont)
         case dashed
-        case gap(CGFloat)
     }
 
     static var paperWidth: CGFloat {
@@ -22,52 +22,61 @@ enum TicketRenderer {
         escpos(from: render(comment: comment, live: true))
     }
 
-    /// Tem gọn để tốn ít giấy: tên shop, tên khách, @id + giờ trên 1 dòng, bình luận, giá.
+    /// Tem nhỏ gọn, 4 dòng:
+    ///   CHỐTLIVE                 15:06 16/11
+    ///   Tên khách
+    ///   @id
+    ///   - - - - - - - - - - - - - - - - - -
+    ///   bình luận                    30.000đ
     static func render(comment c: LiveComment, live: Bool = false) -> UIImage {
         let shop = UserDefaults.standard.string(forKey: "shopName") ?? "ChốtLive"
         let f = DateFormatter()
-        f.dateFormat = "HH:mm dd/MM/yyyy"
+        f.dateFormat = "HH:mm dd/MM"
         let name = (c.nickname.isEmpty ? "@" + c.uniqueId : c.nickname)
-        let time = f.string(from: live ? Date() : c.ts)
+        let small = UIFont.systemFont(ofSize: 20, weight: .semibold)
 
         var blocks: [Block] = [
-            .text(shop.uppercased(), .systemFont(ofSize: 28, weight: .heavy), .center),
-            .dashed,
-            .text(name, .systemFont(ofSize: 34, weight: .heavy), .left),
-            .text("@" + c.uniqueId + "  ·  " + time, .systemFont(ofSize: 22, weight: .semibold), .left),
-            .dashed,
-            .text(c.text, .systemFont(ofSize: 30, weight: .bold), .left),
+            .row(shop.uppercased(), .systemFont(ofSize: 20, weight: .heavy), f.string(from: live ? Date() : c.ts), small),
+            .row(name, .systemFont(ofSize: 28, weight: .heavy), "", small),
         ]
-        if c.price > 0 {
-            blocks += [
-                .dashed,
-                .text(vnd(c.price), .systemFont(ofSize: 48, weight: .heavy), .center),
-            ]
-        }
+        if !c.nickname.isEmpty { blocks.append(.row("@" + c.uniqueId, small, "", small)) }
+        blocks += [
+            .dashed,
+            .row(c.text, .systemFont(ofSize: 26, weight: .bold),
+                 c.price > 0 ? vnd(c.price) : "", .systemFont(ofSize: 32, weight: .heavy)),
+        ]
 
         let width = paperWidth
         let margin: CGFloat = 12
         let cw = width - margin * 2
+        let spacing: CGFloat = 2
+        let dashH: CGFloat = 10
 
-        func style(_ a: NSTextAlignment) -> NSParagraphStyle {
-            let p = NSMutableParagraphStyle()
-            p.alignment = a
-            return p
+        func attrs(_ font: UIFont) -> [NSAttributedString.Key: Any] { [.font: font, .foregroundColor: UIColor.black] }
+        func size(_ s: String, _ font: UIFont, _ w: CGFloat) -> CGSize {
+            let r = (s as NSString).boundingRect(with: CGSize(width: w, height: .greatestFiniteMagnitude),
+                                                 options: [.usesLineFragmentOrigin, .usesFontLeading],
+                                                 attributes: attrs(font), context: nil)
+            return CGSize(width: ceil(r.width), height: ceil(r.height))
         }
-        func height(_ s: String, _ font: UIFont, _ a: NSTextAlignment) -> CGFloat {
-            ceil((s as NSString).boundingRect(
-                with: CGSize(width: cw, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: [.font: font, .paragraphStyle: style(a)], context: nil).height)
+        /// Vị trí 2 bên của 1 dòng: trái, phải (nil nếu rỗng) và chiều cao dòng.
+        func place(_ l: String, _ lf: UIFont, _ r: String, _ rf: UIFont)
+            -> (left: CGRect, right: CGRect?, height: CGFloat) {
+            let rs = r.isEmpty ? CGSize.zero : size(r, rf, cw)
+            let lw = r.isEmpty ? cw : max(cw / 3, cw - rs.width - 16)
+            let ls = size(l, lf, lw)
+            let base = max(lf.ascender, r.isEmpty ? 0 : rf.ascender)
+            let left = CGRect(x: margin, y: base - lf.ascender, width: lw, height: ls.height)
+            let right = r.isEmpty ? nil
+                : CGRect(x: width - margin - rs.width, y: base - rf.ascender, width: rs.width, height: rs.height)
+            return (left, right, max(left.maxY, right?.maxY ?? 0))
         }
 
-        let spacing: CGFloat = 4
         var total: CGFloat = 6
         for b in blocks {
             switch b {
-            case .text(let s, let font, let a): total += height(s, font, a) + spacing
-            case .dashed: total += 14
-            case .gap(let g): total += g
+            case .row(let l, let lf, let r, let rf): total += place(l, lf, r, rf).height + spacing
+            case .dashed: total += dashH
             }
         }
         total += 6
@@ -82,24 +91,26 @@ enum TicketRenderer {
             var y: CGFloat = 6
             for b in blocks {
                 switch b {
-                case .text(let s, let font, let a):
-                    let h = height(s, font, a)
-                    (s as NSString).draw(
-                        with: CGRect(x: margin, y: y, width: cw, height: h),
-                        options: [.usesLineFragmentOrigin, .usesFontLeading],
-                        attributes: [.font: font, .paragraphStyle: style(a), .foregroundColor: UIColor.black],
-                        context: nil)
-                    y += h + spacing
+                case .row(let l, let lf, let r, let rf):
+                    let p = place(l, lf, r, rf)
+                    (l as NSString).draw(with: p.left.offsetBy(dx: 0, dy: y),
+                                         options: [.usesLineFragmentOrigin, .usesFontLeading],
+                                         attributes: attrs(lf), context: nil)
+                    if let rr = p.right {
+                        (r as NSString).draw(with: rr.offsetBy(dx: 0, dy: y),
+                                             options: [.usesLineFragmentOrigin, .usesFontLeading],
+                                             attributes: attrs(rf), context: nil)
+                    }
+                    y += p.height + spacing
                 case .dashed:
                     let path = UIBezierPath()
                     path.setLineDash([10, 7], count: 2, phase: 0)
                     path.lineWidth = 2
-                    path.move(to: CGPoint(x: margin, y: y + 6))
-                    path.addLine(to: CGPoint(x: width - margin, y: y + 6))
+                    path.move(to: CGPoint(x: margin, y: y + dashH / 2))
+                    path.addLine(to: CGPoint(x: width - margin, y: y + dashH / 2))
                     UIColor.black.setStroke()
                     path.stroke()
-                    y += 14
-                case .gap(let g): y += g
+                    y += dashH
                 }
             }
         }
