@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#bf4f0c">
+<title>VTP Nháp Test</title>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f2f1ee;--card:#fff;--ink:#1b1a18;--sub:#625d56;--muted:#8a847c;--line:#e0ddd6;--fill:#f5f4f1;
+--accent:#bf4f0c;--accent-soft:#fbe9db;--ok:#12733a;--ok-bg:#e1f3e8;--bad:#b3261e;--bad-bg:#fbe4e2;--warn:#805300;--warn-bg:#fbf0d3;--info:#1d5fa8;--info-bg:#e2eefb}
+@media (prefers-color-scheme:dark){:root{--bg:#141312;--card:#1f1d1b;--ink:#f1eee9;--sub:#aba59c;--muted:#8f897f;--line:#37332f;--fill:#292623;
+--accent:#f0853f;--accent-soft:#3a2414;--ok:#6fd69a;--ok-bg:#163322;--bad:#f2928b;--bad-bg:#40191a;--warn:#e9c063;--warn-bg:#3a2e10;--info:#8dbdf2;--info-bg:#162b45}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Be Vietnam Pro",system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;
+padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 96px)}
+h1{font-size:22px;font-weight:800;margin:4px 2px 2px}
+.lead{color:var(--sub);font-size:13px;margin:0 2px 14px;line-height:1.5}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;margin-bottom:12px}
+.card h2{font-size:15px;font-weight:800;margin-bottom:4px}
+.card .hint{font-size:12.5px;color:var(--sub);line-height:1.5;margin-bottom:10px}
+label{display:block;font-size:12.5px;font-weight:700;color:var(--sub);margin:10px 0 5px}
+input,select{width:100%;height:46px;border-radius:12px;border:1px solid var(--line);background:var(--fill);color:var(--ink);
+font:inherit;font-size:16px;padding:0 12px}
+input:focus,select:focus{outline:2px solid var(--accent);background:var(--card)}
+button{font:inherit;cursor:pointer}
+.btn{width:100%;height:48px;border-radius:14px;border:0;background:var(--accent);color:#fff;font-weight:800;font-size:15.5px;margin-top:12px}
+.btn.ghost{background:var(--card);color:var(--ink);border:1px solid var(--line)}
+.btn.danger{background:var(--card);color:var(--bad);border:1px solid var(--line)}
+.btn:disabled{opacity:.45}
+.row{display:flex;gap:8px}
+.row .btn{flex:1}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+.kv:last-of-type{border-bottom:0}
+.kv span{color:var(--sub)}.kv b{font-weight:700;text-align:right;word-break:break-word}
+.msg{border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.5;margin-top:10px;font-weight:600}
+.msg.err{background:var(--bad-bg);color:var(--bad)}.msg.ok{background:var(--ok-bg);color:var(--ok)}
+.msg.info{background:var(--info-bg);color:var(--info)}.msg.warn{background:var(--warn-bg);color:var(--warn)}
+.pill{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:99px;background:var(--fill);color:var(--sub);margin:4px 4px 0 0}
+.pill.cod{background:var(--accent-soft);color:var(--accent)}.pill.ok{background:var(--ok-bg);color:var(--ok)}.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.o{display:flex;gap:12px;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;margin-bottom:9px}
+.o.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.o.dis{opacity:.6}
+.ck{width:24px;height:24px;border-radius:8px;border:2px solid var(--line);flex:none;margin-top:2px;display:grid;place-items:center;color:#fff;font-weight:800;font-size:14px}
+.o.on .ck{background:var(--accent);border-color:var(--accent)}
+.o .m{flex:1;min-width:0}
+.o .nm{font-weight:800}.o .nm i{font-style:normal;font-weight:600;color:var(--muted);font-size:12.5px}
+.o .ad{font-size:12.5px;color:var(--sub);margin-top:2px;line-height:1.4}
+.o .res{font-size:12.5px;font-weight:700;margin-top:5px}
+.o .pr{font-weight:800;text-align:right;white-space:nowrap}.o .pr small{display:block;font-size:11px;color:var(--muted);font-weight:600}
+.log{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-space:pre-wrap;word-break:break-word;color:var(--sub);margin-top:4px}
+.le{border-bottom:1px solid var(--line);padding:9px 0}.le:last-child{border-bottom:0}
+.le b{font-size:13.5px}.le time{float:right;font-size:11px;color:var(--muted)}
+.dock{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
+padding:8px 12px calc(env(safe-area-inset-bottom) + 8px);display:flex;gap:6px;z-index:5}
+.dock button{flex:1;height:50px;border:0;border-radius:14px;background:transparent;color:var(--sub);font-weight:700;font-size:13px}
+.dock button.on{background:var(--accent-soft);color:var(--accent)}
+.pushbar{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 66px);padding:0 16px;z-index:4}
+.pushbar .btn{margin:0;box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.tab{display:none}.tab.on{display:block}
+.empty{color:var(--sub);font-size:14px;text-align:center;padding:18px 6px}
+</style>
+</head>
+<body>
+<h1>VTP Nháp Test</h1>
+<p class="lead">Trang THỬ chạy ngay trong Safari: đọc đơn ChotLive (chỉ đọc) và lưu <b>nháp</b> lên Viettel Post, mọi lệnh đi từ máy này. Không tạo vận đơn thật.</p>
+
+<section class="tab on" id="tab-connect">
+  <div class="card" id="cl-card"></div>
+  <div class="card" id="vtp-card"></div>
+  <div class="msg info" id="crypto-note"></div>
+</section>
+
+<section class="tab" id="tab-orders">
+  <div class="card">
+    <label for="f-ready">Lấy đơn</label>
+    <select id="f-ready"><option value="1">Đã duyệt</option><option value="0">Chưa gửi (trừ hẹn gom)</option></select>
+    <label for="f-service">Dịch vụ</label>
+    <select id="f-service"><option value="STK">STK · Chuyển phát tiêu chuẩn</option><option value="SCN">SCN · Chuyển phát nhanh</option><option value="VSL9">VSL9 · Flashsale thỏa thuận</option></select>
+    <label for="f-kho">Kho lấy hàng</label>
+    <select id="f-kho"></select>
+    <div id="orders-warn"></div>
+  </div>
+  <div id="orders"></div>
+  <div class="pushbar" id="pushbar"><button class="btn" id="push-btn" disabled>Đẩy 0 nháp lên Viettel Post</button></div>
+</section>
+
+<section class="tab" id="tab-log">
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn ghost" id="log-copy" style="margin:0">Chép nhật ký</button>
+    <button class="btn ghost" id="log-clear" style="margin:0">Xoá</button>
+  </div>
+  <div class="card" id="log"></div>
+</section>
+
+<nav class="dock">
+  <button data-tab="connect" class="on">Kết nối</button>
+  <button data-tab="orders">Đẩy nháp</button>
+  <button data-tab="log">Nhật ký</button>
+</nav>
+
+<script type="module">
+// @noble/curves 1.4.0 (bản gộp một file của esm.sh), phát từ laptop cùng trang này.
+import { p256 } from './lib/p256.js';
+const sha256 = (bytes) => p256.CURVE.hash(bytes);
+
+// ================= Cấu hình =================
+const VTP = {
+  sso: 'https://oms-sso-2-api.viettelpost.vn',
+  otp: 'https://otp-verify.okd.viettelpost.vn',
+  api: 'https://api.viettelpost.vn',
+  location: 'https://location.viettelpost.vn/location/v1.0/address?system=VTP'
+};
+const CL_DEFAULT = 'https://chotlive.52-64-216-229.sslip.io';
+// Trang test CHỈ được gọi đúng hai lệnh này tới máy chủ ChotLive. Mọi lệnh khác bị chặn.
+const CL_ALLOWED = new Set(['POST /api/auth/login', 'GET /api/state']);
+
+// ================= Tiện ích =================
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const enc = new TextEncoder();
+const b64u = (bytes) => { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const b64uJson = (o) => b64u(enc.encode(JSON.stringify(o)));
+const toHex = (b) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+const fromHex = (h) => new Uint8Array(h.match(/../g).map((x) => parseInt(x, 16)));
+const uuid = () => { const b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128; const h = toHex(b); return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`; };
+const money = (n) => (Number(n) || 0).toLocaleString('vi-VN') + 'đ';
+const mask = (s) => String(s ?? '')
+  .replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '<token>')
+  .replace(/(?<!\d)(?:0|\+?84)\d{8,10}(?!\d)/g, (m) => m.slice(0, 3) + '•••' + m.slice(-3));
+const store = {
+  get(k) { try { return localStorage.getItem('vnt.' + k); } catch { return null; } },
+  set(k, v) { try { v == null ? localStorage.removeItem('vnt.' + k) : localStorage.setItem('vnt.' + k, v); } catch {} },
+  json(k, d) { try { return JSON.parse(this.get(k)) ?? d; } catch { return d; } }
+};
+function clipBytes(s, max = 150) {
+  let out = '';
+  for (const ch of String(s ?? '')) { if (enc.encode(out + ch).length > max) break; out += ch; }
+  return out;
+}
+
+// ================= Nhật ký =================
+const logs = [];
+function log(title, detail = '', ok = true) {
+  logs.unshift({ t: new Date(), title, detail: mask(typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 2500), ok });
+  if (logs.length > 300) logs.length = 300;
+  renderLog();
+}
+function renderLog() {
+  $('log').innerHTML = logs.length ? logs.map((e) => `<div class="le"><time>${e.t.toLocaleTimeString('vi-VN')}</time>
+    <b style="color:var(${e.ok ? '--ok' : '--bad'})">${e.ok ? '✓' : '✗'}</b> <b>${esc(e.title)}</b>
+    ${e.detail ? `<div class="log">${esc(e.detail)}</div>` : ''}</div>`).join('') : '<div class="empty">Chưa có gì.</div>';
+}
+$('log-clear').onclick = () => { logs.length = 0; renderLog(); };
+$('log-copy').onclick = async () => {
+  const text = logs.slice().reverse().map((e) => `[${e.t.toLocaleTimeString('vi-VN')}] ${e.ok ? 'OK' : 'LỖI'} ${e.title}\n${e.detail}`).join('\n\n');
+  try { await navigator.clipboard.writeText(text); alert('Đã chép nhật ký'); }
+  catch { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); alert('Đã chép nhật ký'); }
+};
+
+async function http(method, url, body, headers = {}) {
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/plain, */*', ...headers },
+    body: body == null ? undefined : JSON.stringify(body)
+  });
+  const text = await res.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch {}
+  return { status: res.status, json, text, nonce: res.headers.get('X-Token-Nonce') };
+}
+
+// ================= ChotLive (chỉ đọc) =================
+const cl = {
+  server: store.get('cl.server') || CL_DEFAULT,
+  user: store.get('cl.user') || '',
+  token: store.get('cl.token'),
+  customers: [],
+  busy: false,
+  error: ''
+};
+async function clCall(method, path, body) {
+  if (!CL_ALLOWED.has(`${method} ${path}`)) throw new Error(`Bị chặn: trang test chỉ được đọc dữ liệu (${method} ${path})`);
+  const base = cl.server.trim().replace(/\/+$/, '');
+  if (!/^https:\/\//.test(base)) throw new Error('Địa chỉ máy chủ phải là https://');
+  return http(method, base + path, body, cl.token ? { Authorization: 'Bearer ' + cl.token } : {});
+}
+function clApply(state) { cl.customers = (state?.customers || []).map(parseCustomer).filter(Boolean); }
+async function clLogin(user, pass) {
+  cl.busy = true; cl.error = ''; render();
+  try {
+    const r = await clCall('POST', '/api/auth/login', { username: user, password: pass });
+    if (r.status !== 200 || !r.json?.token) throw new Error(r.json?.error || `Đăng nhập ChotLive thất bại (HTTP ${r.status})`);
+    cl.token = r.json.token; store.set('cl.token', cl.token);
+    cl.user = r.json.user?.username || user; store.set('cl.user', cl.user);
+    clApply(r.json.state);
+    log('ChotLive: đăng nhập ' + cl.user, `Đọc được ${cl.customers.length} khách`);
+  } catch (e) { cl.error = e.message; log('Lỗi: đăng nhập ChotLive', e.message, false); }
+  cl.busy = false; render();
+}
+async function clReload() {
+  cl.busy = true; cl.error = ''; render();
+  try {
+    const r = await clCall('GET', '/api/state');
+    if (r.status === 401) { clForget(); throw new Error('Phiên ChotLive hết hạn, đăng nhập lại'); }
+    if (r.status !== 200) throw new Error('Máy chủ trả HTTP ' + r.status);
+    clApply(r.json?.state);
+    log('ChotLive: tải lại đơn', `${cl.customers.length} khách`);
+  } catch (e) { cl.error = e.message; log('Lỗi: tải đơn ChotLive', e.message, false); }
+  cl.busy = false; render();
+}
+function clForget() { cl.token = null; store.set('cl.token', null); cl.customers = []; }
+
+// ================= Viettel Post trên máy này =================
+let priv = store.get('vtp.key') ? fromHex(store.get('vtp.key')) : null;
+if (!priv) { priv = p256.utils.randomPrivateKey(); store.set('vtp.key', toHex(priv)); }
+const pub = p256.getPublicKey(priv, false);
+const jwk = { kty: 'EC', crv: 'P-256', x: b64u(pub.slice(1, 33)), y: b64u(pub.slice(33, 65)) };
+const deviceId = store.get('vtp.deviceId') || (() => { const id = Date.now().toString(36) + Math.random().toString(36).slice(2); store.set('vtp.deviceId', id); return id; })();
+const deviceToken = store.get('vtp.deviceToken') || (() => { const t = uuid(); store.set('vtp.deviceToken', t); return t; })();
+let nonce = null;
+
+const vtp = {
+  token: store.get('vtp.token'),
+  refresh: store.get('vtp.refresh'),
+  userName: store.get('vtp.userName') || '',
+  otp: null, // { fn, verifyOtpKey, phone, email, sentType }
+  kho: [],
+  busy: false,
+  error: ''
+};
+
+/** Chữ ký DPoP giống hệt web viettelpost.vn: ES256, jwk khoá công khai, ath = SHA-256 của token. */
+function proof(method, url, accessToken) {
+  const u = new URL(url);
+  const payload = { jti: uuid(), htm: method.toUpperCase(), htu: u.origin + u.pathname, iat: Math.floor(Date.now() / 1000) };
+  if (accessToken) payload.ath = b64u(sha256(enc.encode(accessToken)));
+  if (nonce) payload.nonce = nonce;
+  const input = b64uJson({ typ: 'dpop+jwt', alg: 'ES256', jwk }) + '.' + b64uJson(payload);
+  const sig = p256.sign(sha256(enc.encode(input)), priv);
+  return input + '.' + b64u(sig.toCompactRawBytes());
+}
+
+async function vtpApi(path, body, token, extra = {}, retried = false) {
+  const url = VTP.api + path;
+  const h = { deviceId, 'X-Token': proof('POST', url, token || null), ...extra };
+  if (token) h.token = token;
+  const r = await http('POST', url, body, h);
+  if (r.nonce) nonce = r.nonce;
+  if (!retried && r.nonce && (r.json?.messageKey === 'USE_DPOP_NONCE' || r.status === 401)) return vtpApi(path, body, token, extra, true);
+  return r;
+}
+function tokenExp() {
+  try { return JSON.parse(atob(vtp.token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp * 1000; } catch { return 0; }
+}
+async function vtpRefresh() {
+  if (!vtp.token || !vtp.refresh) throw new Error('Chưa đăng nhập Viettel Post');
+  const r = await vtpApi('/api/sessions/refresh/v1', {}, vtp.token, { 'refresh-token': vtp.refresh });
+  log('Làm mới phiên', r.text, !r.json?.error);
+  if (r.json?.error || !r.json?.data?.token) throw new Error('Làm mới phiên thất bại, đăng nhập lại');
+  vtpSave(r.json.data.token, r.json.data.refreshToken || vtp.refresh);
+}
+async function vtpAuthed(path, bodyFn) {
+  if (!vtp.token) throw new Error('Chưa đăng nhập Viettel Post');
+  if (tokenExp() && tokenExp() - Date.now() < 30 * 60 * 1000) await vtpRefresh();
+  let r = await vtpApi(path, bodyFn(), vtp.token);
+  if (r.json?.messageKey === 'EXPIRED_TOKEN') { log('Phiên hết hạn, làm mới rồi gửi lại', '', false); await vtpRefresh(); r = await vtpApi(path, bodyFn(), vtp.token); }
+  return r;
+}
+function vtpSave(token, refresh) {
+  vtp.token = token; vtp.refresh = refresh;
+  store.set('vtp.token', token); store.set('vtp.refresh', refresh);
+}
+async function vtpStep(fn) {
+  vtp.busy = true; vtp.error = ''; render();
+  try { await fn(); } catch (e) { vtp.error = e.message; log('Lỗi Viettel Post', e.message, false); }
+  vtp.busy = false; render();
+}
+
+async function vtpLogin(user, pass) {
+  const r = await http('POST', VTP.sso + '/api/v2/Login/PasswordCaptcha',
+    { clientId: 'vtp.web', clientSecret: 'vtp.web', deviceId, username: user, password: pass }, { Token: '' });
+  const j = r.json || {};
+  log('Đăng nhập SSO', r.text, !!j.status);
+  const phone = j.phoneNumber || user, email = j.email || '';
+  if (j.status && j.accessToken) return vtpFinish(j.accessToken);
+  if (j.status && j.checkCaptcha) { log('Viettel Post đòi captcha → đăng nhập bằng OTP'); vtp.otp = { fn: 'SSO_OTP_FALLBACK', phone, email }; return; }
+  if (j.status && j.verifyOtpKey) { vtp.otp = { fn: 'SSO_VERIFY_LOGIN', verifyOtpKey: j.verifyOtpKey, phone, email }; return; }
+  throw new Error(j.errorMessage || `Đăng nhập thất bại (HTTP ${r.status})`);
+}
+async function vtpSendOtp(type) {
+  const s = vtp.otp;
+  const account = type === 'EMAIL' ? s.email : s.phone;
+  const r = await http('POST', VTP.otp + '/api/otp/sendOTP', { function: s.fn, otpType: 'NUMBER', account, type, deviceId: '' });
+  log('Gửi OTP qua ' + type, r.text, r.json?.status == 1);
+  if (r.json?.status != 1) throw new Error(r.json?.message || 'Không gửi được OTP');
+  s.sentType = type;
+}
+async function vtpVerifyOtp(code) {
+  const s = vtp.otp;
+  const account = s.sentType === 'EMAIL' ? s.email : s.phone;
+  const v = await http('POST', VTP.otp + '/api/otp/verifyOTPV2',
+    { function: s.fn, secretValue: null, otp: code, type: s.sentType, account, expiredType: null, deviceId: '' });
+  log('Xác thực OTP', v.text, v.json?.status == 1);
+  if (v.json?.status != 1 || !v.json?.data) throw new Error(v.json?.message || 'OTP sai hoặc hết hạn');
+  const r = s.fn === 'SSO_OTP_FALLBACK'
+    ? await http('POST', VTP.sso + '/api/v2/Login/otp-fallback', { userName: account, token: v.json.data }, { Token: '' })
+    : await http('POST', VTP.sso + '/api/Login/LoginUserPassTwoFAVerifyOtp', { tokenOtp: v.json.data, verifyOtpKey: s.verifyOtpKey, deviceId }, { token: '' });
+  log('Đăng nhập sau OTP', r.text, !!r.json?.accessToken);
+  if (!r.json?.accessToken) throw new Error(r.json?.errorMessage || 'Chưa đăng nhập được sau OTP');
+  vtp.otp = null;
+  await vtpFinish(r.json.accessToken);
+}
+async function vtpFinish(accessToken) {
+  const r = await vtpApi('/api/user/ssoUpdateUser', {
+    TokenSSO: accessToken, Type: 'VTP', Source: 3, DeviceName: 'VTP Nhap Test (Safari)', DeviceToken: deviceToken,
+    deviceId, deviceType: 'WEB', browser: 'Safari'
+  }, null);
+  log('Đổi sang phiên web (DPoP)', r.text, !r.json?.error);
+  const d = r.json?.data;
+  if (r.json?.error || !d?.TokenKey) throw new Error(r.json?.message || 'Không đổi được sang phiên web');
+  vtpSave(d.TokenKey, d.refreshToken);
+  vtp.userName = d.UserName || ''; store.set('vtp.userName', vtp.userName);
+  await vtpLoadKho();
+}
+async function vtpLoadKho() {
+  const r = await vtpAuthed('/api/setting/listInventoryV2', () => ({ token: vtp.token, deviceId }));
+  const arr = Array.isArray(r.json) ? r.json : Array.isArray(r.json?.data) ? r.json.data : [];
+  vtp.kho = arr.filter((k) => k.GROUPADDRESS_ID != null).map((k) => ({
+    id: String(k.GROUPADDRESS_ID), cusId: Number(k.CUS_ID) || 0, name: k.NAME || '', phone: String(k.PHONE || ''),
+    address: k.ADDRESS || '', province: Number(k.PROVINCE_ID) || 0, district: Number(k.DISTRICT_ID) || 0, ward: Number(k.WARDS_ID) || 0
+  }));
+  log('Kho hàng Viettel Post: ' + vtp.kho.length, vtp.kho.map((k) => `${k.name} · ${k.address}`).join('\n'), vtp.kho.length > 0);
+}
+function vtpLogout() { vtpSave(null, null); vtp.kho = []; vtp.otp = null; log('Đã xoá phiên Viettel Post trên máy này'); }
+
+async function vtpLocate(address) {
+  const r = await http('POST', VTP.location, { address });
+  const j = r.json || {};
+  if (!(j.vtpL1 > 0 && j.vtpL2 > 0 && j.vtpL3 > 0)) throw new Error('Viettel Post không hiểu địa chỉ: ' + address);
+  return { province: j.vtpL1, district: j.vtpL2, ward: j.vtpL3, formatted: j.formattedAddress || address, confidence: j.confidence || 0 };
+}
+async function vtpInsertDraft(body) {
+  const r = await vtpAuthed('/api/tmdt/InsertOrderDraftForWeb', () => ({ ...body, deviceId }));
+  log('Lưu nháp', r.text, !r.json?.error);
+  if (r.json?.error || !r.json?.data?.ORDER_NUMBER) throw new Error(r.json?.message || `Viettel Post không lưu nháp (HTTP ${r.status})`);
+  return String(r.json.data.ORDER_NUMBER);
+}
+
+// ================= Đơn ChotLive → nháp =================
+function parseCustomer(c) {
+  if (!c || c.id == null) return null;
+  return {
+    id: String(c.id), nickname: c.nickname || '', uniqueId: c.uniqueId || '', address: c.address || null,
+    items: (c.items || []).filter((i) => i && i.id != null).map((i) => ({
+      id: String(i.id), price: Number(i.price) || 0, qty: Math.max(1, Number(i.qty) || 1), ts: Number(i.ts) || 0,
+      delivered: !!i.delivered, shipping: !!i.shipping, groupId: i.groupId || null, ship: i.ship || null
+    }))
+  };
+}
+function ordersOf(c) {
+  const groups = new Map();
+  for (const it of c.items) {
+    const d = new Date(it.ts); d.setHours(0, 0, 0, 0);
+    const key = it.groupId || 'day-' + Math.floor(d.getTime() / 1000);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
+  }
+  return [...groups].map(([key, items]) => {
+    items.sort((a, b) => a.ts - b.ts);
+    const ship = items.find((i) => i.ship)?.ship || null;
+    const done = items.length > 0 && items.every((i) => i.shipping || i.delivered);
+    const state = ship?.state || 'ask';
+    return {
+      key, items, ship, state, lastTs: Math.max(...items.map((i) => i.ts)),
+      total: items.reduce((s, i) => s + Math.max(0, i.price) * i.qty, 0), qty: items.reduce((s, i) => s + i.qty, 0),
+      pending: !done && ['ask', 'hold', 'ready'].includes(state)
+    };
+  }).sort((a, b) => a.lastTs - b.lastTs);
+}
+const num = (v) => (v == null || v === '' || !isFinite(Number(v)) ? null : Math.max(0, Math.round(Number(v))));
+/** Cách tính thu hộ giống app thật (Vtp.summarize / public/js/vtp-export.js). */
+function summarize(c, orders) {
+  const last = (f) => { for (let i = orders.length - 1; i >= 0; i--) { const s = orders[i].ship; if (s) { const v = f(s); if (v != null) return v; } } return null; };
+  const paid = (o) => o.ship?.pay === 'paid' || o.ship?.pay === 'shipOnly';
+  const allPaid = orders.every(paid);
+  const goods = orders.reduce((s, o) => s + o.total, 0);
+  const unpaidRaw = orders.filter((o) => !paid(o)).reduce((s, o) => s + o.total, 0);
+  const deposit = Math.min(unpaidRaw, orders.reduce((s, o) => s + (num(o.ship?.deposit) || 0), 0));
+  const unpaid = unpaidRaw - deposit;
+  const fee = last((s) => num(s.shipFee)) ?? 17000;
+  const limit = Math.max(17000, fee);
+  const payerRaw = last((s) => (s.payer ? s.payer : null));
+  const payer = payerRaw === 'sender' || payerRaw === 'receiver' ? payerRaw : allPaid ? 'sender' : 'receiver';
+  const override = last((s) => num(s.codOverride));
+  const small = !allPaid && unpaid < limit;
+  const bankShipByReceiver = allPaid && payer === 'receiver';
+  const overrideSmall = !allPaid && override != null && override < limit;
+  const senderPays = payer === 'sender' || bankShipByReceiver || small || overrideSmall;
+  const addFee = bankShipByReceiver || small;
+  const autoCod = (allPaid ? 0 : unpaid) + (addFee ? fee : 0);
+  const cod = override != null ? (overrideSmall ? override + fee : override) : autoCod;
+  const weights = orders.map((o) => num(o.ship?.weightG)).filter((w) => w > 0);
+  const weightG = weights.length ? Math.max(...weights) : 1000;
+  const l = last((s) => num(s.lengthCm)), w = last((s) => num(s.widthCm)), h = last((s) => num(s.heightCm));
+  const size = l > 0 && w > 0 && h > 0 ? [l, w, h] : null;
+  const a = c.address || {};
+  const receiver = String(a.receiver || c.nickname || '').normalize('NFC').replace(/[^\p{L}\p{N}\s.'-]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const phone = String(a.phone || '').replace(/[^\d+]/g, '');
+  const address = [a.street, a.region].map((x) => String(x || '').trim()).filter(Boolean).join(', ');
+  const problems = [];
+  if (!/^(\+?84|0)\d{9,10}$/.test(phone)) problems.push('Thiếu số điện thoại');
+  if (!String(a.region || '').trim()) problems.push('Thiếu địa chỉ');
+  if (weightG >= 10000 && !size) problems.push('Từ 10kg phải có kích thước');
+  const names = { ask: 'chưa duyệt', hold: 'hẹn gom', ready: 'đã duyệt' };
+  return {
+    id: c.id, customer: c, orders, goods, cod, senderPays, weightG, size, receiver, phone, address, note: a.note || '',
+    qty: orders.reduce((s, o) => s + o.qty, 0), problems,
+    states: [...new Set(orders.map((o) => names[o.state] || o.state))].join(', '),
+    pushKey: c.id + '#' + orders.map((o) => o.key).sort().join(',')
+  };
+}
+function buildGroups(onlyReady) {
+  return cl.customers.map((c) => {
+    const orders = ordersOf(c).filter((o) => o.pending && (onlyReady ? o.state === 'ready' : o.state !== 'hold'));
+    return orders.length ? summarize(c, orders) : null;
+  }).filter(Boolean).sort((a, b) => a.orders[0].lastTs - b.orders[0].lastTs);
+}
+function draftBody(g, kho, place, service) {
+  const d = new Date(), p = (n) => String(n).padStart(2, '0');
+  const product = 'Quần áo';
+  const qty = Math.max(1, g.qty);
+  return {
+    ORDER_REFERENCE: 'CL-' + g.customer.id.replace(/[^A-Za-z0-9]/g, '').slice(0, 24), ORDER_TYPE: 1, TYPE: 12,
+    DELIVERY_DATE: `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`,
+    GROUPADDRESS_ID: kho.id, CUS_ID: kho.cusId,
+    SENDER_FULLNAME: clipBytes(kho.name), SENDER_ADDRESS: clipBytes(kho.address), SENDER_PHONE: kho.phone, SENDER_EMAIL: '',
+    SENDER_PROVINCE: String(kho.province), SENDER_DISTRICT: String(kho.district), SENDER_WARD: String(kho.ward), SENDER_LATITUDE: 0, SENDER_LONGITUDE: 0,
+    RECEIVER_FULLNAME: clipBytes(g.receiver), RECEIVER_ADDRESS: clipBytes(g.address), RECEIVER_PHONE: g.phone, RECEIVER_EMAIL: '',
+    RECEIVER_PROVINCE: place.province, RECEIVER_DISTRICT: place.district, RECEIVER_WARD: place.ward, RECEIVER_LATITUDE: 0, RECEIVER_LONGITUDE: 0,
+    PRODUCT_NAME: product, PRODUCT_DESCRIPTION: '', PRODUCT_QUANTITY: qty, PRODUCT_PRICE: g.goods, PRODUCT_WEIGHT: g.weightG,
+    PRODUCT_LENGTH: g.size?.[0] || 0, PRODUCT_WIDTH: g.size?.[1] || 0, PRODUCT_HEIGHT: g.size?.[2] || 0, PRODUCT_TYPE: 'HH',
+    // 1: không thu hộ; 2: thu hộ tiền hàng + cước; 3: thu hộ tiền hàng; 4: chỉ thu hộ cước (giống máy chủ ChotLive)
+    ORDER_PAYMENT: g.cod > 0 ? (g.senderPays ? 3 : 2) : (g.senderPays ? 1 : 4),
+    ORDER_SERVICE: service, ORDER_SERVICE_ADD: '', ORDER_VOUCHER: '', ORDER_NOTE: clipBytes(g.note), DELIVERY_CODE: -1,
+    MONEY_COLLECTION: g.cod, MONEY_TOTALFEE: 0, MONEY_FEECOD: 0, MONEY_FEEVAS: 0, MONEY_FEEINSURRANCE: 0, MONEY_FEE: 0,
+    MONEY_FEEOTHER: 0, MONEY_TOTALVAT: 0, MONEY_TOTAL: 0,
+    LIST_ITEM: [{ ORDER_NUMBER_ITEM: 1, PRODUCT_NAME: product, PRODUCT_QUANTITY: qty, PRODUCT_WEIGHT: g.weightG, PRODUCT_PRICE: g.goods }],
+    OPTION_LOCATION: 0, REMOVE_PICKUP_DATE: true, XMG_EXTRA_MONEY: 0, ORDER_NUMBER: ''
+  };
+}
+
+// ================= Đẩy nháp =================
+const pushed = store.json('pushed', {});
+const selected = new Set();
+const results = {};
+let pushing = false;
+$('f-ready').value = store.get('onlyReady') ?? '1';
+$('f-service').value = store.get('service') || 'STK';
+$('f-ready').onchange = () => { store.set('onlyReady', $('f-ready').value); selected.clear(); render(); };
+$('f-service').onchange = () => store.set('service', $('f-service').value);
+$('f-kho').onchange = () => store.set('kho', $('f-kho').value);
+
+async function pushSelected() {
+  const kho = vtp.kho.find((k) => k.id === $('f-kho').value) || vtp.kho[0];
+  if (!kho) return;
+  const service = $('f-service').value;
+  const groups = buildGroups($('f-ready').value === '1').filter((g) => selected.has(g.id));
+  pushing = true; render();
+  log(`Bắt đầu đẩy ${groups.length} nháp`, `Kho: ${kho.name} · dịch vụ ${service}`);
+  for (const g of groups) {
+    if (pushed[g.pushKey]) { results[g.id] = { ok: true, text: 'Bỏ qua, đã đẩy: ' + pushed[g.pushKey] }; continue; }
+    try {
+      const place = await vtpLocate(g.address);
+      log('Địa chỉ ' + g.receiver, `${g.address}\n→ ${place.formatted} (${place.province}/${place.district}/${place.ward}, tin cậy ${Math.round(place.confidence * 100)}%)`);
+      const code = await vtpInsertDraft(draftBody(g, kho, place, service));
+      pushed[g.pushKey] = code; store.set('pushed', JSON.stringify(pushed));
+      results[g.id] = { ok: true, text: `Nháp ${code} · thu hộ ${money(g.cod)}` };
+      selected.delete(g.id);
+    } catch (e) {
+      results[g.id] = { ok: false, text: e.message };
+      log('Lỗi nháp ' + g.receiver, e.message, false);
+    }
+    render();
+  }
+  pushing = false; render();
+}
+$('push-btn').onclick = pushSelected;
+
+// ================= Giao diện =================
+function render() {
+  // Giữ chữ đang gõ (mật khẩu, OTP...) khi vẽ lại.
+  const typed = {};
+  for (const el of document.querySelectorAll('#cl-card input, #vtp-card input')) typed[el.id] = el.value;
+  const restore = () => { for (const [id, val] of Object.entries(typed)) { const el = $(id); if (el && val && id !== 'cl-server') el.value = val; } };
+  // ChotLive
+  $('cl-card').innerHTML = `<h2>1. ChotLive (chỉ đọc)</h2>
+    <p class="hint">Chỉ gọi 2 lệnh: đăng nhập và đọc đơn (GET /api/state). Mọi lệnh ghi bị chặn trong code.</p>
+    <label>Máy chủ</label><input id="cl-server" value="${esc(cl.server)}" autocapitalize="off" autocorrect="off" inputmode="url">
+    ${cl.token ? `<div class="kv"><span>Tài khoản</span><b>${esc(cl.user)}</b></div>
+      <div class="kv"><span>Khách đọc được</span><b>${cl.customers.length}</b></div>
+      <div class="row"><button class="btn ghost" id="cl-reload" ${cl.busy ? 'disabled' : ''}>${cl.busy ? 'Đang tải…' : 'Tải lại đơn'}</button>
+      <button class="btn danger" id="cl-forget">Quên phiên</button></div>`
+    : `<label>Tên tài khoản ChotLive</label><input id="cl-user" value="${esc(cl.user)}" autocapitalize="off" autocorrect="off">
+      <label>Mật khẩu</label><input id="cl-pass" type="password">
+      <button class="btn" id="cl-login" ${cl.busy ? 'disabled' : ''}>${cl.busy ? 'Đang đăng nhập…' : 'Đăng nhập & đọc đơn'}</button>`}
+    ${cl.error ? `<div class="msg err">${esc(cl.error)}</div>` : ''}`;
+  $('cl-server').onchange = (e) => { cl.server = e.target.value; store.set('cl.server', cl.server); };
+  if (cl.token) {
+    $('cl-reload').onclick = clReload;
+    $('cl-forget').onclick = () => { clForget(); render(); };
+  } else {
+    $('cl-login').onclick = () => { const u = $('cl-user').value.trim(), p = $('cl-pass').value; if (u && p) clLogin(u, p); };
+  }
+
+  // Viettel Post
+  let v = `<h2>2. Viettel Post (trên máy này)</h2>
+    <p class="hint">Đăng nhập và ký ngay trong Safari, đi từ IP của máy này. Mật khẩu và OTP không được lưu.</p>`;
+  if (vtp.token) {
+    const exp = tokenExp();
+    v += `<div class="kv"><span>Tài khoản</span><b>${esc(vtp.userName || 'Đã đăng nhập')}</b></div>
+      ${exp ? `<div class="kv"><span>Phiên hết hạn</span><b>${new Date(exp).toLocaleString('vi-VN')}</b></div>` : ''}
+      <div class="kv"><span>Kho hàng</span><b>${vtp.kho.length}</b></div>
+      <div class="row"><button class="btn ghost" id="vtp-refresh" ${vtp.busy ? 'disabled' : ''}>Làm mới phiên</button>
+      <button class="btn ghost" id="vtp-kho" ${vtp.busy ? 'disabled' : ''}>Tải lại kho</button></div>
+      <button class="btn danger" id="vtp-logout">Đăng xuất Viettel Post</button>`;
+  } else if (vtp.otp) {
+    v += `<div class="msg warn">${vtp.otp.fn === 'SSO_OTP_FALLBACK' ? 'Viettel Post đòi xác minh không phải robot, chuyển sang đăng nhập bằng OTP.' : 'Viettel Post cần xác minh thiết bị mới bằng OTP.'}</div>`;
+    if (!vtp.otp.sentType) {
+      v += `<button class="btn" id="otp-sms" ${vtp.busy ? 'disabled' : ''}>Gửi mã qua SMS</button>
+        ${vtp.otp.email ? `<button class="btn ghost" id="otp-email" ${vtp.busy ? 'disabled' : ''}>Gửi mã qua Email</button>` : ''}`;
+    } else {
+      v += `<label>Mã OTP (${vtp.otp.sentType === 'EMAIL' ? 'email' : 'SMS'})</label><input id="otp-code" inputmode="numeric" autocomplete="one-time-code">
+        <button class="btn" id="otp-ok" ${vtp.busy ? 'disabled' : ''}>${vtp.busy ? 'Đang xác nhận…' : 'Xác nhận'}</button>`;
+    }
+    v += `<button class="btn ghost" id="otp-cancel">Huỷ</button>`;
+  } else {
+    v += `<label>SĐT hoặc email Viettel Post</label><input id="vtp-user" autocapitalize="off" autocorrect="off">
+      <label>Mật khẩu Viettel Post</label><input id="vtp-pass" type="password">
+      <button class="btn" id="vtp-login" ${vtp.busy ? 'disabled' : ''}>${vtp.busy ? 'Đang đăng nhập…' : 'Đăng nhập Viettel Post'}</button>`;
+  }
+  if (vtp.error) v += `<div class="msg err">${esc(vtp.error)}</div>`;
+  $('vtp-card').innerHTML = v;
+  restore();
+  if (vtp.token) {
+    $('vtp-refresh').onclick = () => vtpStep(vtpRefresh);
+    $('vtp-kho').onclick = () => vtpStep(vtpLoadKho);
+    $('vtp-logout').onclick = () => { vtpLogout(); render(); };
+  } else if (vtp.otp) {
+    if (!vtp.otp.sentType) {
+      $('otp-sms').onclick = () => vtpStep(() => vtpSendOtp('PHONE'));
+      if ($('otp-email')) $('otp-email').onclick = () => vtpStep(() => vtpSendOtp('EMAIL'));
+    } else {
+      $('otp-ok').onclick = () => { const c = $('otp-code').value.trim(); if (c) vtpStep(() => vtpVerifyOtp(c)); };
+    }
+    $('otp-cancel').onclick = () => { vtp.otp = null; render(); };
+  } else {
+    $('vtp-login').onclick = () => { const u = $('vtp-user').value.trim(), p = $('vtp-pass').value; if (u && p) vtpStep(() => vtpLogin(u, p)); };
+  }
+
+  // Kho
+  const khoSel = $('f-kho');
+  const wanted = store.get('kho');
+  khoSel.innerHTML = vtp.kho.length ? vtp.kho.map((k) => `<option value="${esc(k.id)}">${esc(k.name)} · ${esc(k.address)}</option>`).join('') : '<option value="">Chưa có kho (đăng nhập Viettel Post)</option>';
+  if (wanted && vtp.kho.some((k) => k.id === wanted)) khoSel.value = wanted;
+
+  // Đơn
+  const groups = buildGroups($('f-ready').value === '1');
+  $('orders-warn').innerHTML = !cl.token ? '<div class="msg info">Chưa đăng nhập ChotLive (tab Kết nối).</div>'
+    : !vtp.token ? '<div class="msg info">Chưa đăng nhập Viettel Post (tab Kết nối).</div>' : '';
+  $('orders').innerHTML = groups.length ? groups.map((g) => {
+    const on = selected.has(g.id), bad = g.problems.length > 0, r = results[g.id], old = pushed[g.pushKey];
+    return `<div class="o ${on ? 'on' : ''} ${bad ? 'dis' : ''}" data-id="${esc(g.id)}">
+      <div class="ck">${on ? '✓' : ''}</div>
+      <div class="m">
+        <div class="nm">${esc(g.receiver || g.customer.nickname)} ${g.customer.uniqueId ? `<i>@${esc(g.customer.uniqueId)}</i>` : ''}</div>
+        <div class="ad">${esc(g.address || 'Chưa có địa chỉ')}</div>
+        <span class="pill">${g.orders.length} đơn · ${esc(g.states)}</span><span class="pill">${g.qty} món · ${g.weightG}g</span>
+        <span class="pill">${g.senderPays ? 'shop trả cước' : 'khách trả cước'}</span>
+        ${g.problems.map((p) => `<span class="pill bad">⚠ ${esc(p)}</span>`).join('')}
+        ${r ? `<div class="res" style="color:var(${r.ok ? '--ok' : '--bad'})">${r.ok ? '✓' : '✗'} ${esc(r.text)}</div>`
+          : old ? `<div class="res" style="color:var(--ok)">Đã đẩy nháp trước đó: ${esc(old)}</div>` : ''}
+      </div>
+      <div class="pr">${money(g.cod)}<small>thu hộ</small></div>
+    </div>`;
+  }).join('') : `<div class="empty">${cl.token ? 'Không có đơn phù hợp.' : 'Chưa có dữ liệu.'}</div>`;
+  for (const el of document.querySelectorAll('.o[data-id]')) {
+    el.onclick = () => {
+      const id = el.dataset.id, g = groups.find((x) => x.id === id);
+      if (!g || pushing) return;
+      if (selected.has(id)) selected.delete(id); else if (!g.problems.length) selected.add(id);
+      render();
+    };
+  }
+  const n = groups.filter((g) => selected.has(g.id)).length;
+  const btn = $('push-btn');
+  btn.textContent = pushing ? 'Đang đẩy…' : `Đẩy ${n} nháp lên Viettel Post`;
+  btn.disabled = pushing || !n || !vtp.token || !vtp.kho.length;
+}
+
+for (const b of document.querySelectorAll('.dock button')) {
+  b.onclick = () => {
+    for (const x of document.querySelectorAll('.dock button')) x.classList.toggle('on', x === b);
+    for (const t of document.querySelectorAll('.tab')) t.classList.toggle('on', t.id === 'tab-' + b.dataset.tab);
+    $('pushbar').style.display = b.dataset.tab === 'orders' ? 'block' : 'none';
+    window.scrollTo(0, 0);
+  };
+}
+$('pushbar').style.display = 'none';
+$('crypto-note').textContent = `Khoá ký của máy này: ${jwk.x.slice(0, 10)}… · deviceId ${deviceId.slice(0, 8)}… · ${window.isSecureContext ? 'trang https' : 'trang http (ký bằng thư viện @noble/curves)'}`;
+
+renderLog();
+render();
+log('Mở trang', `Khoá ký sẵn sàng · ${navigator.userAgent}`);
+if (cl.token) clReload();
+if (vtp.token) vtpStep(vtpLoadKho);
+</script>
+</body>
+</html>
