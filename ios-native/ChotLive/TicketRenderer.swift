@@ -118,10 +118,16 @@ enum TicketRenderer {
             }
         }
 
+        // Bỏ dòng trắng cuối ảnh (khoảng chừa dưới chân chữ), chỉ giữ 16 chấm (2mm) sau dòng có mực
+        // cuối cùng để dao cắt lệch một chút cũng không cắt vào chữ.
+        var inked = h
+        while inked > 0 && !(0..<w).contains(where: { gray[(inked - 1) * w + $0] < 150 }) { inked -= 1 }
+        let printed = min(h, inked + 16)
+
         var out = Data([0x1B, 0x40]) // ESC @
         var y = 0
-        while y < h {
-            let rows = min(128, h - y)
+        while y < printed {
+            let rows = min(128, printed - y)
             out.append(contentsOf: [0x1D, 0x76, 0x30, 0x00,
                                     UInt8(bytesPerRow & 0xFF), UInt8(bytesPerRow >> 8),
                                     UInt8(rows & 0xFF), UInt8(rows >> 8)])
@@ -137,8 +143,9 @@ enum TicketRenderer {
             }
             y += rows
         }
-        out.append(contentsOf: [0x1B, 0x64, 0x03])       // feed 3 dòng cho tới dao cắt
-        out.append(contentsOf: [0x1D, 0x56, 0x42, 0x00]) // cắt giấy (máy không có dao sẽ bỏ qua)
+        // GS V 66 0: máy tự đẩy giấy tới dao rồi mới cắt, nên không cần ESC d trước đó
+        // (ESC d sẽ đẩy thêm khoảng trắng thừa dưới chân tem).
+        out.append(contentsOf: [0x1D, 0x56, 0x42, 0x00])
         return out
     }
 }

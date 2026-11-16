@@ -124,11 +124,18 @@ class TicketRenderer(private val context: Context, private val paperWidth: () ->
             val bytesPerRow = (w + 7) / 8
             val px = IntArray(w * h)
             bmp.getPixels(px, 0, w, 0, 0, w, h)
+            fun dark(c: Int) = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000 < 150
+            // Bỏ dòng trắng cuối ảnh (khoảng chừa dưới chân chữ), chỉ giữ 16 chấm (2mm) sau dòng có mực
+            // cuối cùng để dao cắt lệch một chút cũng không cắt vào chữ.
+            var inked = h
+            while (inked > 0 && (0 until w).none { dark(px[(inked - 1) * w + it]) }) inked--
+            val printed = minOf(h, inked + 16)
+
             val out = ByteArrayOutputStream()
             out.write(byteArrayOf(0x1B, 0x40)) // ESC @
             var y = 0
-            while (y < h) {
-                val rows = minOf(128, h - y)
+            while (y < printed) {
+                val rows = minOf(128, printed - y)
                 out.write(byteArrayOf(0x1D, 0x76, 0x30, 0x00,
                     (bytesPerRow and 0xFF).toByte(), (bytesPerRow shr 8).toByte(),
                     (rows and 0xFF).toByte(), (rows shr 8).toByte()))
@@ -137,19 +144,16 @@ class TicketRenderer(private val context: Context, private val paperWidth: () ->
                         var byte = 0
                         for (bit in 0 until 8) {
                             val x = bx * 8 + bit
-                            if (x < w) {
-                                val c = px[r * w + x]
-                                val gray = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000
-                                if (gray < 150) byte = byte or (0x80 shr bit)
-                            }
+                            if (x < w && dark(px[r * w + x])) byte = byte or (0x80 shr bit)
                         }
                         out.write(byte)
                     }
                 }
                 y += rows
             }
-            out.write(byteArrayOf(0x1B, 0x64, 0x03))       // feed 3 dòng cho tới dao cắt
-            out.write(byteArrayOf(0x1D, 0x56, 0x42, 0x00)) // cắt giấy (máy không có dao sẽ bỏ qua)
+            // GS V 66 0: máy tự đẩy giấy tới dao rồi mới cắt, nên không cần ESC d trước đó
+            // (ESC d sẽ đẩy thêm khoảng trắng thừa dưới chân tem).
+            out.write(byteArrayOf(0x1D, 0x56, 0x42, 0x00))
             return out.toByteArray()
         }
     }
