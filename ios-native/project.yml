@@ -29,7 +29,7 @@ targets:
         # Giữ kết nối máy in khi người bán chuyển sang TikTok trong lúc live.
         UIBackgroundModes:
           - bluetooth-central
-        NSLocalNetworkUsageDescription: Ứng dụng cần mạng nội bộ để nối server ChốtLive chạy trên máy tính cùng Wi-Fi.
+        NSLocalNetworkUsageDescription: Ứng dụng cần mạng nội bộ để in tem qua máy in WiFi và nối server ChốtLive chạy trên máy tính cùng Wi-Fi.
         # Ra Internet bắt buộc HTTPS để mật khẩu không đi dạng rõ; chỉ mạng nội bộ (thử nghiệm) mới được dùng http.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

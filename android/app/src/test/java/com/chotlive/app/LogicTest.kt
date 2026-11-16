@@ -14,6 +14,7 @@ import com.chotlive.app.model.PriceParser
 import com.chotlive.app.model.ShipInfo
 import com.chotlive.app.model.money
 import com.chotlive.app.print.PrinterProfile
+import com.chotlive.app.print.WifiPrinterAddress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -283,5 +284,20 @@ class StoreTest {
         store.applyServer(snap)
         assertEquals(1, store.allOrders().size)
         assertEquals(1, store.sessions.size)
+    }
+    @Test
+    fun wifiAddressParsesIpAndPort() {
+        assertEquals(WifiPrinterAddress("192.168.1.13", 9100), WifiPrinterAddress.parse(" 192.168.1.13 ", "9100"))
+        assertEquals(WifiPrinterAddress("192.168.1.13", 9100), WifiPrinterAddress.parse("192.168.1.13", ""))
+        assertEquals(WifiPrinterAddress("10.0.0.5", 9101), WifiPrinterAddress.parse("10.0.0.5:9101", "9100"))
+    }
+
+    @Test
+    fun wifiAddressRejectsTypos() {
+        for ((host, port) in listOf("192.168.1" to "9100", "192.168.1.13." to "9100", "192.168.1.256" to "9100",
+            "192,168,1,13" to "9100", "0.0.0.0" to "9100", "192.168.1.13" to "0", "192.168.1.13" to "70000",
+            "192.168.1.13" to "91a")) {
+            assertNull("$host:$port", WifiPrinterAddress.parse(host, port))
+        }
     }
 }

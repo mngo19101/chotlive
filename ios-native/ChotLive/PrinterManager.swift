@@ -8,7 +8,8 @@ struct NearbyDevice: Identifiable {
     var id: UUID { peripheral.identifier }
 }
 
-/// Kết nối máy in nhiệt Bluetooth LE (Xprinter...) bằng CoreBluetooth và gửi lệnh ESC/POS.
+/// Kết nối máy in nhiệt Bluetooth LE (Xprinter...) bằng CoreBluetooth, hoặc máy in mạng qua WiFi (IP + cổng 9100), và gửi lệnh ESC/POS.
+/// Dùng một trong hai: chọn máy WiFi thì bỏ máy Bluetooth và ngược lại.
 /// Mọi callback chạy trên main queue. iPhone không dùng được máy chỉ có Bluetooth Classic (SPP).
 final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     @Published var devices: [NearbyDevice] = []
@@ -17,6 +18,9 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
     @Published var isScanning = false
     @Published var hasScanned = false
     @Published var statusText = "Đang khởi tạo Bluetooth..."
+    /// Máy in WiFi đang dùng; nil là đang dùng Bluetooth (hoặc chưa chọn máy nào).
+    @Published private(set) var wifiAddress: WifiPrinterAddress?
+    @Published private(set) var wifiStatusText = ""
 
     private struct Job {
         let data: Data
@@ -37,22 +41,57 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
     private var awaitingAck = false
     private var pacing = false
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var wifiLink: WifiPrinterLink?
 
     private var scanStop: DispatchWorkItem?
     private var connectTimeout: DispatchWorkItem?
     private var writeWatchdog: DispatchWorkItem?
 
     private let lastKey = "lastPrinterUUID"
+    private let wifiHostKey = "wifiPrinterHost"
+    private let wifiPortKey = "wifiPrinterPort"
     private let connectTimeoutSeconds: TimeInterval = 15
     private let writeTimeoutSeconds: TimeInterval = 10
     private let settleSeconds: TimeInterval = 0.3
 
     override init() {
         super.init()
+        let defaults = UserDefaults.standard
+        if let host = defaults.string(forKey: wifiHostKey),
+           let saved = WifiPrinterAddress.parse(host: host, port: String(defaults.integer(forKey: wifiPortKey))) {
+            wifiAddress = saved
+            wifiLink = WifiPrinterLink(address: saved)
+            wifiStatusText = "Dùng máy in WiFi \(saved.label)"
+        }
         central = CBCentralManager(delegate: self, queue: .main)
     }
 
-    var isConnected: Bool { connectedName != nil && writeChar != nil }
+    /// Đã chọn máy in WiFi, hoặc đang nối máy Bluetooth. Máy WiFi chỉ được thử thật khi gửi tem.
+    var isConnected: Bool { wifiAddress != nil || (connectedName != nil && writeChar != nil) }
+
+    // MARK: - Máy in WiFi
+
+    func useWifi(_ address: WifiPrinterAddress) {
+        stopScan()
+        UserDefaults.standard.removeObject(forKey: lastKey)
+        releasePeripheral(reason: "Đã chuyển sang máy in WiFi.")
+        if connectedName == nil, central.state == .poweredOn { statusText = "Chưa kết nối máy in" }
+        clearWifi(reason: "Đã đổi máy in WiFi.")
+        wifiAddress = address
+        wifiLink = WifiPrinterLink(address: address)
+        wifiStatusText = "Đã lưu máy in WiFi \(address.label). Bấm In thử để kiểm tra."
+        UserDefaults.standard.set(address.host, forKey: wifiHostKey)
+        UserDefaults.standard.set(Int(address.port), forKey: wifiPortKey)
+    }
+
+    private func clearWifi(reason: String) {
+        wifiLink?.cancelAll(reason)
+        wifiLink = nil
+        wifiAddress = nil
+        wifiStatusText = ""
+        UserDefaults.standard.removeObject(forKey: wifiHostKey)
+        UserDefaults.standard.removeObject(forKey: wifiPortKey)
+    }
 
     // MARK: - Quét / kết nối
 
@@ -78,6 +117,7 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
     /// Người dùng chọn thiết bị: có giới hạn thời gian để không treo ở "Đang kết nối".
     func connect(_ p: CBPeripheral) {
         stopScan()
+        clearWifi(reason: "Đã chuyển sang máy in Bluetooth.")
         if p === peripheral {
             if !isConnected { armConnectTimeout() }
             return
@@ -88,6 +128,7 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
     }
 
     func disconnect() {
+        clearWifi(reason: "Đã ngắt kết nối máy in.")
         UserDefaults.standard.removeObject(forKey: lastKey)
         releasePeripheral(reason: "Đã ngắt kết nối máy in.")
         statusText = "Đã ngắt kết nối"
@@ -278,6 +319,10 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
             completion("Không tạo được nội dung tem.")
             return
         }
+        if let link = wifiLink {
+            sendWifi(data, via: link, completion: completion)
+            return
+        }
         guard isConnected else {
             completion("Chưa kết nối máy in.")
             return
@@ -293,6 +338,17 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
     func sendAndWait(_ data: Data) async -> String? {
         await withCheckedContinuation { continuation in
             send(data) { continuation.resume(returning: $0) }
+        }
+    }
+
+    private func sendWifi(_ data: Data, via link: WifiPrinterLink, completion: @escaping (String?) -> Void) {
+        holdBackgroundTime()
+        link.send(data) { [weak self, weak link] error in
+            if let self, let link, link === self.wifiLink {
+                self.wifiStatusText = error ?? "Đã gửi tem tới máy in WiFi \(link.address.label)"
+            }
+            completion(error)
+            if let self, self.wifiLink?.isBusy != true { self.releaseBackgroundTime() }
         }
     }
 
@@ -374,13 +430,15 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
         guard backgroundTask == .invalid else { return }
         MainActor.assumeIsolated {
             self.backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "ChotLivePrint") { [weak self] in
-                self?.releaseBackgroundTime()
+                self?.releaseBackgroundTime(force: true)
             }
         }
     }
 
-    private func releaseBackgroundTime() {
+    private func releaseBackgroundTime(force: Bool = false) {
         guard backgroundTask != .invalid else { return }
+        // Tem Bluetooth và tem WiFi dùng chung thời gian chạy nền: chỉ trả lại khi cả hai đã xong.
+        guard force || (jobs.isEmpty && wifiLink?.isBusy != true) else { return }
         let task = backgroundTask
         backgroundTask = .invalid
         MainActor.assumeIsolated {

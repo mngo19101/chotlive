@@ -290,6 +290,9 @@ struct PrinterView: View {
     @EnvironmentObject var ui: AppUI
     @AppStorage("paperWidth") private var paperWidth = 576
     @AppStorage("shopName") private var shopName = "ChốtLive"
+    @State private var wifiHost = ""
+    @State private var wifiPort = ""
+    @State private var wifiError: String?
 
     var body: some View {
         SubPage(title: "Máy in") {
@@ -297,8 +300,17 @@ struct PrinterView: View {
                 VStack(alignment: .leading, spacing: Metrics.gap) {
                     VStack(alignment: .leading, spacing: 12) {
                         T("Trạng thái", 15, .bold)
-                        T(printer.statusText, 13, .medium, Theme.muted)
-                        if let n = printer.connectedName {
+                        if let w = printer.wifiAddress {
+                            T(printer.wifiStatusText, 13, .medium, Theme.muted)
+                            T("Đang dùng: Máy in WiFi \(w.label)", 14, .semibold, Theme.green)
+                            HStack(spacing: 8) {
+                                OutlineButton(title: "In thử", icon: .printer, filled: true) { printTest() }
+                                OutlineButton(title: "Ngắt kết nối", color: Theme.red) { printer.disconnect() }
+                            }
+                        } else {
+                            T(printer.statusText, 13, .medium, Theme.muted)
+                        }
+                        if printer.wifiAddress == nil, let n = printer.connectedName {
                             T("Đang dùng: \(n)", 14, .semibold, Theme.green)
                             HStack(spacing: 8) {
                                 OutlineButton(title: "In thử", icon: .printer, filled: true) { printTest() }
@@ -331,6 +343,8 @@ struct PrinterView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .cardStyle(20)
 
+                    wifiCard
+
                     VStack(alignment: .leading, spacing: 14) {
                         T("Tem", 15, .bold)
                         HStack(spacing: 8) {
@@ -348,6 +362,43 @@ struct PrinterView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
+        .onAppear {
+            if let w = printer.wifiAddress {
+                wifiHost = w.host
+                wifiPort = String(w.port)
+            }
+        }
+    }
+
+    private var wifiCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            T("Máy in WiFi (mạng LAN)", 15, .bold)
+            T("Dùng cho máy in nối mạng bằng dây LAN hoặc WiFi. iPhone phải dùng cùng WiFi với máy in. IP thường in ra khi giữ nút FEED lúc bật máy.",
+              13, .medium, Theme.muted)
+            LabeledField(label: "Địa chỉ IP", placeholder: "192.168.1.13", text: $wifiHost,
+                         keyboard: .numbersAndPunctuation, capitalize: false)
+            LabeledField(label: "Port", placeholder: "9100", text: $wifiPort, keyboard: .numberPad, capitalize: false)
+            if let wifiError {
+                T(wifiError, 13, .medium, Theme.red)
+            }
+            OutlineButton(title: "Lưu và dùng máy in này", icon: .printer, filled: true) { saveWifi() }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle(20)
+    }
+
+    private func saveWifi() {
+        guard let address = WifiPrinterAddress.parse(host: wifiHost, port: wifiPort) else {
+            wifiError = "IP phải có dạng 192.168.1.13 và Port là số (thường là 9100)."
+            return
+        }
+        wifiError = nil
+        wifiHost = address.host
+        wifiPort = String(address.port)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        printer.useWifi(address)
+        ui.notify("Đã lưu máy in WiFi \(address.label). Bấm In thử để kiểm tra.")
     }
 
     private func deviceRow(_ d: NearbyDevice) -> some View {

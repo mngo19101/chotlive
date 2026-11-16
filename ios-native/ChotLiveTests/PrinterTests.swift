@@ -88,4 +88,20 @@ final class PrinterTests: XCTestCase {
         }
         wait(for: [done], timeout: 1)
     }
+    func testWifiAddressParsesIPAndPort() {
+        XCTAssertEqual(WifiPrinterAddress.parse(host: " 192.168.1.13 ", port: "9100"), .init(host: "192.168.1.13", port: 9100))
+        XCTAssertEqual(WifiPrinterAddress.parse(host: "192.168.1.13", port: ""), .init(host: "192.168.1.13", port: 9100))
+        XCTAssertEqual(WifiPrinterAddress.parse(host: "10.0.0.5:9101", port: "9100"), .init(host: "10.0.0.5", port: 9101))
+    }
+
+    func testWifiAddressRejectsTypos() {
+        XCTAssertNil(WifiPrinterAddress.parse(host: "192.168.1", port: "9100"))
+        XCTAssertNil(WifiPrinterAddress.parse(host: "192.168.1.13.", port: "9100"))
+        XCTAssertNil(WifiPrinterAddress.parse(host: "192.168.1.256", port: "9100"))
+        XCTAssertNil(WifiPrinterAddress.parse(host: "192,168,1,13", port: "9100"))
+        XCTAssertNil(WifiPrinterAddress.parse(host: "0.0.0.0", port: "9100"))
+        XCTAssertNil(WifiPrinterAddress.parse(host: "192.168.1.13", port: "0"))
+        XCTAssertNil(WifiPrinterAddress.parse(host: "192.168.1.13", port: "70000"))
+        XCTAssertNil(WifiPrinterAddress.parse(host: "192.168.1.13", port: "91a"))
+    }
 }

@@ -49,6 +49,7 @@ import com.chotlive.app.model.LiveComment
 import com.chotlive.app.model.initialsOf
 import com.chotlive.app.net.vtpConnected
 import com.chotlive.app.print.NearbyDevice
+import com.chotlive.app.print.WifiPrinterAddress
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -261,6 +262,22 @@ fun PrinterScreen() {
     val ui = LocalAppUI.current
     val scope = rememberCoroutineScope()
     var shopName by remember { mutableStateOf(settings.shopName) }
+    var wifiHost by remember { mutableStateOf(printer.wifiAddress?.host ?: "") }
+    var wifiPort by remember { mutableStateOf(printer.wifiAddress?.port?.toString() ?: "") }
+    var wifiError by remember { mutableStateOf<String?>(null) }
+
+    fun saveWifi() {
+        val a = WifiPrinterAddress.parse(wifiHost, wifiPort)
+        if (a == null) {
+            wifiError = "IP phải có dạng 192.168.1.13 và Port là số (thường là 9100)."
+            return
+        }
+        wifiError = null
+        wifiHost = a.host
+        wifiPort = a.port.toString()
+        printer.useWifi(a)
+        ui.notify("Đã lưu máy in WiFi ${a.label}. Bấm In thử để kiểm tra.")
+    }
 
     val enableBt = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         printer.refreshStatus()
@@ -307,12 +324,18 @@ fun PrinterScreen() {
         ) {
             Column(Modifier.fillMaxWidth().cardStyle(20f).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 T("Trạng thái", 15f, BV.BOLD)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (printer.isConnecting) CircularProgressIndicator(Modifier.size(14.dp), C.muted, 2.dp)
-                    T(printer.statusText, 13f, BV.MEDIUM, C.muted)
-                }
-                printer.connectedName?.let { n ->
-                    T("Đang dùng: $n", 14f, BV.SEMIBOLD, C.green)
+                val wifi = printer.wifiAddress
+                if (wifi != null) {
+                    T(printer.wifiStatusText, 13f, BV.MEDIUM, C.muted)
+                    T("Đang dùng: Máy in WiFi ${wifi.label}", 14f, BV.SEMIBOLD, C.green)
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (printer.isConnecting) CircularProgressIndicator(Modifier.size(14.dp), C.muted, 2.dp)
+                        T(printer.statusText, 13f, BV.MEDIUM, C.muted)
+                    }
+                    printer.connectedName?.let { n ->
+                        T("Đang dùng: $n", 14f, BV.SEMIBOLD, C.green)
+                    }
                 }
                 if (printer.hasPrinter) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -336,6 +359,15 @@ fun PrinterScreen() {
                     T("Không thấy máy in? Kiểm tra máy đã bật và không nối với điện thoại khác. Máy in Bluetooth Classic nên ghép đôi trước trong Cài đặt › Bluetooth của điện thoại (mã PIN thường là 0000 hoặc 1234).",
                         13f, BV.MEDIUM, C.muted)
                 }
+            }
+            Column(Modifier.fillMaxWidth().cardStyle(20f).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                T("Máy in WiFi (mạng LAN)", 15f, BV.BOLD)
+                T("Dùng cho máy in nối mạng bằng dây LAN hoặc WiFi. Điện thoại phải dùng cùng WiFi với máy in. IP thường in ra khi giữ nút FEED lúc bật máy.",
+                    13f, BV.MEDIUM, C.muted)
+                LabeledField("Địa chỉ IP", "192.168.1.13", wifiHost, { wifiHost = it }, KeyboardType.Uri, capitalize = false)
+                LabeledField("Port", "9100", wifiPort, { wifiPort = it }, KeyboardType.Number, capitalize = false)
+                wifiError?.let { T(it, 13f, BV.MEDIUM, C.red) }
+                OutlineButton("Lưu và dùng máy in này", Modifier.fillMaxWidth(), IconName.PRINTER, filled = true) { saveWifi() }
             }
             Column(Modifier.fillMaxWidth().cardStyle(20f).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 T("Tem", 15f, BV.BOLD)

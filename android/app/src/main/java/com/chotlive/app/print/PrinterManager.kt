@@ -38,7 +38,8 @@ data class NearbyDevice(
 )
 
 /**
- * Kết nối máy in nhiệt Bluetooth (Xprinter...) và gửi lệnh ESC/POS.
+ * Kết nối máy in nhiệt Bluetooth (Xprinter...), hoặc máy in mạng qua WiFi (IP + cổng 9100), và gửi lệnh ESC/POS.
+ * Dùng một trong hai: chọn máy WiFi thì bỏ máy Bluetooth và ngược lại.
  * Khác iPhone: Android dùng được cả máy Bluetooth LE lẫn máy chỉ có Bluetooth Classic (SPP).
  */
 @SuppressLint("MissingPermission")
@@ -50,6 +51,9 @@ class PrinterManager(private val context: Context) {
     var hasScanned by mutableStateOf(false); private set
     var statusText by mutableStateOf("Chưa kết nối máy in"); private set
     var isConnecting by mutableStateOf(false); private set
+    /** Máy in WiFi đang dùng; null là đang dùng Bluetooth (hoặc chưa chọn máy nào). */
+    var wifiAddress by mutableStateOf<WifiPrinterAddress?>(null); private set
+    var wifiStatusText by mutableStateOf(""); private set
 
     private val adapter: BluetoothAdapter? = context.getSystemService(BluetoothManager::class.java)?.adapter
     private val prefs = context.getSharedPreferences("printer", Context.MODE_PRIVATE)
@@ -63,17 +67,42 @@ class PrinterManager(private val context: Context) {
     private val lastAddress: String? get() = prefs.getString(KEY_ADDRESS, null)
     private val lastName: String get() = prefs.getString(KEY_NAME, null) ?: "Máy in"
 
-    val isConnected: Boolean get() = connectedName != null
+    /** Đã chọn máy in WiFi, hoặc đang nối máy Bluetooth. Máy WiFi chỉ được thử thật khi gửi tem. */
+    val isConnected: Boolean get() = connectedName != null || wifiAddress != null
 
     /** Đã chọn máy in: in được, nếu đang rớt kết nối thì app tự nối lại trước khi in. */
     val hasPrinter: Boolean get() = isConnected || lastAddress != null
 
     init {
+        val host = prefs.getString(KEY_WIFI_HOST, null)
+        WifiPrinterAddress.parse(host ?: "", prefs.getInt(KEY_WIFI_PORT, 0).toString()).takeIf { host != null }?.let {
+            wifiAddress = it
+            wifiStatusText = "Dùng máy in WiFi ${it.label}"
+        }
         refreshStatus()
         scope.launch {
             delay(500)
             reconnectQuietly()
         }
+    }
+
+    // MARK: - Máy in WiFi
+
+    fun useWifi(a: WifiPrinterAddress) {
+        stopScan()
+        reconnectJob?.cancel()
+        prefs.edit().remove(KEY_ADDRESS).remove(KEY_NAME).remove(KEY_TRANSPORT)
+            .putString(KEY_WIFI_HOST, a.host).putInt(KEY_WIFI_PORT, a.port).apply()
+        dropLink()
+        wifiAddress = a
+        wifiStatusText = "Đã lưu máy in WiFi ${a.label}. Bấm In thử để kiểm tra."
+        refreshStatus()
+    }
+
+    private fun clearWifi() {
+        wifiAddress = null
+        wifiStatusText = ""
+        prefs.edit().remove(KEY_WIFI_HOST).remove(KEY_WIFI_PORT).apply()
     }
 
     // MARK: - Quyền
@@ -247,6 +276,7 @@ class PrinterManager(private val context: Context) {
     fun connect(d: NearbyDevice) {
         stopScan()
         reconnectJob?.cancel()
+        clearWifi()
         scope.launch {
             mutex.withLock {
                 dropLink()
@@ -266,6 +296,7 @@ class PrinterManager(private val context: Context) {
 
     fun disconnect() {
         reconnectJob?.cancel()
+        clearWifi()
         prefs.edit().remove(KEY_ADDRESS).remove(KEY_NAME).remove(KEY_TRANSPORT).apply()
         dropLink()
         statusText = "Đã ngắt kết nối"
@@ -328,6 +359,11 @@ class PrinterManager(private val context: Context) {
     suspend fun sendAndWait(data: ByteArray): String? {
         if (data.isEmpty()) return "Không tạo được nội dung tem."
         return mutex.withLock {
+            wifiAddress?.let { a ->
+                val error = WifiPrinter.send(context, a, data)
+                if (wifiAddress == a) wifiStatusText = error ?: "Đã gửi tem tới máy in WiFi ${a.label}"
+                return@withLock error
+            }
             try {
                 ensureLink()
                 try {
@@ -353,5 +389,7 @@ class PrinterManager(private val context: Context) {
         private const val KEY_ADDRESS = "lastPrinterAddress"
         private const val KEY_NAME = "lastPrinterName"
         private const val KEY_TRANSPORT = "lastPrinterTransport"
+        private const val KEY_WIFI_HOST = "wifiPrinterHost"
+        private const val KEY_WIFI_PORT = "wifiPrinterPort"
     }
 }
