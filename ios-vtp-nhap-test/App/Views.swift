@@ -154,6 +154,9 @@ struct OrdersView: View {
                         }
                     } else if let k = kho {
                         LabeledContent("Kho lấy hàng", value: k.name)
+                    } else if vtp.loggedIn {
+                        Button(vtp.loadingKho ? "Đang tải kho hàng…" : "Tải kho hàng Viettel Post") { Task { await vtp.loadKho() } }
+                            .disabled(vtp.loadingKho)
                     }
                 } footer: {
                     if !cl.loggedIn { Text("Chưa đăng nhập ChotLive (tab Kết nối).") }
@@ -174,6 +177,8 @@ struct OrdersView: View {
             }
             .navigationTitle("Đẩy nháp")
             .refreshable { await cl.reload() }
+            // Phiên Viettel Post giữ được qua lần mở app, nhưng danh sách kho thì không: tự tải lại.
+            .task { if vtp.loggedIn && vtp.kho.isEmpty { await vtp.loadKho() } }
             .safeAreaInset(edge: .bottom) { pushBar }
         }
     }
@@ -225,10 +230,22 @@ struct OrdersView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(pushing || selected.isEmpty || !vtp.loggedIn || kho == nil)
+            if let why = blockedReason {
+                Text(why).font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(.bar)
+    }
+
+    /// Vì sao nút đẩy đang khoá (nil = bấm được).
+    private var blockedReason: String? {
+        if pushing { return nil }
+        if !vtp.loggedIn { return "Chưa đăng nhập Viettel Post (tab Kết nối)." }
+        if kho == nil { return vtp.loadingKho ? "Đang tải kho hàng Viettel Post…" : "Chưa có kho hàng Viettel Post: bấm \"Tải kho hàng Viettel Post\" ở trên." }
+        if selected.isEmpty { return "Chọn ít nhất 1 khách." }
+        return nil
     }
 
     private func push() async {

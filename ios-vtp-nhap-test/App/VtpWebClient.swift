@@ -47,6 +47,7 @@ final class VtpWebClient: ObservableObject {
     @Published var busy = false
     @Published var lastError: String?
     @Published private(set) var kho: [VtpKho] = []
+    @Published private(set) var loadingKho = false
 
     let log: LogStore
     let deviceId: String
@@ -293,6 +294,9 @@ final class VtpWebClient: ObservableObject {
     // MARK: - Dữ liệu
 
     func loadKho() async {
+        guard !loadingKho else { return }
+        loadingKho = true
+        defer { loadingKho = false }
         do {
             let r = try await authed("/api/setting/listInventoryV2") { ["token": self.token ?? "", "deviceId": self.deviceId] }
             let arr = (r.json as? [[String: Any]]) ?? (J.dict(r.json)?["data"] as? [[String: Any]]) ?? []
