@@ -63,7 +63,8 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
             wifiLink = WifiPrinterLink(address: saved)
             wifiStatusText = "Dùng máy in WiFi \(saved.label)"
         }
-        central = CBCentralManager(delegate: self, queue: .main)
+        // Không bật hộp thoại "muốn sử dụng Bluetooth" của iOS khi Bluetooth đang tắt: người dùng máy in WiFi không cần Bluetooth.
+        central = CBCentralManager(delegate: self, queue: .main, options: [CBCentralManagerOptionShowPowerAlertKey: false])
     }
 
     /// Đã chọn máy in WiFi, hoặc đang nối máy Bluetooth. Máy WiFi chỉ được thử thật khi gửi tem.
