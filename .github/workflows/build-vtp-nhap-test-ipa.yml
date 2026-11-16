@@ -1,0 +1,50 @@
+name: Build VTP Nháp Test IPA (app thử, tách biệt)
+
+# App thử riêng trong ios-vtp-nhap-test/. Chỉ chạy trên nhánh vtp-nhap-test hoặc bấm tay,
+# không đụng app thật (ios-native/) và không triển khai gì lên máy chủ.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - vtp-nhap-test
+    paths:
+      - 'ios-vtp-nhap-test/**'
+      - '.github/workflows/build-vtp-nhap-test-ipa.yml'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cài XcodeGen
+        run: brew install xcodegen
+
+      - name: Tạo project Xcode
+        working-directory: ios-vtp-nhap-test
+        run: xcodegen generate
+
+      - name: Build (không ký - Sideloadly/ESign sẽ ký lại)
+        working-directory: ios-vtp-nhap-test
+        run: |
+          xcodebuild \
+            -project VtpNhapTest.xcodeproj \
+            -scheme VtpNhapTest \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Đóng gói IPA
+        working-directory: ios-vtp-nhap-test
+        run: |
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/VtpNhapTest.app Payload/
+          zip -r9 VtpNhapTest.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VTP-Nhap-Test-IPA
+          path: ios-vtp-nhap-test/VtpNhapTest.ipa
+          retention-days: 30
