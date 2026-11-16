@@ -203,13 +203,48 @@ struct DraftGroup: Identifiable {
 
     static let smallLimit = 17_000
 
-    static func build(_ customers: [CLCustomer], onlyReady: Bool) -> [DraftGroup] {
+    /// mode 0: đã duyệt · 1: chưa gửi (trừ hẹn gom) · 2: đơn gần nhất của mỗi khách, kể cả đã gửi (chỉ để thử,
+    /// vì nháp không gọi bưu tá).
+    static func build(_ customers: [CLCustomer], mode: Int) -> [DraftGroup] {
         customers.compactMap { c -> DraftGroup? in
-            let orders = CLOrder.orders(of: c).filter { onlyReady ? ($0.pending && $0.state == "ready") : ($0.pending && $0.state != "hold") }
+            let all = CLOrder.orders(of: c)
+            let orders: [CLOrder]
+            switch mode {
+            case 0: orders = all.filter { $0.pending && $0.state == "ready" }
+            case 1: orders = all.filter { $0.pending && $0.state != "hold" }
+            default: orders = all.last.map { [$0] } ?? []
+            }
             guard !orders.isEmpty else { return nil }
             return summarize(c, orders)
         }
-        .sorted { ($0.orders.first?.lastTs ?? 0) < ($1.orders.first?.lastTs ?? 0) }
+        .sorted { (a, b) in
+            mode == 2 ? (a.orders.last?.lastTs ?? 0) > (b.orders.last?.lastTs ?? 0)
+                      : (a.orders.first?.lastTs ?? 0) < (b.orders.first?.lastTs ?? 0)
+        }
+    }
+
+    /// Đếm đơn theo trạng thái để biết vì sao danh sách trống.
+    static func stats(_ customers: [CLCustomer]) -> String {
+        var counts: [String: Int] = [:]
+        var total = 0
+        for c in customers {
+            for o in CLOrder.orders(of: c) {
+                total += 1
+                let key: String
+                if o.done { key = "đã gửi/giao" } else {
+                    switch o.state {
+                    case "ask": key = "chưa duyệt"
+                    case "hold": key = "hẹn gom"
+                    case "ready": key = "đã duyệt"
+                    case "exported": key = "đã xuất"
+                    default: key = o.state
+                    }
+                }
+                counts[key, default: 0] += 1
+            }
+        }
+        let parts = counts.sorted { $0.value > $1.value }.map { "\($0.key) \($0.value)" }
+        return "\(customers.count) khách, \(total) đơn" + (parts.isEmpty ? "" : ": " + parts.joined(separator: " · "))
     }
 
     static func summarize(_ c: CLCustomer, _ orders: [CLOrder]) -> DraftGroup {

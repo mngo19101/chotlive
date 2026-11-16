@@ -74,7 +74,7 @@ padding:8px 12px calc(env(safe-area-inset-bottom) + 8px);display:flex;gap:6px;z-
 <section class="tab" id="tab-orders">
   <div class="card">
     <label for="f-ready">Lấy đơn</label>
-    <select id="f-ready"><option value="1">Đã duyệt</option><option value="0">Chưa gửi (trừ hẹn gom)</option></select>
+    <select id="f-ready"><option value="1">Đã duyệt</option><option value="0">Chưa gửi (trừ hẹn gom)</option><option value="2">Đơn gần nhất mỗi khách (để thử)</option></select>
     <label for="f-service">Dịch vụ</label>
     <select id="f-service"><option value="STK">STK · Chuyển phát tiêu chuẩn</option><option value="SCN">SCN · Chuyển phát nhanh</option><option value="VSL9">VSL9 · Flashsale thỏa thuận</option></select>
     <label for="f-kho">Kho lấy hàng</label>
@@ -420,11 +420,27 @@ function summarize(c, orders) {
     pushKey: c.id + '#' + orders.map((o) => o.key).sort().join(',')
   };
 }
-function buildGroups(onlyReady) {
+/** mode '1': đã duyệt · '0': chưa gửi (trừ hẹn gom) · '2': đơn gần nhất của mỗi khách, kể cả đã gửi (chỉ để thử). */
+function buildGroups(mode) {
+  const latest = mode === '2';
   return cl.customers.map((c) => {
-    const orders = ordersOf(c).filter((o) => o.pending && (onlyReady ? o.state === 'ready' : o.state !== 'hold'));
+    const all = ordersOf(c);
+    const orders = latest ? all.slice(-1) : all.filter((o) => o.pending && (mode === '1' ? o.state === 'ready' : o.state !== 'hold'));
     return orders.length ? summarize(c, orders) : null;
-  }).filter(Boolean).sort((a, b) => a.orders[0].lastTs - b.orders[0].lastTs);
+  }).filter(Boolean).sort((a, b) => latest ? b.orders.at(-1).lastTs - a.orders.at(-1).lastTs : a.orders[0].lastTs - b.orders[0].lastTs);
+}
+function stats() {
+  const names = { ask: 'chưa duyệt', hold: 'hẹn gom', ready: 'đã duyệt', exported: 'đã xuất' };
+  const counts = {};
+  let total = 0;
+  for (const c of cl.customers) for (const o of ordersOf(c)) {
+    total++;
+    const done = o.items.every((i) => i.shipping || i.delivered);
+    const k = done ? 'đã gửi/giao' : names[o.state] || o.state;
+    counts[k] = (counts[k] || 0) + 1;
+  }
+  const parts = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`);
+  return `${cl.customers.length} khách, ${total} đơn${parts.length ? ': ' + parts.join(' · ') : ''}`;
 }
 function draftBody(g, kho, place, service) {
   const d = new Date(), p = (n) => String(n).padStart(2, '0');
@@ -465,7 +481,7 @@ async function pushSelected() {
   const kho = vtp.kho.find((k) => k.id === $('f-kho').value) || vtp.kho[0];
   if (!kho) return;
   const service = $('f-service').value;
-  const groups = buildGroups($('f-ready').value === '1').filter((g) => selected.has(g.id));
+  const groups = buildGroups($('f-ready').value).filter((g) => selected.has(g.id));
   pushing = true; render();
   log(`Bắt đầu đẩy ${groups.length} nháp`, `Kho: ${kho.name} · dịch vụ ${service}`);
   for (const g of groups) {
@@ -565,9 +581,10 @@ function render() {
   if (wanted && vtp.kho.some((k) => k.id === wanted)) khoSel.value = wanted;
 
   // Đơn
-  const groups = buildGroups($('f-ready').value === '1');
+  const groups = buildGroups($('f-ready').value);
   $('orders-warn').innerHTML = !cl.token ? '<div class="msg info">Chưa đăng nhập ChotLive (tab Kết nối).</div>'
     : !vtp.token ? '<div class="msg info">Chưa đăng nhập Viettel Post (tab Kết nối).</div>' : '';
+  if (cl.token) $('orders-warn').innerHTML += `<div class="msg info">Trên ChotLive: ${esc(stats())}</div>`;
   $('orders').innerHTML = groups.length ? groups.map((g) => {
     const on = selected.has(g.id), bad = g.problems.length > 0, r = results[g.id], old = pushed[g.pushKey];
     return `<div class="o ${on ? 'on' : ''} ${bad ? 'dis' : ''}" data-id="${esc(g.id)}">
@@ -583,7 +600,7 @@ function render() {
       </div>
       <div class="pr">${money(g.cod)}<small>thu hộ</small></div>
     </div>`;
-  }).join('') : `<div class="empty">${cl.token ? 'Không có đơn phù hợp.' : 'Chưa có dữ liệu.'}</div>`;
+  }).join('') : `<div class="empty">${cl.token ? 'Không có đơn phù hợp. Đổi "Lấy đơn" sang "Đơn gần nhất mỗi khách" để thử với đơn cũ.' : 'Chưa có dữ liệu.'}</div>`;
   for (const el of document.querySelectorAll('.o[data-id]')) {
     el.onclick = () => {
       const id = el.dataset.id, g = groups.find((x) => x.id === id);

@@ -122,24 +122,26 @@ struct OrdersView: View {
     @EnvironmentObject var vtp: VtpWebClient
     @EnvironmentObject var log: LogStore
 
-    @AppStorage("onlyReady") private var onlyReady = true
+    @AppStorage("filterMode") private var mode = 0
     @AppStorage("service") private var service = "STK"
     @AppStorage("khoId") private var khoId = ""
     @State private var selected: Set<String> = []
     @State private var results: [String: PushResult] = [:]
     @State private var pushing = false
 
-    private var groups: [DraftGroup] { DraftGroup.build(cl.customers, onlyReady: onlyReady) }
+    private var groups: [DraftGroup] { DraftGroup.build(cl.customers, mode: mode) }
     private var kho: VtpKho? { vtp.kho.first { $0.id == khoId } ?? vtp.kho.first }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Picker("Lấy đơn", selection: $onlyReady) {
-                        Text("Đã duyệt").tag(true)
-                        Text("Chưa gửi (trừ hẹn gom)").tag(false)
+                    Picker("Lấy đơn", selection: $mode) {
+                        Text("Đã duyệt").tag(0)
+                        Text("Chưa gửi (trừ hẹn gom)").tag(1)
+                        Text("Đơn gần nhất mỗi khách (để thử)").tag(2)
                     }
+                    .onChange(of: mode) { _ in selected.removeAll() }
                     Picker("Dịch vụ", selection: $service) {
                         Text("STK · Tiêu chuẩn").tag("STK")
                         Text("SCN · Nhanh").tag("SCN")
@@ -157,11 +159,16 @@ struct OrdersView: View {
                     else if !vtp.loggedIn { Text("Chưa đăng nhập Viettel Post (tab Kết nối).") }
                 }
 
-                Section("\(groups.count) khách · đã chọn \(selected.count)") {
+                Section {
                     if groups.isEmpty {
-                        Text(cl.loggedIn ? "Không có đơn phù hợp." : "Chưa có dữ liệu.").foregroundStyle(.secondary)
+                        Text(cl.loggedIn ? "Không có đơn phù hợp. Đổi \"Lấy đơn\" sang \"Đơn gần nhất mỗi khách\" để thử với đơn cũ."
+                                         : "Chưa có dữ liệu.").foregroundStyle(.secondary)
                     }
                     ForEach(groups) { g in row(g) }
+                } header: {
+                    Text("\(groups.count) khách · đã chọn \(selected.count)")
+                } footer: {
+                    if cl.loggedIn { Text("Trên ChotLive: " + DraftGroup.stats(cl.customers)) }
                 }
             }
             .navigationTitle("Đẩy nháp")
