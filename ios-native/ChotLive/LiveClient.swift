@@ -138,7 +138,7 @@ final class LiveClient: ObservableObject {
         do {
             reply = try await URLSession.shared.data(for: req)
         } catch {
-            throw ClientError.msg("Không kết nối được máy chủ. Vui lòng kiểm tra mạng rồi thử lại.")
+            throw ClientError.msg("Không kết nối được máy chủ: \(NetErrorText.describe(error)). Bấm Kiểm tra kết nối bên dưới để xem chi tiết.")
         }
         let (data, resp) = reply
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]

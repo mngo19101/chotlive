@@ -189,6 +189,7 @@ struct LoginView: View {
     @State private var confirm = ""
     @State private var busy = false
     @State private var error: String?
+    @State private var showConnectionTest = false
 
     private var isRegister: Bool { mode == .register }
 
@@ -219,6 +220,13 @@ struct LoginView: View {
                       12, .medium, Theme.muted)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
+                    Button { showConnectionTest = true } label: {
+                        T("Kiểm tra kết nối", 13, .bold, Theme.orange)
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(server.isEmpty)
                 }
                 .padding(.horizontal, Metrics.gutter)
                 .padding(.vertical, 24)
@@ -227,6 +235,7 @@ struct LoginView: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .background(Theme.bg.ignoresSafeArea())
+        .sheet(isPresented: $showConnectionTest) { ConnectionTestView(server: server) }
         #if DEBUG
         .onAppear { if Demo.screen == "register" { mode = .register } }
         #endif
