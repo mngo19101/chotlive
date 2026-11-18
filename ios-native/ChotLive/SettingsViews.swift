@@ -9,6 +9,7 @@ struct SettingsView: View {
     @EnvironmentObject var printer: PrinterManager
     @EnvironmentObject var ui: AppUI
     @EnvironmentObject var appearance: Appearance
+    @EnvironmentObject var vtpDraft: VtpDraftClient
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
@@ -148,8 +149,9 @@ struct SettingsView: View {
 
     private var settingsCard: some View {
         VStack(spacing: 0) {
-            settingRow(.truck, "ViettelPost", trailing: client.vtpConnected ? "Đã kết nối" : "Chưa kết nối",
-                       trailingColor: client.vtpConnected ? Theme.green : Theme.muted, route: .vtp)
+            settingRow(.truck, "ViettelPost", trailing: "Vận đơn: " + (client.vtpConnected ? "đã kết nối" : "chưa kết nối"),
+                       trailingColor: client.vtpConnected ? Theme.green : Theme.muted,
+                       trailing2: draftStatus.text, trailing2Color: draftStatus.color, route: .vtp)
             HairLine()
             settingRow(.printer, "Máy in", trailing: printerConnected ? "Đã kết nối" : "Chưa kết nối",
                        trailingColor: printerConnected ? Theme.green : Theme.muted, route: .printer)
@@ -167,7 +169,15 @@ struct SettingsView: View {
         .cardStyle(22)
     }
 
+    /// Dòng thứ hai bên phải mục ViettelPost: phiên đẩy nháp trên máy này.
+    private var draftStatus: (text: String, color: Color) {
+        if !vtpDraft.loggedIn { return ("Nháp: chưa đăng nhập", Theme.muted) }
+        if vtpDraft.sessionExpired { return ("Nháp: cần đăng nhập lại", Theme.red) }
+        return ("Nháp: đã đăng nhập", Theme.green)
+    }
+
     private func settingRow(_ icon: IconName, _ title: String, trailing: String? = nil, trailingColor: Color = Theme.muted,
+                            trailing2: String? = nil, trailing2Color: Color = Theme.muted,
                             isNew: Bool = false, route: Route) -> some View {
         Button { ui.push(route) } label: {
             HStack(spacing: 12) {
@@ -180,11 +190,19 @@ struct SettingsView: View {
                     T("MỚI", 10, .heavy).padding(.horizontal, 7).frame(height: 18)
                         .background(Capsule().fill(Theme.orange)).onAccent()
                 }
-                if let trailing { T(trailing, 12, .semibold, trailingColor).lineLimit(1).fixedSize() }
+                if let trailing2 {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        if let trailing { T(trailing, 12, .semibold, trailingColor).lineLimit(1) }
+                        T(trailing2, 12, .semibold, trailing2Color).lineLimit(1)
+                    }
+                    .fixedSize()
+                } else if let trailing {
+                    T(trailing, 12, .semibold, trailingColor).lineLimit(1).fixedSize()
+                }
                 Icon(name: .chevronRight, size: 16, weight: 2.4, color: Theme.muted).padding(.leading, -2)
             }
             .padding(.horizontal, 17)
-            .frame(height: 56)
+            .frame(height: trailing2 == nil ? 56 : 64)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

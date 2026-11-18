@@ -16,18 +16,36 @@ struct VtpConnectView: View {
     @State private var loadingSenders = false
     @State private var senderError: String?
 
+    /// Mở thẳng phần 2 "Đẩy nháp" (từ nút Đẩy nháp VTP khi chưa đăng nhập).
+    let focusDraft: Bool
+
+    // Viết tay: có @State private nên init tự sinh của Swift là private, gọi từ Views.swift không được.
+    init(focusDraft: Bool = false) { self.focusDraft = focusDraft }
+
     private var conn: VtpConnection? { client.vtp }
 
     var body: some View {
         SubPage(title: "Kết nối ViettelPost") {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: Metrics.gap) {
-                    if client.vtpConnected, let conn { connectedView(conn) } else { tokenView }
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: Metrics.gap) {
+                        VtpSectionHeader(number: 1, title: "Tạo vận đơn", hint: "nút “Lên vận đơn”")
+                        if client.vtpConnected, let conn { connectedView(conn) } else { tokenView }
+                        VtpSectionHeader(number: 2, title: "Đẩy nháp", hint: "nút “Đẩy nháp VTP”", color: Color(hex: 0xEE0033))
+                            .id("draft")
+                        VtpDraftSection()
+                    }
+                    .padding(.horizontal, Metrics.gutter)
+                    .padding(.bottom, 16)
                 }
-                .padding(.horizontal, Metrics.gutter)
-                .padding(.bottom, 16)
+                .scrollDismissesKeyboard(.interactively)
+                .onAppear {
+                    guard focusDraft else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        withAnimation { proxy.scrollTo("draft", anchor: .top) }
+                    }
+                }
             }
-            .scrollDismissesKeyboard(.interactively)
         }
         .onAppear {
             if client.vtp == nil { client.refreshVtp() }

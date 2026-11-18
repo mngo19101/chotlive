@@ -188,6 +188,8 @@ enum Route: Hashable {
     case help
     case appearance
     case vtp
+    /// Kết nối ViettelPost, cuộn sẵn tới phần 2 "Đẩy nháp".
+    case vtpDraft
 }
 
 struct SheetItem: Identifiable {
