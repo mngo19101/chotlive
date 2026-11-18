@@ -345,6 +345,10 @@ struct SessionDetailView: View {
     @State private var older: [LiveComment] = []
     @State private var loadingOlder = false
     @State private var olderExhausted = false
+    /// Bình luận đang sổ ra các đơn đã in của khách (mỗi lúc một bình luận).
+    @State private var expandedId: String?
+    /// Món vừa bỏ, còn hoàn tác được trong vài giây.
+    @State private var undo: Store.RemovedItem?
 
     private var session: LiveSession? { store.sessions.first { $0.id == sessionId } }
 
@@ -419,7 +423,14 @@ struct SessionDetailView: View {
                         LazyVStack(spacing: 9) {
                             ForEach(shown) { c in
                                 let owner = customer(of: c, in: map)
-                                CommentRow(c: c, closing: store.isClosingComment(c), customer: owner, isNew: isNew(owner)) {
+                                let open = expandedId == c.id
+                                CommentRow(c: c, closing: store.isClosingComment(c), customer: owner, isNew: isNew(owner),
+                                           expanded: open,
+                                           printedItems: open ? store.printedItems(of: c, sessionId: sessionId) : [],
+                                           onToggle: {
+                                               withAnimation(.easeOut(duration: 0.2)) { expandedId = open ? nil : c.id }
+                                           },
+                                           onRemove: { it in confirmRemove(it, of: c) }) {
                                     Task { @MainActor in
                                         ui.notify(await printComment(c, store: store, printer: printer))
                                     }
@@ -449,7 +460,9 @@ struct SessionDetailView: View {
                     await loadOlder()
                 }
                 .overlay(alignment: .bottom) {
-                    if pending > 0 {
+                    if let r = undo {
+                        undoBar(r)
+                    } else if pending > 0 {
                         newCommentsPill(pending) {
                             frozenAt = nil
                             withAnimation { proxy.scrollTo("top", anchor: .top) }
@@ -458,6 +471,45 @@ struct SessionDetailView: View {
                 }
             }
         }
+    }
+
+    /// Hỏi lại trước khi bỏ một món in nhầm của khách.
+    private func confirmRemove(_ it: OrderItem, of c: LiveComment) {
+        guard let owner = store.customer(of: c) else { return }
+        ui.present(dim: AppSheet.dim) {
+            RemovePrintedItemSheet(customerId: owner.id, item: it) { removed in
+                withAnimation(.easeOut(duration: 0.2)) { undo = removed }
+                // Thanh hoàn tác tự ẩn sau vài giây, trừ khi đã có lần bỏ khác thay chỗ.
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    if undo == removed { withAnimation(.easeOut(duration: 0.2)) { undo = nil } }
+                }
+            }
+        }
+    }
+
+    private func undoBar(_ r: Store.RemovedItem) -> some View {
+        HStack(spacing: 10) {
+            T("Đã bỏ \(r.item.productLabel) của \(r.customer.displayName)", 13.5, .semibold, .white)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            Button {
+                store.restore(r)
+                withAnimation(.easeOut(duration: 0.2)) { undo = nil }
+            } label: {
+                T("Hoàn tác", 13.5, .bold, Color(hex: 0x9CC0FF))
+                    .frame(height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 48)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(hex: 0x14181F)))
+        .shadow(color: Color.black.opacity(0.18), radius: 10, y: 5)
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.bottom, Metrics.safeBottom > 0 ? 0 : 12)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     private var emptyText: String {
@@ -652,9 +704,23 @@ struct CommentRow: View {
     let closing: Bool
     let customer: Customer?
     let isNew: Bool
+    /// Đang sổ ra danh sách món đã in của khách trong phiên.
+    var expanded = false
+    /// Món đã in của khách này trong phiên, mới nhất trước.
+    var printedItems: [OrderItem] = []
+    var onToggle: (() -> Void)? = nil
+    var onRemove: ((OrderItem) -> Void)? = nil
     let onPrint: () -> Void
 
     var body: some View {
+        VStack(spacing: 0) {
+            main
+            if expanded { drawer }
+        }
+        .cardStyle(20, fill: closing ? Theme.peachRow : Theme.card, border: expanded ? Theme.orange : (closing ? Theme.peachLine : Theme.line))
+    }
+
+    private var main: some View {
         HStack(spacing: 9.7) {
             Avatar(text: initialsOf(c.nickname), size: 34, fontSize: 12.5, seed: c.uniqueId)
             VStack(alignment: .leading, spacing: closing ? 3.4 : 2) {
@@ -680,6 +746,8 @@ struct CommentRow: View {
                 .frame(height: 17)
                 CommentText(text: c.text, size: 14, highlight: closing)
             }
+            // Bấm vào phần tên và chữ để sổ ra / thu gọn; nút in vẫn riêng.
+            .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: onPrint) {
                 Icon(name: .printer, size: 15, weight: 2.2)
                     .frame(width: 34, height: 34)
@@ -689,7 +757,147 @@ struct CommentRow: View {
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 9.5)
-        .cardStyle(20, fill: closing ? Theme.peachRow : Theme.card, border: closing ? Theme.peachLine : Theme.line)
+        .contentShape(Rectangle())
+        .onTapGesture { onToggle?() }
+    }
+
+    /// Lề trái của phần sổ ra: thẳng với chữ bình luận (lề 13 + ảnh 34 + khoảng 9.7).
+    private static let drawerLead: CGFloat = 56.7
+
+    private var drawer: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                T(printedItems.isEmpty ? "Chưa in đơn nào của khách này trong phiên"
+                                       : "Đã in trong phiên · \(printedItems.count) đơn", 11, .semibold, Theme.muted)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Button { onToggle?() } label: {
+                    HStack(spacing: 2) {
+                        T("Thu gọn", 11, .semibold, Theme.accentDeep)
+                        Icon(name: .chevronUp, size: 11, weight: 3, color: Theme.accentDeep)
+                    }
+                    .frame(height: 24)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.trailing, 13)
+            ForEach(Array(printedItems.enumerated()), id: \.element.id) { i, it in
+                if i > 0 { Rectangle().fill(Theme.peachLine.opacity(0.6)).frame(height: 1).padding(.trailing, 13) }
+                itemRow(it)
+            }
+        }
+        .padding(.leading, Self.drawerLead)
+        .padding(.top, 5)
+        .padding(.bottom, 7)
+        .overlay(alignment: .top) {
+            DashLine().stroke(Theme.peachLine, style: StrokeStyle(lineWidth: 1, dash: [4, 3])).frame(height: 1)
+        }
+    }
+
+    private func itemRow(_ it: OrderItem) -> some View {
+        let mine = (it.commentId ?? it.id) == c.id
+        var info = "· " + timeText(it.ts)
+        if mine { info += " · cmt này" } else if !it.printed { info += " · chưa in tem" }
+        return HStack(spacing: 7) {
+            T(it.productLabel, 12.5, .bold)
+                .lineLimit(1)
+                .padding(.horizontal, 6)
+                .frame(height: 20)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.peachCode))
+                .layoutPriority(1)
+            T(money(it.lineTotal) + (it.qty > 1 ? " ×\(it.qty)" : ""), 12.5, .semibold).lineLimit(1).fixedSize()
+            T(info, 11, mine ? .semibold : .medium, mine ? Theme.accentDeep : Theme.faint).lineLimit(1)
+            Spacer(minLength: 0)
+            // Thẳng hàng dưới nút in: nút in rộng 34 cách mép 13, nút X rộng 28.
+            Button { onRemove?(it) } label: {
+                Icon(name: .close, size: 13, weight: 2.8, color: Theme.red)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(Theme.redSoft))
+                    .frame(width: 40, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 10)
+        }
+        .frame(height: 36)
+    }
+}
+
+/// Đường ngang một nét (dùng cho gạch đứt).
+private struct DashLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: rect.midY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return p
+    }
+}
+
+// MARK: - Bỏ món in nhầm
+
+struct RemovePrintedItemSheet: View {
+    let customerId: String
+    let item: OrderItem
+    let onRemoved: (Store.RemovedItem) -> Void
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var ui: AppUI
+
+    private var customer: Customer? { store.customers.first { $0.id == customerId } }
+
+    /// Đơn chứa món đã gửi đi thì bỏ món ở đây không sửa được vận đơn đã tạo.
+    private var alreadySent: Bool {
+        guard let customer, let o = store.orders(of: customer).first(where: { $0.items.contains { $0.id == item.id } }) else { return false }
+        return !Vtp.state(o).isPending || !(o.ship?.vtpCode ?? "").isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            T("Bỏ \(item.productLabel) khỏi đơn của \(customer?.displayName ?? "khách")?", 17, .heavy, Theme.ink, track: -0.3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 6)
+            T(alreadySent
+              ? "Đơn này đã gửi đi: bỏ món ở đây không sửa vận đơn đã tạo. Phiếu đã in giấy thì bạn tự xé bỏ."
+              : "Món này bị gỡ khỏi đơn của khách. Phiếu đã in giấy thì bạn tự xé bỏ.",
+              13.5, .medium, alreadySent ? Theme.red : Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 14)
+            HStack(spacing: 10) {
+                T(item.productLabel, 13.5, .bold)
+                    .lineLimit(1)
+                    .padding(.horizontal, 7)
+                    .frame(height: 22)
+                    .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.peachCode))
+                T(money(item.lineTotal), 13.5, .bold).lineLimit(1).fixedSize()
+                T("· in lúc " + timeText(item.ts), 13, .medium, Theme.faint).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 46)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.field)
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.line, lineWidth: 1)))
+            .padding(.bottom, 16)
+            Button {
+                ui.dismissSheet()
+                if let r = store.removePrintedItem(customerId: customerId, itemId: item.id) { onRemoved(r) }
+            } label: {
+                T("Bỏ khỏi đơn", 15, .bold, .white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(Capsule().fill(Theme.red))
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 8)
+            Button { ui.dismissSheet() } label: {
+                T("Giữ lại", 15, .bold)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(Capsule().fill(Theme.field))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.top, 4)
     }
 }
 

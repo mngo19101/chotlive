@@ -166,6 +166,44 @@ final class SyncTests: XCTestCase {
         XCTAssertNil(store.makeSyncUpdate())
     }
 
+    func testPrintedItemsListOnlyThisCustomersItemsInSession() {
+        let store = makeStore()
+        _ = store.saveToCustomer(comment("c1"))
+        _ = store.saveToCustomer(comment("c2"))
+        _ = store.saveToCustomer(comment("c3", session: "s0"))
+        _ = store.saveToCustomer(comment("k1", user: "khac"))
+        let ids = store.printedItems(of: comment("c9"), sessionId: "s1").map(\.id)
+        XCTAssertEqual(Set(ids), ["c1", "c2"])
+    }
+
+    func testRemovePrintedItemThenUndoSendsItemBack() throws {
+        let store = makeStore()
+        markSynced(store)
+        _ = store.saveToCustomer(comment("c1"))
+        let removed = try XCTUnwrap(store.removePrintedItem(customerId: "khach", itemId: "c1"))
+        XCTAssertTrue(store.customers.isEmpty)
+        XCTAssertEqual(store.syncState.deletedItems, ["c1"])
+
+        store.restore(removed)
+        XCTAssertEqual(store.customers.first?.items.map(\.id), ["c1"])
+        // Hoàn tác trước khi gửi: không được báo server xoá món này nữa.
+        let update = try XCTUnwrap(store.makeSyncUpdate())
+        XCTAssertEqual(update.deletedItemIds, [])
+        XCTAssertEqual(update.customers.first?.items.map(\.id), ["c1"])
+    }
+
+    func testUndoKeepsItemPlaceAmongOtherItems() throws {
+        let store = makeStore()
+        _ = store.saveToCustomer(comment("c1"))
+        _ = store.saveToCustomer(comment("c2"))
+        _ = store.saveToCustomer(comment("c3"))
+        let removed = try XCTUnwrap(store.removePrintedItem(customerId: "khach", itemId: "c2"))
+        XCTAssertEqual(store.customers[0].items.map(\.id), ["c1", "c3"])
+        store.restore(removed)
+        store.restore(removed)
+        XCTAssertEqual(store.customers[0].items.map(\.id), ["c1", "c2", "c3"])
+    }
+
     func testChangeWhileSendingIsSentAgain() {
         let store = makeStore()
         markSynced(store)

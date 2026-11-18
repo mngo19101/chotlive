@@ -286,6 +286,51 @@ final class Store: ObservableObject {
         save()
     }
 
+    /// Khách của bình luận, cùng cách nhận khách như `saveToCustomer`.
+    func customer(of c: LiveComment) -> Customer? {
+        let key = Self.key(uniqueId: c.uniqueId, userId: c.userId)
+        return customers.first { $0.id == key || (!c.userId.isEmpty && $0.userId == c.userId) }
+    }
+
+    /// Các món đã bấm in cho khách của bình luận này trong phiên, mới nhất trước.
+    func printedItems(of c: LiveComment, sessionId: String) -> [OrderItem] {
+        guard let owner = customer(of: c) else { return [] }
+        return owner.items.filter { $0.sessionId == sessionId }.sorted { $0.ts > $1.ts }
+    }
+
+    /// Bản lưu để hoàn tác khi bỏ một món in nhầm.
+    struct RemovedItem: Equatable {
+        var customer: Customer
+        var item: OrderItem
+        var index: Int
+    }
+
+    /// Bỏ một món in nhầm (khách nhường cho người khác). Trả về bản lưu để hoàn tác.
+    @discardableResult
+    func removePrintedItem(customerId: String, itemId: String) -> RemovedItem? {
+        guard let idx = customers.firstIndex(where: { $0.id == customerId }),
+              let ii = customers[idx].items.firstIndex(where: { $0.id == itemId }) else { return nil }
+        let removed = RemovedItem(customer: customers[idx], item: customers[idx].items[ii], index: ii)
+        deleteItem(customerId: customerId, itemId: itemId)
+        return removed
+    }
+
+    /// Trả lại món vừa bỏ, đúng chỗ cũ trong đơn của khách.
+    func restore(_ r: RemovedItem) {
+        // Còn nằm trong danh sách xoá chưa gửi thì server sẽ bỏ món này đi, nên rút ra trước.
+        syncState.deletedItems.remove(r.item.id)
+        if let idx = customers.firstIndex(where: { $0.id == r.customer.id }) {
+            guard !customers[idx].items.contains(where: { $0.id == r.item.id }) else { return }
+            customers[idx].items.insert(r.item, at: min(r.index, customers[idx].items.count))
+        } else {
+            var c = r.customer
+            c.items = [r.item]
+            customers.append(c)
+        }
+        touchCustomer(r.customer.id)
+        save()
+    }
+
     func deleteOrder(_ o: Order) {
         guard let idx = customers.firstIndex(where: { $0.id == o.customer.id }) else { return }
         let ids = Set(o.items.map(\.id))
