@@ -226,8 +226,8 @@ struct DateFilterSheet: View {
     @EnvironmentObject var store: Store
     let onApply: (DateFilter) -> Void
 
-    /// Tháng đang hiện, luôn là ngày đầu tháng. Đặt một lần trong init: đặt trong `onAppear` thì `ViewThatFits`
-    /// gọi lại mỗi khi lịch đổi chiều cao (tháng 5 hàng ↔ 6 hàng) và kéo lịch về tháng cũ.
+    /// Tháng đang hiện, luôn là ngày đầu tháng. Đặt một lần trong init: `onAppear` có thể chạy lại khi bảng
+    /// dựng lại và kéo lịch về tháng cũ.
     @State private var month: Date
     @State private var pickerYear: Int
     @State private var pickingMonth = false
@@ -240,6 +240,8 @@ struct DateFilterSheet: View {
     @State private var editingFrom: Bool? = nil
     @State private var dragging = false
     @State private var dragLast: Date?
+    @State private var contentHeight: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
 
     private static let rowHeight: CGFloat = 46
     private static let weekdayHeight: CGFloat = 30
@@ -258,11 +260,30 @@ struct DateFilterSheet: View {
     }
 
     var body: some View {
-        // Máy màn nhỏ: nội dung không đủ chỗ thì cho cuộn.
-        ViewThatFits(in: .vertical) {
+        // Một ScrollView duy nhất, cao vừa bằng nội dung và tối đa bằng màn hình. Trước đây `ViewThatFits` đổi
+        // qua lại giữa bản không cuộn và bản cuộn khi mở khung giờ: hai bản chồng lên nhau và sheet giật.
+        ScrollView(showsIndicators: false) {
             content
-            ScrollView(showsIndicators: false) { content }
+                .scrollDisabled(false)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: DateSheetContentHeight.self, value: g.size.height)
+                })
         }
+        .frame(maxHeight: contentHeight > 0 ? contentHeight : nil)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: DateSheetViewportHeight.self, value: g.size.height)
+        })
+        // Vừa màn hình thì không cho cuộn, để kéo ngoài lịch không làm cả bảng nảy.
+        .scrollDisabled(contentHeight <= viewportHeight + 0.5)
+        .onPreferenceChange(DateSheetContentHeight.self) { h in
+            guard abs(h - contentHeight) > 0.5 else { return }
+            if contentHeight == 0 {
+                contentHeight = h
+            } else {
+                withAnimation(.easeOut(duration: 0.18)) { contentHeight = h }
+            }
+        }
+        .onPreferenceChange(DateSheetViewportHeight.self) { viewportHeight = $0 }
     }
 
     private var content: some View {
@@ -369,11 +390,15 @@ struct DateFilterSheet: View {
             }
             .buttonStyle(.plain)
             Spacer()
-            if !pickingMonth {
+            // Luôn giữ chỗ cho hai nút: gỡ ra thì hàng thấp đi 8pt và cả bảng nhảy khi mở lưới tháng.
+            HStack(spacing: 0) {
                 navButton(.chevronLeft, enabled: true) { shiftMonth(-1) }
                 navButton(.chevronRight, enabled: canGoNextMonth) { shiftMonth(1) }
-                    .padding(.trailing, -4)
             }
+            .padding(.trailing, -4)
+            .opacity(pickingMonth ? 0 : 1)
+            .allowsHitTesting(!pickingMonth)
+            .accessibilityHidden(pickingMonth)
         }
     }
 
@@ -712,7 +737,7 @@ struct DateFilterSheet: View {
         return VStack(alignment: .leading, spacing: 5) {
             T(label, 12, .medium, Theme.muted)
             Button {
-                editingFrom = active ? nil : isFrom
+                withAnimation(.easeOut(duration: 0.18)) { editingFrom = active ? nil : isFrom }
             } label: {
                 T(minuteText(minute), 15, .bold)
                     .padding(.leading, 15)
@@ -765,4 +790,16 @@ struct DateFilterSheet: View {
         onApply(next)
         ui.dismissSheet()
     }
+}
+
+/// Chiều cao nội dung bảng chọn ngày, để ScrollView cao vừa đúng bằng nó.
+private struct DateSheetContentHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// Chiều cao thật của ScrollView sau khi bị màn hình giới hạn.
+private struct DateSheetViewportHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }

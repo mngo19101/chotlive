@@ -238,6 +238,7 @@ struct SheetLayer: View {
     private static let mountDelay: UInt64 = 30_000_000
     /// Spring đã tắt hẳn, sheet nằm ngoài màn hình nên gỡ lúc này không thấy giật.
     private static let removeDelay: UInt64 = 450_000_000
+    private static let backgroundOverhang: CGFloat = 400
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -266,7 +267,13 @@ struct SheetLayer: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, Metrics.safeBottom > 0 ? -6 : 16)
-                .background(TopRounded(radius: 28).fill(Theme.card).ignoresSafeArea(.container, edges: .bottom))
+                // Nền trắng kéo dài xuống dưới đáy màn hình: khi sheet đổi chiều cao có hoạt ảnh, mép dưới
+                // không bao giờ hở ra cho thấy lớp phủ đen. Phần thừa nằm ngoài màn hình nên không thấy.
+                .background(
+                    TopRounded(radius: 28).fill(Theme.card)
+                        .padding(.bottom, -Self.backgroundOverhang)
+                        .ignoresSafeArea(.container, edges: .bottom)
+                )
                 .offset(y: max(drag, 0))
                 .modifier(SheetSlide(progress: isUp ? 1 : 0))
                 .id(s.id)
