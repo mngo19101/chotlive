@@ -103,6 +103,9 @@ enum Demo {
         case "appearance":
             ui.tab = .me
             ui.push(.appearance)
+        case "vtpDraft":
+            ui.tab = .me
+            ui.push(.vtpDraft)
         default: break
         }
     }

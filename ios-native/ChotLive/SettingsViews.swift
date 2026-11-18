@@ -191,11 +191,11 @@ struct SettingsView: View {
                         .background(Capsule().fill(Theme.orange)).onAccent()
                 }
                 if let trailing2 {
+                    // Tên mục luôn hiện đủ; hai dòng trạng thái tự thu nhỏ khi máy hẹp.
                     VStack(alignment: .trailing, spacing: 2) {
-                        if let trailing { T(trailing, 12, .semibold, trailingColor).lineLimit(1) }
-                        T(trailing2, 12, .semibold, trailing2Color).lineLimit(1)
+                        if let trailing { T(trailing, 12, .semibold, trailingColor).lineLimit(1).minimumScaleFactor(0.75) }
+                        T(trailing2, 12, .semibold, trailing2Color).lineLimit(1).minimumScaleFactor(0.75)
                     }
-                    .fixedSize()
                 } else if let trailing {
                     T(trailing, 12, .semibold, trailingColor).lineLimit(1).fixedSize()
                 }
