@@ -104,7 +104,8 @@ final class VtpDraftTests: XCTestCase {
         let exp = VtpJ.jwtExpiry(jwt(expiresIn: 3600))
         XCTAssertNotNil(exp)
         XCTAssertGreaterThan(exp!.timeIntervalSinceNow, 3500)
-        XCTAssertEqual(VtpDraftClient.dateText(Date(timeIntervalSince1970: 0)), "01/01/1970 07:00:00")
+        // 2026-01-01 00:00 UTC = 07:00 giờ Việt Nam (năm 1970 Việt Nam còn dùng UTC+8 nên không lấy mốc 0).
+        XCTAssertEqual(VtpDraftClient.dateText(Date(timeIntervalSince1970: 1_767_225_600)), "01/01/2026 07:00:00")
     }
 
     // MARK: - Phiên
