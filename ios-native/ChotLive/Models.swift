@@ -157,6 +157,16 @@ struct ShipInfo: Codable, Equatable {
     /// Đơn "chưa rõ vận đơn": mã Viettel Post vừa báo qua webhook mà chưa đơn nào nhận (máy chủ gợi ý, shop xác nhận).
     var vtpHint: String? = nil
     var vtpHintCod: Int? = nil
+    // Nháp Viettel Post do app đẩy từ máy (VtpDraftClient). App ghi, máy chủ chỉ lưu và đồng bộ.
+    /// Mã nháp Viettel Post cấp (ORDER_NUMBER). Mọi đơn của khách trong cùng nháp mang cùng mã.
+    var draftCode: String? = nil
+    var draftAt: Double? = nil
+    /// Băm nội dung đã đẩy (VtpDraftBody.hash): khác bản hiện tại là nháp trên Viettel Post đã cũ.
+    var draftHash: String? = nil
+    /// Tài khoản Viettel Post đã đẩy, đã che (0987 *** 321).
+    var draftAccount: String? = nil
+    var draftError: String? = nil
+    var draftErrorAt: Double? = nil
 
     init(state: String? = nil, pay: String? = nil, payer: String? = nil, deposit: Int? = nil, shipFee: Int? = nil,
          codOverride: Int? = nil, weightG: Int? = nil, exportedAt: Double? = nil, batchId: String? = nil,
@@ -170,6 +180,7 @@ struct ShipInfo: Codable, Equatable {
         case state, pay, payer, deposit, shipFee, codOverride, weightG, exportedAt, batchId, lengthCm, widthCm, heightCm
         case vtpCode, vtpOldCode, vtpFee, vtpCod, vtpGoods, vtpService, vtpStatus, vtpStatusName, vtpStatusAt, vtpKind, vtpNote, vtpError, vtpErrorAt
         case vtpHint, vtpHintCod
+        case draftCode, draftAt, draftHash, draftAccount, draftError, draftErrorAt
     }
 
     private static func text(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> String? {
@@ -216,6 +227,12 @@ struct ShipInfo: Codable, Equatable {
         vtpErrorAt = Self.number(c, .vtpErrorAt)
         vtpHint = Self.text(c, .vtpHint)
         vtpHintCod = Self.money(Self.number(c, .vtpHintCod))
+        draftCode = Self.text(c, .draftCode)
+        draftAt = Self.number(c, .draftAt)
+        draftHash = Self.text(c, .draftHash)
+        draftAccount = Self.text(c, .draftAccount)
+        draftError = Self.text(c, .draftError)
+        draftErrorAt = Self.number(c, .draftErrorAt)
     }
 
     /// Ghi cả giá trị rỗng (null) để server xoá đúng trường đã bỏ, ví dụ COD nhập tay.
@@ -247,6 +264,16 @@ struct ShipInfo: Codable, Equatable {
         try c.encodeIfPresent(vtpNote, forKey: .vtpNote)
         try c.encodeIfPresent(vtpError, forKey: .vtpError)
         try c.encodeIfPresent(vtpErrorAt, forKey: .vtpErrorAt)
+        // Nháp do app ghi: gửi cả null để "bỏ nhãn nháp" trên máy này cũng xoá trên máy chủ. Chỉ gửi khi đơn
+        // từng có nháp, để đơn thường không mang thêm 6 trường rỗng.
+        if draftCode != nil || draftAt != nil || draftHash != nil || draftError != nil {
+            try c.encode(draftCode, forKey: .draftCode)
+            try c.encode(draftAt, forKey: .draftAt)
+            try c.encode(draftHash, forKey: .draftHash)
+            try c.encode(draftAccount, forKey: .draftAccount)
+            try c.encode(draftError, forKey: .draftError)
+            try c.encode(draftErrorAt, forKey: .draftErrorAt)
+        }
     }
 }
 

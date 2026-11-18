@@ -462,10 +462,61 @@ final class Store: ObservableObject {
                 s.vtpKind = old.vtpKind
                 s.vtpError = old.vtpError
                 s.vtpErrorAt = old.vtpErrorAt
+                // Giữ mã nháp Viettel Post: sửa đơn xong vẫn phải biết nháp cũ để xoá hoặc báo "nháp cũ".
+                s.draftCode = old.draftCode
+                s.draftAt = old.draftAt
+                s.draftHash = old.draftHash
+                s.draftAccount = old.draftAccount
+                s.draftError = old.draftError
+                s.draftErrorAt = old.draftErrorAt
             }
             s.exportedAt = nil
             s.batchId = nil
             changes[id] = s
+        }
+        setShip(changes)
+    }
+
+    // MARK: - Nháp Viettel Post (đẩy từ máy)
+
+    /// Đẩy nháp thành công: mọi đơn của khách trong lần đẩy mang cùng mã nháp và băm nội dung đã gửi.
+    func markDraft(_ orders: [Order], code: String, hash: String, account: String, at now: Date = Clock.now) {
+        editDraft(orders) { s in
+            s.draftCode = code
+            s.draftHash = hash
+            s.draftAccount = account
+            s.draftAt = (now.timeIntervalSince1970 * 1000).rounded()
+            s.draftError = nil
+            s.draftErrorAt = nil
+        }
+    }
+
+    /// Đẩy nháp lỗi: ghi lý do, KHÔNG đụng mã nháp cũ (nếu có) để còn xoá được.
+    func markDraftError(_ orders: [Order], error: String, at now: Date = Clock.now) {
+        editDraft(orders) { s in
+            s.draftError = String(error.prefix(200))
+            s.draftErrorAt = (now.timeIntervalSince1970 * 1000).rounded()
+        }
+    }
+
+    /// Bỏ nhãn nháp (đã xoá trên Viettel Post, hoặc người dùng tự xoá trên web): đơn về "Chưa đẩy".
+    func clearDraft(_ orders: [Order]) {
+        editDraft(orders) { s in
+            s.draftCode = nil
+            s.draftHash = nil
+            s.draftAccount = nil
+            s.draftAt = nil
+            s.draftError = nil
+            s.draftErrorAt = nil
+        }
+    }
+
+    private func editDraft(_ orders: [Order], _ edit: (inout ShipInfo) -> Void) {
+        var changes: [String: ShipInfo] = [:]
+        for o in orders {
+            var s = order(id: o.id)?.ship ?? o.ship ?? ShipInfo()
+            edit(&s)
+            changes[o.id] = s
         }
         setShip(changes)
     }
