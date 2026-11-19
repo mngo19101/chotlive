@@ -114,7 +114,8 @@ enum VtpDraftBody {
     /// Băm những gì quyết định nội dung nháp: người nhận, địa chỉ, tiền, ai trả cước, cân nặng, kích thước,
     /// dịch vụ, ghi chú và danh sách đơn. Đổi một trong số đó là nháp trên Viettel Post đã cũ.
     static func hash(_ g: Vtp.Group, service: String) -> String {
-        let s = g.summary
+        // Bản tạm tính (chưa áp cước thật): cước Viettel Post báo về sau không làm nháp vừa đẩy bị coi là cũ.
+        let s = g.baseSummary ?? g.summary
         let size = s.size.map { "\($0.0)x\($0.1)x\($0.2)" } ?? ""
         let parts: [String] = [
             s.receiver, s.phone, s.address.line, String(s.goods), String(s.cod), s.senderPays ? "S" : "R",
@@ -127,7 +128,7 @@ enum VtpDraftBody {
 
     enum Status: Equatable {
         /// Chưa đẩy lần nào (hoặc đã bỏ nhãn).
-        case none
+        case notPushed
         /// Đã có nháp trên Viettel Post, khớp đơn hiện tại.
         case pushed(code: String, at: Double?)
         /// Có nháp nhưng đơn đã sửa / thêm đơn sau khi đẩy: cần đẩy lại.
@@ -146,7 +147,7 @@ enum VtpDraftBody {
             return .stale(code: code)
         }
         if let e = ships.compactMap({ $0?.draftError }).last, !e.isEmpty { return .failed(e) }
-        return .none
+        return .notPushed
     }
 
     /// Mọi mã nháp đang gắn với khách (thường 1; nhiều hơn khi có đơn đẩy riêng trước đó): để xoá hết khi đẩy lại.

@@ -95,7 +95,7 @@ final class VtpDraftBodyTests: XCTestCase {
     func testStatus() {
         var ship = ShipInfo(state: "ready", pay: "cod")
         let fresh = group([order("a", ship: ship)])
-        XCTAssertEqual(VtpDraftBody.status(fresh, service: "VSL9"), .none)
+        XCTAssertEqual(VtpDraftBody.status(fresh, service: "VSL9"), .notPushed)
 
         ship.draftCode = "157491796322"
         ship.draftHash = VtpDraftBody.hash(fresh, service: "VSL9")

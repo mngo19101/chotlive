@@ -143,56 +143,6 @@ func weightText(_ g: Int) -> String {
     return s + "kg"
 }
 
-// MARK: - Thanh Sẵn sàng xuất
-
-struct ReadyExportBanner: View {
-    let groups: [Vtp.Group]
-    /// Đã kết nối Viettel Post: soát nháp rồi tạo vận đơn ("Soát & tạo") thay cho xuất Excel ("Xuất VTP").
-    var connected = false
-    let onExport: () -> Void
-
-    private var subtitle: String {
-        let start = Calendar.current.startOfDay(for: Clock.now)
-        let merged = groups.filter { $0.orders.count > 1 }.count
-        let older = groups.filter { g in g.orders.contains { $0.lastTs < start } }.count
-        let cod = groups.reduce(0) { $0 + $1.summary.cod }
-        let failed = connected ? groups.filter { g in g.orders.contains { VtpTrack.lastError($0) != nil } }.count : 0
-        let noPhone = connected ? groups.filter { $0.summary.problems.contains("Thiếu số điện thoại") }.count : 0
-        var parts: [String] = []
-        if failed > 0 { parts.append("\(failed) khách tạo vận đơn lỗi") }
-        if noPhone > 0 { parts.append("\(noPhone) khách thiếu SĐT") }
-        if merged > 0 { parts.append("\(merged) khách gộp nhiều đơn") }
-        if older > 0 { parts.append("\(older) khách có đơn duyệt từ ngày trước") }
-        parts.append("Thu hộ \(money(cod))")
-        return parts.joined(separator: " · ")
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                // Đã kết nối Viettel Post: đơn ở Chờ gửi là nháp sẵn, bấm Soát & tạo mở bảng nháp.
-                T(connected ? "\(groups.count) nháp chờ tạo vận đơn" : "\(groups.count) khách sẵn sàng xuất", 14, .bold)
-                T(subtitle, 12, .medium, Theme.muted).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-            Button(action: onExport) {
-                HStack(spacing: 6) {
-                    Icon(name: connected ? .truck : .download, size: 15, weight: 2.4)
-                    T(connected ? "Soát & tạo" : "Xuất VTP", 14, .bold).fixedSize()
-                }
-                .padding(.horizontal, 15)
-                .frame(height: 40)
-                .background(Capsule().fill(Theme.orange))
-                .onAccent()
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .cardStyle(18, fill: Theme.peachSoft, border: Theme.peachLine)
-    }
-}
-
 // MARK: - Bảng Duyệt đơn
 
 struct ShipReviewSheet: View {
@@ -319,10 +269,13 @@ struct ShipReviewSheet: View {
         }
     }
 
-    /// Quay lại bảng Nháp vận đơn; `open` thì mở thẳng nháp của khách này.
+    /// Quay lại tab Chờ gửi (danh sách nháp nằm ngay trong tab); `open` thì mở thẳng nháp của khách này.
     private func backToDraft(open: Bool) {
         let customerId = focus?.customer.id
-        ui.present(dim: 0.42) { VtpExportSheet(openDetail: open ? customerId : nil) }
+        ui.dismissSheet()
+        ui.tab = .orders
+        ui.ordersFilter = 2
+        if open { ui.draftDetail = customerId }
     }
 
     /// Mỗi lần mở bảng hay đổi lựa chọn, COD quay về số tự cộng.
@@ -589,6 +542,13 @@ struct VtpExportSheet: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var client: LiveClient
     @EnvironmentObject var ui: AppUI
+    @EnvironmentObject var vtpDraft: VtpDraftClient
+    /// Nằm luôn trong tab Chờ gửi (thay cho bảng "Nháp vận đơn" bật lên trước đây).
+    let embedded: Bool
+    /// Ô tìm của tab Đơn hàng: lọc danh sách khách khi nằm trong tab.
+    let search: String
+    /// Lọc trong tab Chờ gửi: 0 tất cả, 1 chưa đẩy, 2 nháp VTP, 3 cần sửa.
+    @State private var draftFilter = 0
     @State private var sending = false
     /// Kết quả lần tạo vận đơn vừa xong (cùng các khách đã gửi), hiện thay cho danh sách.
     @State private var result: (groups: [Vtp.Group], results: [VtpCreateResult])?
@@ -603,12 +563,50 @@ struct VtpExportSheet: View {
     @State private var detailId: String?
 
     /// `openDetail`: mở thẳng nháp của khách này (dùng khi vừa sửa Hàng & tiền xong).
-    init(openDetail: String? = nil) {
+    init(openDetail: String? = nil, embedded: Bool = false, search: String = "") {
         _detailId = State(initialValue: openDetail)
+        self.embedded = embedded
+        self.search = search
+    }
+
+    /// Khách khớp ô tìm (tên, SĐT, @tiktok, mã đơn).
+    private func matchesSearch(_ g: Vtp.Group) -> Bool {
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return true }
+        let s = g.summary
+        let hay = ([s.receiver, s.phone, g.customer.nickname, g.customer.uniqueId] + g.orders.compactMap(\.code))
+            .joined(separator: " ").lowercased()
+        return hay.contains(q)
+    }
+
+    /// Danh sách đang hiện: trong tab Chờ gửi thì theo ô tìm và hàng lọc nháp.
+    private var groups: [Vtp.Group] {
+        let all = allGroups
+        guard embedded else { return all }
+        return all.filter { matchesSearch($0) && matchesDraftFilter($0, draftFilter) }
+    }
+
+    private func matchesDraftFilter(_ g: Vtp.Group, _ f: Int) -> Bool {
+        let st = VtpDraftBody.status(g, service: service)
+        switch f {
+        case 1:
+            if case .notPushed = st { return !g.isBad }
+            return false
+        case 2:
+            switch st {
+            case .pushed, .stale: return true
+            default: return false
+            }
+        case 3:
+            if case .failed = st { return true }
+            return g.isBad
+        default:
+            return true
+        }
     }
 
     /// Đơn ở Chờ gửi là nháp sẵn. Viettel Post hiểu địa chỉ sang phường/tỉnh khác thì nháp đó chưa cho tạo.
-    private var groups: [Vtp.Group] {
+    private var allGroups: [Vtp.Group] {
         Vtp.readyGroups(store.allOrders()).map { g in
             guard api, let q = quotes[VtpQuote.signature(g, service: service)] else { return g }
             var out = g
@@ -640,16 +638,26 @@ struct VtpExportSheet: View {
     var body: some View {
         Group {
             if let result {
-                VtpResultView(groups: result.groups, results: result.results)
-            } else if let id = detailId, let g = groups.first(where: { $0.id == id }) {
+                VtpResultView(groups: result.groups, results: result.results, onDone: embedded ? { self.result = nil } : nil)
+            } else if let id = detailId, let g = allGroups.first(where: { $0.id == id }) {
                 detailView(g)
             } else {
                 picker
             }
         }
-        .frame(height: Metrics.sheetHeight(top: UIScreen.main.bounds.height * 0.12))
+        .frame(height: embedded ? nil : Metrics.sheetHeight(top: UIScreen.main.bounds.height * 0.12))
+        .frame(maxHeight: embedded ? .infinity : nil)
+        .onAppear { takeDetailRequest() }
+        .onChange(of: ui.draftDetail) { _ in takeDetailRequest() }
         // Khoá theo mọi nháp đủ địa chỉ (không theo cái đang hỏi), để lượt hỏi đang chạy không bị huỷ giữa chừng.
         .task(id: quoteKey) { await loadQuotes() }
+    }
+
+    /// Vừa sửa Hàng & tiền xong (bảng Duyệt đơn): mở lại đúng nháp của khách đó.
+    private func takeDetailRequest() {
+        guard embedded, let id = ui.draftDetail else { return }
+        detailId = id
+        ui.draftDetail = nil
     }
 
     private var quoteKey: String {
@@ -745,7 +753,14 @@ struct VtpExportSheet: View {
                     if !codes.isEmpty { T(codes, 12.5, .medium, Theme.muted).lineLimit(2) }
                 }
                 Spacer()
-                SheetClose()
+                if embedded {
+                    Button { detailId = nil } label: {
+                        Icon(name: .close, size: 17, weight: 2.4).frame(width: 36, height: 36).background(Circle().fill(Theme.field))
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    SheetClose()
+                }
             }
             .padding(.horizontal, Metrics.gutter)
             .padding(.bottom, 12)
@@ -826,7 +841,7 @@ struct VtpExportSheet: View {
             .frame(maxHeight: .infinity)
 
             HStack(spacing: 10) {
-                OutlineButton(title: "Để nháp", height: 52) { detailId = nil }
+                OutlineButton(title: embedded ? "Quay lại" : "Để nháp", height: 52) { detailId = nil }
                     .frame(width: (Metrics.screenWidth - 50) / 3)
                 PrimaryButton(title: sending ? "Đang tạo vận đơn…" : busy ? "Đang tính cước…" : "Tạo vận đơn này",
                               icon: .truck, fontSize: 15, enabled: !g.isBad && !sending && !busy) {
@@ -844,17 +859,21 @@ struct VtpExportSheet: View {
         let pick = chosen
         let bad = list.filter(\.isBad).count
         return VStack(spacing: 0) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    T(api ? "Nháp vận đơn" : "Xuất Viettel Post", 20, .heavy, Theme.ink, track: -0.3)
-                    T(api ? "\(list.count) nháp · \(list.count - bad) sẵn sàng\(bad > 0 ? " · \(bad) cần sửa" : "")"
-                          : "\(list.count - bad) khách sẵn sàng gửi\(bad > 0 ? " · \(bad) khách cần sửa" : "")", 13, .medium, Theme.muted)
-                        .lineLimit(1).minimumScaleFactor(0.85)
+            if embedded {
+                draftChips
+            } else {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        T(api ? "Nháp vận đơn" : "Xuất Viettel Post", 20, .heavy, Theme.ink, track: -0.3)
+                        T(api ? "\(list.count) nháp · \(list.count - bad) sẵn sàng\(bad > 0 ? " · \(bad) cần sửa" : "")"
+                              : "\(list.count - bad) khách sẵn sàng gửi\(bad > 0 ? " · \(bad) khách cần sửa" : "")", 13, .medium, Theme.muted)
+                            .lineLimit(1).minimumScaleFactor(0.85)
+                    }
+                    Spacer()
+                    SheetClose()
                 }
-                Spacer()
-                SheetClose()
+                .padding(.horizontal, Metrics.gutter)
             }
-            .padding(.horizontal, Metrics.gutter)
 
             HStack {
                 T("ĐÃ CHỌN \(pick.count)", 12, .bold, Theme.muted, track: 0.4)
@@ -870,15 +889,22 @@ struct VtpExportSheet: View {
                 .disabled(okIds.isEmpty)
             }
             .padding(.horizontal, Metrics.gutter + 4)
-            .padding(.top, 12)
+            .padding(.top, embedded ? 8 : 12)
             .padding(.bottom, 8)
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 10) {
                     if list.isEmpty {
-                        T("Chưa có đơn nào đã duyệt.", 14, .medium, Theme.muted).padding(.vertical, 30)
+                        T(embedded && !allGroups.isEmpty ? "Không có khách nào khớp." : "Chưa có đơn nào đã duyệt.", 14, .medium, Theme.muted)
+                            .padding(.vertical, 30)
                     }
-                    if api && !list.isEmpty {
+                    if embedded && !list.isEmpty {
+                        T("Đẩy nháp: vào mục Đơn nháp trên viettelpost.vn, chưa gọi bưu tá. Lên vận đơn: tạo vận đơn thật, bưu tá tới lấy.",
+                          12.5, .medium, Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                    } else if api && !list.isEmpty {
                         T("Viettel Post chưa nhận đơn nào. Soát xong rồi mới bấm Tạo.", 12.5, .medium, Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -967,11 +993,57 @@ struct VtpExportSheet: View {
     private func tagList(_ g: Vtp.Group, olderDay: String?) -> [(String, Color, Color)] {
         var tags: [(String, Color, Color)] = []
         if g.isBad { tags.append(("cần sửa", Theme.red, Theme.redSoft)) }
+        if let d = draftTag(g) { tags.append(d) }
         if g.orders.count > 1 { tags.append(("gộp \(g.orders.count) đơn", Theme.gomInk, Theme.gomTag)) }
         if let olderDay { tags.append(("duyệt \(olderDay)", Theme.muted, Theme.grayBadge)) }
         if g.summary.allPaid { tags.append(("bank đủ", Theme.green, Theme.greenSoft)) }
         if g.summary.address.ok && g.summary.address.isOld { tags.append(("địa chỉ cũ", Theme.muted, Theme.grayBadge)) }
         return tags
+    }
+
+    /// Nhãn nháp Viettel Post của khách: đã đẩy (giờ đẩy), nháp cũ, lỗi đẩy, chưa đẩy (khi đã đăng nhập).
+    private func draftTag(_ g: Vtp.Group) -> (String, Color, Color)? {
+        switch VtpDraftBody.status(g, service: service) {
+        case .pushed(_, let at):
+            var when = ""
+            if let at {
+                let d = Date(timeIntervalSince1970: at / 1000)
+                when = " · \(timeText(d))"
+            }
+            return ("Nháp VTP" + when, VtpDraftColors.ink, VtpDraftColors.soft)
+        case .stale:
+            return ("Nháp cũ", Theme.gomInk, Theme.gomTag)
+        case .failed:
+            return ("Lỗi đẩy nháp", Theme.red, Theme.redSoft)
+        case .notPushed:
+            return embedded && vtpDraft.loggedIn && !g.isBad ? ("Chưa đẩy", Theme.muted, Theme.grayBadge) : nil
+        }
+    }
+
+    /// Hàng lọc nhanh trong tab Chờ gửi.
+    private var draftChips: some View {
+        let all = allGroups.filter { matchesSearch($0) }
+        let items: [(id: Int, title: String)] = [(0, "Tất cả"), (1, "Chưa đẩy"), (2, "Nháp VTP"), (3, "Cần sửa")]
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(items, id: \.id) { item in
+                    let n = all.filter { matchesDraftFilter($0, item.id) }.count
+                    let on = draftFilter == item.id
+                    Button {
+                        draftFilter = item.id
+                        touched = false
+                    } label: {
+                        T("\(item.title) \(n)", 12.5, .bold, on ? Theme.card : Theme.muted)
+                            .padding(.horizontal, 12)
+                            .frame(height: 30)
+                            .background(Capsule().fill(on ? Theme.ink : Theme.card))
+                            .overlay(Capsule().strokeBorder(on ? Color.clear : Theme.line, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, Metrics.gutter)
+        }
     }
 
     private func tag(_ text: String, _ color: Color, _ fill: Color) -> some View {
@@ -1023,17 +1095,45 @@ struct VtpExportSheet: View {
                 }
             }
             .zIndex(1)
-            HStack(spacing: 10) {
-                OutlineButton(title: "Huỷ", height: 52) { ui.dismissSheet() }
-                    .frame(width: (Metrics.screenWidth - 50) / 3)
-                if api {
-                    PrimaryButton(title: sending ? "Đang tạo \(pick.count) vận đơn…" : busy ? "Đang tính cước…" : "Tạo \(pick.count) vận đơn",
-                                  icon: .truck, fontSize: 15, enabled: !pick.isEmpty && !sending && !busy) {
-                        create(list.filter { pick.contains($0.id) })
+            if embedded {
+                HStack(spacing: 10) {
+                    Button { pushDrafts(picked) } label: {
+                        HStack(spacing: 6) {
+                            Icon(name: .arrowRight, size: 15, weight: 2.4, color: VtpDraftColors.brand)
+                            T("Đẩy nháp VTP", 15, .bold, VtpDraftColors.brand).lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(VtpDraftColors.brand, lineWidth: 2))
+                        .contentShape(Rectangle())
                     }
-                } else {
-                    PrimaryButton(title: "Xuất Excel · \(pick.count) vận đơn", icon: .download, fontSize: 15, enabled: !pick.isEmpty) {
-                        export(list.filter { pick.contains($0.id) })
+                    .buttonStyle(.plain)
+                    .disabled(pick.isEmpty || sending)
+                    .opacity(pick.isEmpty || sending ? 0.45 : 1)
+                    if api {
+                        PrimaryButton(title: sending ? "Đang tạo…" : busy ? "Đang tính cước…" : "Lên vận đơn",
+                                      icon: .truck, fontSize: 15, enabled: !pick.isEmpty && !sending && !busy) {
+                            create(picked)
+                        }
+                    } else {
+                        PrimaryButton(title: "Xuất Excel", icon: .download, fontSize: 15, enabled: !pick.isEmpty) {
+                            export(picked)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: 10) {
+                    OutlineButton(title: "Huỷ", height: 52) { ui.dismissSheet() }
+                        .frame(width: (Metrics.screenWidth - 50) / 3)
+                    if api {
+                        PrimaryButton(title: sending ? "Đang tạo \(pick.count) vận đơn…" : busy ? "Đang tính cước…" : "Tạo \(pick.count) vận đơn",
+                                      icon: .truck, fontSize: 15, enabled: !pick.isEmpty && !sending && !busy) {
+                            create(list.filter { pick.contains($0.id) })
+                        }
+                    } else {
+                        PrimaryButton(title: "Xuất Excel · \(pick.count) vận đơn", icon: .download, fontSize: 15, enabled: !pick.isEmpty) {
+                            export(list.filter { pick.contains($0.id) })
+                        }
                     }
                 }
             }
@@ -1048,7 +1148,22 @@ struct VtpExportSheet: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .padding(.top, 14)
+        .padding(.bottom, embedded ? 12 : 0)
         .background(Theme.card.overlay(alignment: .top) { HairLine() })
+    }
+
+    /// Đẩy các khách đã chọn vào mục Đơn nháp trên Viettel Post, từ máy này. Chưa đăng nhập phần 2 thì mở màn đăng nhập.
+    private func pushDrafts(_ chosen: [Vtp.Group]) {
+        guard !chosen.isEmpty else { return }
+        guard vtpDraft.loggedIn, !vtpDraft.sessionExpired else {
+            ui.dismissSheet()
+            ui.push(.vtpDraft)
+            ui.notify(vtpDraft.sessionExpired ? "Phiên Viettel Post trên máy này đã hết. Đăng nhập lại rồi đẩy nháp."
+                                              : "Đăng nhập Viettel Post trên máy này (phần 2 · Đẩy nháp) rồi đẩy nháp.")
+            return
+        }
+        let svc = service
+        ui.present(dim: 0.42) { VtpDraftPushSheet(groups: chosen, service: svc) }
     }
 
     private var servicePicker: some View {

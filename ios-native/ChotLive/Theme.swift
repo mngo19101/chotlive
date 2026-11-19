@@ -213,6 +213,10 @@ final class AppUI: ObservableObject {
     @Published var sheet: SheetItem?
     @Published var alert: String?
     @Published var confirm: ConfirmItem?
+    /// Mở thẳng phần soát chi tiết của khách này trong tab Chờ gửi (sau khi sửa Hàng & tiền xong).
+    @Published var draftDetail: String?
+    /// Chuyển tab Đơn hàng sang ô lọc này (2 = Chờ gửi) lần mở tới.
+    @Published var ordersFilter: Int?
 
     func push(_ r: Route) { path.append(r) }
     func pop() { if !path.isEmpty { path.removeLast() } }

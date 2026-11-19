@@ -27,36 +27,66 @@ struct OrdersView: View {
         let scoped = every.filter { dateFilter.contains($0.lastTs) }
         let groups = Vtp.readyGroups(every)
         let shown = list(every: every, scoped: scoped)
+        if filter == 2 {
+            // Chờ gửi: danh sách khách đã duyệt (gộp theo khách, mọi ngày) nằm luôn trong tab, thanh Đẩy nháp /
+            // Lên vận đơn ở dưới. Thay cho khung "N nháp chờ tạo vận đơn" + bảng "Nháp vận đơn" bật lên trước đây.
+            VStack(spacing: 0) {
+                VStack(spacing: Metrics.gap) {
+                    header(every: every, scoped: scoped, readyCount: groups.count)
+                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.top, 2)
+                .padding(.bottom, 10)
+                VtpExportSheet(embedded: true, search: search)
+            }
+            .background(Theme.bg)
+            .onAppear(perform: takeFilterRequest)
+            .onChange(of: ui.ordersFilter) { _ in takeFilterRequest() }
+        } else {
+            allTabs(every: every, scoped: scoped, readyCount: groups.count, shown: shown)
+                .onAppear(perform: takeFilterRequest)
+                .onChange(of: ui.ordersFilter) { _ in takeFilterRequest() }
+        }
+    }
+
+    private func takeFilterRequest() {
+        guard let f = ui.ordersFilter else { return }
+        filter = f
+        ui.ordersFilter = nil
+    }
+
+    @ViewBuilder
+    private func header(every: [Order], scoped: [Order], readyCount: Int) -> some View {
+        PageHeader(subtitle: filter == 2 ? "\(readyCount) khách chờ gửi · mọi ngày"
+                   : filter == 0 ? "\(every.count) đơn · mọi ngày" : "\(scoped.count) đơn · \(dateFilter.pillLabel)",
+                   title: "Đơn hàng") {
+            HeaderAddButton(title: "Tạo đơn") { ui.push(.orderCreate) }
+        }
+        HStack(spacing: 8) {
+            SearchField(text: $search, placeholder: client.vtpConnected ? "Tìm tên, @tiktok, mã vận đơn" : "Tìm tên hoặc @tiktok")
+            CircleButton(icon: .filter) {
+                ui.present(dim: 0.9) { DateFilterSheet(filter: dateFilter) { dateFilter = $0 } }
+            }
+        }
+        // Cả 5 tab nằm gọn một hàng, không phải kéo ngang. Hàng chip cuộn ngang cũ (lề âm)
+        // làm trang rộng hơn màn hình nên kéo qua lại bị lộ khoảng trắng.
+        HStack(spacing: 4) {
+            StatusTab(title: "Tất cả", count: VtpTrack.oneCardPerWaybill(every).count, selected: filter == 0) { filter = 0 }
+            statusTab("Đơn mới", 1, scoped)
+            // Chờ gửi đếm theo khách (mỗi khách một vận đơn), mọi ngày, đúng danh sách trong tab.
+            StatusTab(title: "Chờ gửi", count: readyCount, selected: filter == 2) { filter = 2 }
+            statusTab("Gom sau", 3, scoped)
+            statusTab("Đang giao", 4, scoped)
+        }
+        .padding(4)
+        .cardStyle(18)
+    }
+
+    private func allTabs(every: [Order], scoped: [Order], readyCount: Int, shown: [Order]) -> some View {
         GeometryReader { geo in
             ScrollView(showsIndicators: false) {
                 VStack(spacing: Metrics.gap) {
-                    PageHeader(subtitle: filter == 0 ? "\(every.count) đơn · mọi ngày" : "\(scoped.count) đơn · \(dateFilter.pillLabel)",
-                               title: "Đơn hàng") {
-                        HeaderAddButton(title: "Tạo đơn") { ui.push(.orderCreate) }
-                    }
-                    HStack(spacing: 8) {
-                        SearchField(text: $search, placeholder: client.vtpConnected ? "Tìm tên, @tiktok, mã vận đơn" : "Tìm tên hoặc @tiktok")
-                        CircleButton(icon: .filter) {
-                            ui.present(dim: 0.9) { DateFilterSheet(filter: dateFilter) { dateFilter = $0 } }
-                        }
-                    }
-                    // Cả 5 tab nằm gọn một hàng, không phải kéo ngang. Hàng chip cuộn ngang cũ (lề âm)
-                    // làm trang rộng hơn màn hình nên kéo qua lại bị lộ khoảng trắng.
-                    HStack(spacing: 4) {
-                        StatusTab(title: "Tất cả", count: VtpTrack.oneCardPerWaybill(every).count, selected: filter == 0) { filter = 0 }
-                        statusTab("Đơn mới", 1, scoped)
-                        statusTab("Chờ gửi", 2, scoped)
-                        statusTab("Gom sau", 3, scoped)
-                        statusTab("Đang giao", 4, scoped)
-                    }
-                    .padding(4)
-                    .cardStyle(18)
-
-                    if !groups.isEmpty {
-                        ReadyExportBanner(groups: groups, connected: client.vtpConnected) {
-                            ui.present(dim: 0.42) { VtpExportSheet() }
-                        }
-                    }
+                    header(every: every, scoped: scoped, readyCount: readyCount)
 
                     if filter == 4 {
                         let attention = shown.filter(VtpTrack.needsAction)

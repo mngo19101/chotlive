@@ -103,6 +103,9 @@ enum Demo {
         case "appearance":
             ui.tab = .me
             ui.push(.appearance)
+        case "ready":
+            ui.tab = .orders
+            ui.ordersFilter = 2
         case "vtpDraft":
             ui.tab = .me
             ui.push(.vtpDraft)

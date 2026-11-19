@@ -351,8 +351,12 @@ enum VtpActions {
 struct VtpResultView: View {
     let groups: [Vtp.Group]
     let results: [VtpCreateResult]
+    /// Nằm trong tab Chờ gửi (không phải bảng bật lên): "Xong" quay về danh sách thay vì đóng bảng.
+    var onDone: (() -> Void)? = nil
     @EnvironmentObject var client: LiveClient
     @EnvironmentObject var ui: AppUI
+
+    private func done() { if let onDone { onDone() } else { ui.dismissSheet() } }
 
     private var okList: [VtpCreateResult] { results.filter(\.ok) }
 
@@ -364,7 +368,7 @@ struct VtpResultView: View {
                     T(okList.isEmpty ? "Chưa tạo được vận đơn nào" : "\(okList.count) khách đã chuyển sang Đang giao", 13, .medium, Theme.muted)
                 }
                 Spacer()
-                Button { ui.dismissSheet() } label: {
+                Button { done() } label: {
                     Icon(name: .close, size: 17, weight: 2.4).frame(width: 36, height: 36).background(Circle().fill(Theme.field))
                 }
                 .buttonStyle(.plain)
@@ -382,7 +386,7 @@ struct VtpResultView: View {
                     }
                     .cardStyle(18)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    T("Đơn lỗi vẫn nằm ở “Chờ gửi”, sửa xong bấm Soát & tạo lại. Không tạo trùng vận đơn cho đơn đã thành công.",
+                    T("Đơn lỗi vẫn nằm ở “Chờ gửi”, sửa xong bấm Lên vận đơn lại. Không tạo trùng vận đơn cho đơn đã thành công.",
                       12.5, .medium, Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 4)
@@ -398,7 +402,7 @@ struct VtpResultView: View {
                         VtpActions.printLabels(okList.map(\.code), client: client, ui: ui)
                     }
                 }
-                OutlineButton(title: "Xong", height: 52) { ui.dismissSheet() }
+                OutlineButton(title: "Xong", height: 52) { done() }
             }
             .padding(.horizontal, Metrics.gutter)
             .padding(.top, 14)
@@ -484,7 +488,7 @@ struct VtpOrderBox: View {
         } else if let old = VtpTrack.cancelledCode(order) {
             VStack(alignment: .leading, spacing: 6) {
                 T("Vận đơn \(VtpTrack.pretty(old)) đã huỷ", 14, .bold, Theme.red)
-                T("Đơn đã về Chờ gửi. Bấm Soát & tạo ở tab Đơn hàng để tạo vận đơn mới.", 12.5, .medium, Theme.muted)
+                T("Đơn đã về Chờ gửi. Bấm Lên vận đơn ở tab Chờ gửi để tạo vận đơn mới.", 12.5, .medium, Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(15)
