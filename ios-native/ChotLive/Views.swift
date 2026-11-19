@@ -119,6 +119,7 @@ struct MainShell: View {
 
 struct TabsContainer: View {
     @EnvironmentObject var ui: AppUI
+    @State private var mounted: Set<AppTab> = [.sales]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -134,12 +135,17 @@ struct TabsContainer: View {
         .background(Theme.bg.ignoresSafeArea())
         .ignoresSafeArea(.container, edges: .bottom)
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        .onAppear { mounted.insert(ui.tab) }
+        .onChange(of: ui.tab) { mounted.insert($0) }
     }
 
+    @ViewBuilder
     private func tab<V: View>(_ t: AppTab, @ViewBuilder _ content: () -> V) -> some View {
-        content()
-            .opacity(ui.tab == t ? 1 : 0)
-            .allowsHitTesting(ui.tab == t)
+        if mounted.contains(t) || ui.tab == t {
+            content()
+                .opacity(ui.tab == t ? 1 : 0)
+                .allowsHitTesting(ui.tab == t)
+        }
     }
 }
 
@@ -362,10 +368,7 @@ struct DashboardView: View {
     private var newCustomersToday: Int { store.customers.filter(\.isNewToday).count }
 
     private var series: [(Date, Int)] {
-        (0..<days).reversed().map { off in
-            let d = cal.date(byAdding: .day, value: -off, to: today) ?? today
-            return (d, store.revenue(on: d))
-        }
+        store.dailyRevenues(days: days, through: today)
     }
 
     var body: some View {

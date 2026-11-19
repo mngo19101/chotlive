@@ -48,8 +48,10 @@ enum PriceParser {
             && !has(codeBefore, before)
     }
 
+    private static let enLocale = Locale(identifier: "en")
+
     static func stripAccents(_ s: String) -> String {
-        s.folding(options: .diacriticInsensitive, locale: Locale(identifier: "en"))
+        s.folding(options: .diacriticInsensitive, locale: enLocale)
             .replacingOccurrences(of: "đ", with: "d")
             .replacingOccurrences(of: "Đ", with: "D")
     }
@@ -181,12 +183,19 @@ enum PriceParser {
     }
 }
 
-private func groupedNumber(_ n: Int) -> String {
+private let groupedNumberLock = NSLock()
+private let groupedNumberFormatter: NumberFormatter = {
     let f = NumberFormatter()
     f.numberStyle = .decimal
     f.usesGroupingSeparator = true
     f.groupingSeparator = "."
-    return f.string(from: NSNumber(value: n)) ?? "\(n)"
+    return f
+}()
+
+private func groupedNumber(_ n: Int) -> String {
+    groupedNumberLock.lock()
+    defer { groupedNumberLock.unlock() }
+    return groupedNumberFormatter.string(from: NSNumber(value: n)) ?? "\(n)"
 }
 
 /// Dùng trên tem in.

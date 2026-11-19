@@ -89,10 +89,12 @@ enum VtpDraftBody {
         return b
     }
 
+    private static let badRefRe = try! NSRegularExpression(pattern: #"[^A-Za-z0-9_+-]+"#)
+
     /// Mã đơn ChốtLive của các đơn trong nháp (giống cột "Mã đơn hàng" file Excel), tối đa 50 ký tự.
     static func reference(_ g: Vtp.Group) -> String {
         let codes = g.orders.compactMap(\.code).filter { !$0.isEmpty }.joined(separator: "+")
-        let clean = codes.replacingOccurrences(of: "[^A-Za-z0-9_+-]+", with: "-", options: .regularExpression)
+        let clean = badRefRe.stringByReplacingMatches(in: codes, range: NSRange(location: 0, length: (codes as NSString).length), withTemplate: "-")
         return String(clean.prefix(50))
     }
 

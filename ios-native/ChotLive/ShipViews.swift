@@ -548,6 +548,8 @@ struct VtpExportSheet: View {
     let embedded: Bool
     /// Ô tìm của tab Đơn hàng: lọc danh sách khách khi nằm trong tab.
     let search: String
+    /// Nhóm khách Chờ gửi tính sẵn từ màn cha để không gom và kiểm địa chỉ lại từ đầu.
+    let baseGroups: [Vtp.Group]?
     /// Lọc trong tab Chờ gửi: 0 tất cả, 1 chưa đẩy, 2 nháp VTP, 3 cần sửa.
     @State private var draftFilter = 0
     @State private var sending = false
@@ -566,11 +568,14 @@ struct VtpExportSheet: View {
     @State private var deletingDrafts = false
 
     /// `openDetail`: mở thẳng nháp của khách này (dùng khi vừa sửa Hàng & tiền xong).
-    init(openDetail: String? = nil, embedded: Bool = false, search: String = "") {
+    init(openDetail: String? = nil, embedded: Bool = false, search: String = "", baseGroups: [Vtp.Group]? = nil) {
         _detailId = State(initialValue: openDetail)
         self.embedded = embedded
         self.search = search
+        self.baseGroups = baseGroups
     }
+
+    private var rawGroups: [Vtp.Group] { baseGroups ?? store.readyGroups() }
 
     /// Khách khớp ô tìm (tên, SĐT, @tiktok, mã đơn).
     private func matchesSearch(_ g: Vtp.Group) -> Bool {
@@ -580,13 +585,6 @@ struct VtpExportSheet: View {
         let hay = ([s.receiver, s.phone, g.customer.nickname, g.customer.uniqueId] + g.orders.compactMap(\.code))
             .joined(separator: " ").lowercased()
         return hay.contains(q)
-    }
-
-    /// Danh sách đang hiện: trong tab Chờ gửi thì theo ô tìm và hàng lọc nháp.
-    private var groups: [Vtp.Group] {
-        let all = allGroups
-        guard embedded else { return all }
-        return all.filter { matchesSearch($0) && matchesDraftFilter($0, draftFilter) }
     }
 
     private func matchesDraftFilter(_ g: Vtp.Group, _ f: Int) -> Bool {
@@ -609,8 +607,8 @@ struct VtpExportSheet: View {
     }
 
     /// Đơn ở Chờ gửi là nháp sẵn. Viettel Post hiểu địa chỉ sang phường/tỉnh khác thì nháp đó chưa cho tạo.
-    private var allGroups: [Vtp.Group] {
-        Vtp.readyGroups(store.allOrders()).map { g in
+    private func makeAllGroups() -> [Vtp.Group] {
+        rawGroups.map { g in
             guard api, let q = quotes[VtpQuote.signature(g, service: service)] else { return g }
             var out = g
             // Đã có cước thật: đơn thu hộ thấp hơn cước đó chuyển người gửi trả và cộng đúng cước đó vào thu hộ.
@@ -629,8 +627,6 @@ struct VtpExportSheet: View {
         .sorted { a, b in a.element.isBad != b.element.isBad ? !a.element.isBad : a.offset < b.offset }
         .map(\.element)
     }
-    private var okIds: Set<String> { Set(groups.filter { !$0.isBad }.map(\.id)) }
-    private var chosen: Set<String> { touched ? selected.intersection(okIds) : okIds }
     private var serviceName: String {
         let s = Vtp.services.first { $0.code == service } ?? Vtp.services[0]
         return "\(s.code) · \(s.name)"
@@ -639,13 +635,14 @@ struct VtpExportSheet: View {
     private var api: Bool { client.vtpConnected }
 
     var body: some View {
+        let all = result == nil ? makeAllGroups() : []
         Group {
             if let result {
                 VtpResultView(groups: result.groups, results: result.results, onDone: embedded ? { self.result = nil } : nil)
-            } else if let id = detailId, let g = allGroups.first(where: { $0.id == id }) {
+            } else if let id = detailId, let g = all.first(where: { $0.id == id }) {
                 detailView(g)
             } else {
-                picker
+                picker(all: all)
             }
         }
         .frame(height: embedded ? nil : Metrics.sheetHeight(top: UIScreen.main.bounds.height * 0.12))
@@ -665,14 +662,14 @@ struct VtpExportSheet: View {
 
     private var quoteKey: String {
         guard api, client.vtp?.sender != nil else { return "" }
-        return Vtp.readyGroups(store.allOrders()).filter { !$0.isBad }
+        return rawGroups.filter { !$0.isBad }
             .map { VtpQuote.signature($0, service: service) }.sorted().joined(separator: ",")
     }
 
     /// Nháp đủ địa chỉ chưa có cước cho gói đang chọn.
     private var quoteNeeds: [(String, Vtp.Group)] {
         guard api, client.vtp?.sender != nil else { return [] }
-        return Vtp.readyGroups(store.allOrders())
+        return rawGroups
             .filter { !$0.isBad }
             .map { (VtpQuote.signature($0, service: service), $0) }
             .filter { quotes[$0.0] == nil && !quoting.contains($0.0) }
@@ -864,13 +861,15 @@ struct VtpExportSheet: View {
         }
     }
 
-    private var picker: some View {
-        let list = groups
-        let pick = chosen
+    private func picker(all: [Vtp.Group]) -> some View {
+        let searched = embedded ? all.filter { matchesSearch($0) } : all
+        let list = embedded ? searched.filter { matchesDraftFilter($0, draftFilter) } : searched
+        let ok = Set(list.filter { !$0.isBad }.map(\.id))
+        let pick = touched ? selected.intersection(ok) : ok
         let bad = list.filter(\.isBad).count
         return VStack(spacing: 0) {
             if embedded {
-                draftChips
+                draftChips(searched)
             } else {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -889,14 +888,13 @@ struct VtpExportSheet: View {
                 T("ĐÃ CHỌN \(pick.count)", 12, .bold, Theme.muted, track: 0.4)
                 Spacer()
                 Button {
-                    let ok = okIds
                     selected = pick.count == ok.count ? [] : ok
                     touched = true
                 } label: {
-                    T(pick.count == okIds.count && !pick.isEmpty ? "Bỏ chọn tất cả" : "Chọn tất cả", 13, .bold, Theme.accent)
+                    T(pick.count == ok.count && !pick.isEmpty ? "Bỏ chọn tất cả" : "Chọn tất cả", 13, .bold, Theme.accent)
                 }
                 .buttonStyle(.plain)
-                .disabled(okIds.isEmpty)
+                .disabled(ok.isEmpty)
                 let withDraft = list.filter { pick.contains($0.id) && !VtpDraftBody.codes($0).isEmpty }
                 if embedded && !withDraft.isEmpty {
                     Button { deleteDrafts(withDraft) } label: {
@@ -912,9 +910,9 @@ struct VtpExportSheet: View {
             .padding(.bottom, 8)
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 10) {
+                LazyVStack(spacing: 10) {
                     if list.isEmpty {
-                        T(embedded && !allGroups.isEmpty ? "Không có khách nào khớp." : "Chưa có đơn nào đã duyệt.", 14, .medium, Theme.muted)
+                        T(embedded && !all.isEmpty ? "Không có khách nào khớp." : "Chưa có đơn nào đã duyệt.", 14, .medium, Theme.muted)
                             .padding(.vertical, 30)
                     }
                     if embedded && !list.isEmpty {
@@ -930,7 +928,7 @@ struct VtpExportSheet: View {
                             .padding(.horizontal, 4)
                     }
                     ForEach(list) { g in
-                        row(g, on: pick.contains(g.id))
+                        row(g, on: pick.contains(g.id), pick: pick)
                             .cardStyle(16, fill: g.isBad ? Theme.badRow : Theme.card)
                             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
@@ -944,13 +942,13 @@ struct VtpExportSheet: View {
         }
     }
 
-    private func row(_ g: Vtp.Group, on: Bool) -> some View {
+    private func row(_ g: Vtp.Group, on: Bool, pick: Set<String>) -> some View {
         let s = g.summary
         let start = Calendar.current.startOfDay(for: Clock.now)
         let olderDay = g.orders.first { $0.lastTs < start }.map { dayMonth($0.lastTs) }
         return Button {
             guard !g.isBad else { return }
-            var next = chosen
+            var next = pick
             if on { next.remove(g.id) } else { next.insert(g.id) }
             selected = next
             touched = true
@@ -1040,13 +1038,12 @@ struct VtpExportSheet: View {
     }
 
     /// Hàng lọc nhanh trong tab Chờ gửi.
-    private var draftChips: some View {
-        let all = allGroups.filter { matchesSearch($0) }
+    private func draftChips(_ searched: [Vtp.Group]) -> some View {
         let items: [(id: Int, title: String)] = [(0, "Tất cả"), (1, "Chưa đẩy"), (2, "Nháp VTP"), (3, "Cần sửa")]
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(items, id: \.id) { item in
-                    let n = all.filter { matchesDraftFilter($0, item.id) }.count
+                    let n = item.id == 0 ? searched.count : searched.filter { matchesDraftFilter($0, item.id) }.count
                     let on = draftFilter == item.id
                     Button {
                         draftFilter = item.id

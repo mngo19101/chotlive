@@ -100,6 +100,10 @@ enum Vtp {
         var problems: [String] = []
     }
 
+    private static let phoneRe = try! NSRegularExpression(pattern: #"^(\+?84|0)\d{9,10}$"#)
+    private static let badNameRe = try! NSRegularExpression(pattern: #"[^\p{L}\p{N}\s.'-]"#)
+    private static let multiSpaceRe = try! NSRegularExpression(pattern: #"\s+"#)
+
     private static func last<T>(_ lines: [Line], _ field: (ShipInfo) -> T?) -> T? {
         for l in lines.reversed() { if let s = l.ship, let v = field(s) { return v } }
         return nil
@@ -158,7 +162,7 @@ enum Vtp {
         s.receiver = cleanName((address?.receiver ?? "").isEmpty ? nickname : address!.receiver)
         s.phone = (address?.phone ?? "").filter { $0.isNumber || $0 == "+" }
         s.note = address?.note ?? ""
-        if s.phone.range(of: "^(\\+?84|0)\\d{9,10}$", options: .regularExpression) == nil {
+        if phoneRe.firstMatch(in: s.phone, range: NSRange(location: 0, length: (s.phone as NSString).length)) == nil {
             s.problems.append("Thiếu số điện thoại")
         }
         if !s.address.ok { s.problems.append(s.address.reason) }
@@ -173,8 +177,8 @@ enum Vtp {
     /// Viettel Post không nhận emoji/ký tự lạ trong tên người nhận.
     static func cleanName(_ s: String) -> String {
         var n = s.precomposedStringWithCanonicalMapping
-        n = n.replacingOccurrences(of: "[^\\p{L}\\p{N}\\s.'-]", with: " ", options: .regularExpression)
-        n = n.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        n = badNameRe.stringByReplacingMatches(in: n, range: NSRange(location: 0, length: (n as NSString).length), withTemplate: " ")
+        n = multiSpaceRe.stringByReplacingMatches(in: n, range: NSRange(location: 0, length: (n as NSString).length), withTemplate: " ")
         return n.trimmingCharacters(in: .whitespaces)
     }
 

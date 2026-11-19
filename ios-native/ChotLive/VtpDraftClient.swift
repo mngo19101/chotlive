@@ -37,6 +37,17 @@ struct VtpDraftPlace: Equatable {
     var confidence: Double
 }
 
+private enum VtpDraftDateFormat {
+    static let lock = NSLock()
+    static let formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "Asia/Ho_Chi_Minh")
+        f.dateFormat = "dd/MM/yyyy HH:mm:ss"
+        return f
+    }()
+}
+
 @MainActor
 final class VtpDraftClient: ObservableObject {
     enum Endpoint {
@@ -411,11 +422,9 @@ final class VtpDraftClient: ObservableObject {
     }
 
     nonisolated static func dateText(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "Asia/Ho_Chi_Minh")
-        f.dateFormat = "dd/MM/yyyy HH:mm:ss"
-        return f.string(from: d)
+        VtpDraftDateFormat.lock.lock()
+        defer { VtpDraftDateFormat.lock.unlock() }
+        return VtpDraftDateFormat.formatter.string(from: d)
     }
 
     // MARK: - Gửi

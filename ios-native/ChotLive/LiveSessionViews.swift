@@ -376,23 +376,23 @@ struct SessionDetailView: View {
         Dictionary(store.customers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
-    private func counts(_ comments: [LiveComment], _ map: [String: Customer]) -> (closing: Int, newCustomers: Int) {
+    private func counts(_ comments: [LiveComment], _ map: [String: Customer], closingCount: Int) -> (closing: Int, newCustomers: Int) {
         #if DEBUG
         if Demo.isActive { return (31, 9) }
         #endif
-        let closing = comments.filter(store.isClosingComment).count
         let newCustomers = Set(comments.compactMap { c -> String? in
             let owner = customer(of: c, in: map)
             return isNew(owner) ? owner?.id : nil
         }).count
-        return (closing, newCustomers)
+        return (closingCount, newCustomers)
     }
 
     var body: some View {
         let comments = all
         let map = customerMap
-        let count = counts(comments, map)
-        let matching = filter(comments, map)
+        let closingIds = Set(comments.lazy.filter(store.isClosingComment).map(\.id))
+        let count = counts(comments, map, closingCount: closingIds.count)
+        let matching = filter(comments, map, closingIds: closingIds)
         let shown = frozenAt.map { at in matching.filter { $0.ts <= at } } ?? matching
         let pending = isDemo ? 12 : matching.count - shown.count
         let newest = comments.first?.ts
@@ -424,7 +424,7 @@ struct SessionDetailView: View {
                             ForEach(shown) { c in
                                 let owner = customer(of: c, in: map)
                                 let open = expandedId == c.id
-                                CommentRow(c: c, closing: store.isClosingComment(c), customer: owner, isNew: isNew(owner),
+                                CommentRow(c: c, closing: closingIds.contains(c.id), customer: owner, isNew: isNew(owner),
                                            expanded: open,
                                            printedItems: open ? store.printedItems(of: c, sessionId: sessionId) : [],
                                            onToggle: {
@@ -584,10 +584,10 @@ struct SessionDetailView: View {
         )
     }
 
-    private func filter(_ comments: [LiveComment], _ map: [String: Customer]) -> [LiveComment] {
+    private func filter(_ comments: [LiveComment], _ map: [String: Customer], closingIds: Set<String>) -> [LiveComment] {
         var list = comments
         switch tab {
-        case 1: list = list.filter(store.isClosingComment)
+        case 1: list = list.filter { closingIds.contains($0.id) }
         case 2: list = list.filter { isNew(customer(of: $0, in: map)) }
         default: break
         }

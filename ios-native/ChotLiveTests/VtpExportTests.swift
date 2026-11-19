@@ -248,4 +248,114 @@ final class VtpExportTests: XCTestCase {
         XCTAssertTrue((p2["ref"] as? String ?? "").hasPrefix("HDc-"))
         XCTAssertEqual(VtpTrack.cancelledCode(c), "156288120034")
     }
+
+    func testAddressResolveCacheHandlesOldNewAndStreetChanges() {
+        let oldAddr = DeliveryAddress(street: "1 Lê Lợi", region: "Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh")
+        let old1 = VtpAddress.resolve(oldAddr)
+        let old2 = VtpAddress.resolve(oldAddr)
+        XCTAssertEqual(old1, old2)
+        XCTAssertTrue(old2.ok, old2.reason)
+        XCTAssertEqual(old2.line, "1 Lê Lợi, P.Bến Nghé, Q.1, TP.Hồ Chí Minh")
+
+        let newAddr = DeliveryAddress(street: "1 Trần Thái Tông", region: "Phường Cầu Giấy, Hà Nội")
+        let new1 = VtpAddress.resolve(newAddr)
+        let new2 = VtpAddress.resolve(newAddr)
+        XCTAssertEqual(new1, new2)
+        XCTAssertTrue(new2.ok, new2.reason)
+        XCTAssertEqual(new2.province, "TP.Hà Nội")
+
+        // Đổi số nhà/đường cùng phường/tỉnh phải ra kết quả mới chứ không dính cache cũ.
+        let moved = VtpAddress.resolve(DeliveryAddress(street: "2 Lê Lợi", region: "Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh"))
+        XCTAssertTrue(moved.ok, moved.reason)
+        XCTAssertNotEqual(moved, old1)
+        XCTAssertEqual(moved.street, "2 Lê Lợi")
+        XCTAssertEqual(moved.line, "2 Lê Lợi, P.Bến Nghé, Q.1, TP.Hồ Chí Minh")
+
+        let missingStreet = VtpAddress.resolve(DeliveryAddress(street: "", region: "Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh"))
+        XCTAssertFalse(missingStreet.ok)
+    }
+
+    func testStoreCachesInvalidateOnMutationsAndAccountSwitch() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("chotlive-cache-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let suite = "chotlive.cachetests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: dir)
+        }
+
+        let store = Store(account: "acc1", directory: dir, defaults: defaults)
+        defer { store.save() }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: today) ?? today
+
+        let c1 = LiveComment(id: "c1", uniqueId: "khach1", userId: "", nickname: "Khách 1", text: "Chốt 150", ts: today, price: 150_000)
+        let saved = store.saveToCustomer(c1)
+        XCTAssertEqual(saved.count, 1)
+        XCTAssertEqual(store.allOrders().count, 1)
+        XCTAssertTrue(store.readyGroups().isEmpty)
+
+        let c2 = LiveComment(id: "c2", uniqueId: "khach1", userId: "", nickname: "Khách 1", text: "Chốt 200", ts: twoDaysAgo, price: 200_000)
+        let saved2 = store.saveToCustomer(c2)
+        XCTAssertEqual(saved2.count, 1)
+        XCTAssertEqual(store.dailyRevenues(days: 3, through: today).map(\.1), [200_000, 0, 150_000])
+
+        let validAddr = DeliveryAddress(receiver: "A", phone: "0912345678", street: "1 Lê Lợi", region: "Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh")
+        store.setAddress(validAddr, customerId: "khach1")
+        XCTAssertEqual(store.allOrders().first?.customer.address?.street, "1 Lê Lợi")
+        XCTAssertTrue(store.readyGroups().isEmpty)
+
+        let order1 = try XCTUnwrap(store.allOrders().first { $0.items.contains { $0.id == saved[0].id } })
+        store.setShip([order1.id: ShipInfo(state: "ready", pay: "cod")])
+        let groups1 = store.readyGroups()
+        XCTAssertEqual(groups1.count, 1)
+        XCTAssertFalse(groups1[0].isBad)
+        XCTAssertEqual(groups1[0].customer.address?.street, "1 Lê Lợi")
+
+        var updatedAddr = validAddr
+        updatedAddr.street = "99 Lê Lợi"
+        store.setAddress(updatedAddr, customerId: "khach1")
+        let groups2 = store.readyGroups()
+        XCTAssertEqual(groups2.count, 1)
+        XCTAssertEqual(groups2[0].customer.address?.street, "99 Lê Lợi")
+
+        store.deleteItem(customerId: "khach1", itemId: saved[0].id)
+        XCTAssertTrue(store.readyGroups().isEmpty)
+        XCTAssertEqual(store.allOrders().count, 1)
+
+        let order2 = try XCTUnwrap(store.allOrders().first { $0.items.contains { $0.id == saved2[0].id } })
+        store.setShip([order2.id: ShipInfo(state: "ready", pay: "cod")])
+        XCTAssertEqual(store.readyGroups().count, 1)
+
+        store.switchAccount("acc2")
+        XCTAssertTrue(store.allOrders().isEmpty)
+        XCTAssertTrue(store.readyGroups().isEmpty)
+    }
+
+    func testStoreIsClosingCommentCacheInvalidatesOnSetKeywords() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("chotlive-kw-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let suite = "chotlive.kwtests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: dir)
+        }
+
+        let store = Store(account: "acc1", directory: dir, defaults: defaults)
+        defer { store.save() }
+        let comment = LiveComment(id: "k1", uniqueId: "u1", userId: "", nickname: "U1", text: "gửi mẫu giúp mình nha", ts: Date(), price: 0)
+
+        store.setKeywords(["chốt"])
+        XCTAssertFalse(store.isClosingComment(comment))
+        XCTAssertFalse(store.isClosingComment(comment))
+
+        store.setKeywords(["gửi mẫu"])
+        XCTAssertTrue(store.isClosingComment(comment))
+
+        store.setKeywords(["khác"])
+        XCTAssertFalse(store.isClosingComment(comment))
+    }
 }

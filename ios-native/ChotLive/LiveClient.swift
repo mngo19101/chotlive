@@ -445,7 +445,8 @@ final class LiveClient: ObservableObject {
             if let (data, resp) = reply, (resp as? HTTPURLResponse)?.statusCode == 200,
                let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                let raw = (json["user"] as? [String: Any])?["access"] as? [String: Any] {
-                self.access = AccountAccess(raw)
+                let next = AccountAccess(raw)
+                if self.access != next { self.access = next }
             } else {
                 self.scheduleAccessCheck() // mất mạng lúc vừa hết giờ: thử lại sau
             }
@@ -505,7 +506,7 @@ final class LiveClient: ObservableObject {
         pingTimer = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
-        socketConnected = false
+        if socketConnected { socketConnected = false }
         onSocketClosed?()
     }
 
@@ -521,7 +522,7 @@ final class LiveClient: ObservableObject {
                 guard let self, self.task === t else { return }
                 switch result {
                 case .success(let msg):
-                    self.socketConnected = true
+                    if !self.socketConnected { self.socketConnected = true }
                     switch msg {
                     case .string(let s): self.handle(Data(s.utf8))
                     case .data(let d): self.handle(d)
@@ -555,9 +556,11 @@ final class LiveClient: ObservableObject {
     private func applyLives(_ raw: [[String: Any]]) {
         let next = raw.compactMap { LiveInfo($0) }
         if next != lives { lives = next }
-        viewers = next.reduce(0) { $0 + $1.viewers }
+        let totalViewers = next.reduce(0) { $0 + $1.viewers }
+        if totalViewers != viewers { viewers = totalViewers }
         let lead = next.first { $0.state == "connected" } ?? next.first
-        liveUsername = lead?.username ?? ""
+        let nextUser = lead?.username ?? ""
+        if nextUser != liveUsername { liveUsername = nextUser }
         let state = lead?.state ?? "idle"
         if state != liveState { liveState = state }
     }
@@ -577,9 +580,13 @@ final class LiveClient: ObservableObject {
         switch type {
         case "hello":
             let version = (m["version"] as? Int) ?? 0
-            serverSupportsSync = version >= 4
-            if let n = m["clientsCount"] as? Int { clientsCount = n }
-            if let raw = (m["user"] as? [String: Any])?["access"] as? [String: Any] { access = AccountAccess(raw) }
+            let nextSync = version >= 4
+            if serverSupportsSync != nextSync { serverSupportsSync = nextSync }
+            if let n = m["clientsCount"] as? Int, clientsCount != n { clientsCount = n }
+            if let raw = (m["user"] as? [String: Any])?["access"] as? [String: Any] {
+                let next = AccountAccess(raw)
+                if access != next { access = next }
+            }
             if serverSupportsSync, let raw = m["lives"] as? [[String: Any]] {
                 applyLives(raw)
             } else if let ls = m["liveStatus"] as? [String: Any] {
@@ -595,14 +602,17 @@ final class LiveClient: ObservableObject {
         case "native_state":
             if let snap = decodeSnapshot(data) { onSnapshot?(snap) }
         case "native_ack":
-            if let n = m["clientsCount"] as? Int { clientsCount = n }
+            if let n = m["clientsCount"] as? Int, clientsCount != n { clientsCount = n }
             if let id = m["id"] as? Int { onSyncAck?(id) }
         case "sync_error":
             onSyncError?(m["id"] as? Int, (m["code"] as? String) ?? "")
         case "clients_count":
-            if let n = m["clientsCount"] as? Int { clientsCount = n }
+            if let n = m["clientsCount"] as? Int, clientsCount != n { clientsCount = n }
         case "access":
-            if let raw = m["access"] as? [String: Any] { access = AccountAccess(raw) }
+            if let raw = m["access"] as? [String: Any] {
+                let next = AccountAccess(raw)
+                if access != next { access = next }
+            }
         case "status":
             let state = (m["state"] as? String) ?? "idle"
             let username = (m["username"] as? String) ?? ""
@@ -622,9 +632,10 @@ final class LiveClient: ObservableObject {
             let count = (m["count"] as? Int) ?? Int((m["count"] as? Double) ?? 0)
             if serverSupportsSync, let username = m["username"] as? String,
                let i = lives.firstIndex(where: { $0.username == username }) {
-                lives[i].viewers = count
-                viewers = lives.reduce(0) { $0 + $1.viewers }
-            } else {
+                if lives[i].viewers != count { lives[i].viewers = count }
+                let totalViewers = lives.reduce(0) { $0 + $1.viewers }
+                if viewers != totalViewers { viewers = totalViewers }
+            } else if viewers != count {
                 viewers = count
             }
         case "chat":

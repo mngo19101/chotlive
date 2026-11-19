@@ -201,9 +201,13 @@ extension Store {
 
         if let printed = snap.printedCommentIds, !printed.isEmpty {
             let ids = Set(printed)
-            for i in comments.indices where !comments[i].printed && ids.contains(comments[i].id) {
-                comments[i].printed = true
+            var nextComments = comments
+            var changed = false
+            for i in nextComments.indices where !nextComments[i].printed && ids.contains(nextComments[i].id) {
+                nextComments[i].printed = true
+                changed = true
             }
+            if changed { comments = nextComments }
         }
         // Khách đã xoá hết món trên máy thì không còn gì để bảo vệ nữa.
         sync.dirtyCustomers = sync.dirtyCustomers.filter { id in

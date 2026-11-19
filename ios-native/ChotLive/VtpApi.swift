@@ -282,7 +282,8 @@ extension LiveClient {
     func refreshVtp() {
         Task { @MainActor [weak self] in
             guard let self, let r = await self.apiCall("/api/vtp/status"), r.0 == 200 else { return }
-            self.vtp = VtpConnection(r.1)
+            let next = VtpConnection(r.1)
+            if self.vtp != next { self.vtp = next }
         }
     }
 

@@ -25,8 +25,7 @@ struct OrdersView: View {
     var body: some View {
         let every = store.allOrders()
         let scoped = every.filter { dateFilter.contains($0.lastTs) }
-        let groups = Vtp.readyGroups(every)
-        let shown = list(every: every, scoped: scoped)
+        let groups = store.readyGroups()
         if filter == 2 {
             // Chờ gửi: danh sách khách đã duyệt (gộp theo khách, mọi ngày) nằm luôn trong tab, thanh Đẩy nháp /
             // Lên vận đơn ở dưới. Thay cho khung "N nháp chờ tạo vận đơn" + bảng "Nháp vận đơn" bật lên trước đây.
@@ -37,12 +36,13 @@ struct OrdersView: View {
                 .padding(.horizontal, Metrics.gutter)
                 .padding(.top, 2)
                 .padding(.bottom, 10)
-                VtpExportSheet(embedded: true, search: search)
+                VtpExportSheet(embedded: true, search: search, baseGroups: groups)
             }
             .background(Theme.bg)
             .onAppear(perform: takeFilterRequest)
             .onChange(of: ui.ordersFilter) { _ in takeFilterRequest() }
         } else {
+            let shown = list(every: every, scoped: scoped)
             allTabs(every: every, scoped: scoped, readyCount: groups.count, shown: shown)
                 .onAppear(perform: takeFilterRequest)
                 .onChange(of: ui.ordersFilter) { _ in takeFilterRequest() }

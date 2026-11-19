@@ -4,11 +4,18 @@ import Foundation
 /// Mỗi tài khoản có một file riêng: Documents/accounts/<mã tài khoản>/chotlive.json.
 final class Store: ObservableObject {
     @Published var comments: [LiveComment] = []
-    @Published var customers: [Customer] = []
+    @Published var customers: [Customer] = [] {
+        didSet {
+            ordersCache = nil
+            readyGroupsCache = nil
+        }
+    }
     @Published var sessions: [LiveSession] = []
     @Published var accounts: [TikTokAccount] = []
     @Published var activeAccountId: String?
-    @Published var keywords: [String] = Store.defaultKeywords
+    @Published var keywords: [String] = Store.defaultKeywords {
+        didSet { rebuildKeywordCache() }
+    }
     /// Báo cho người dùng khi không đọc hoặc không ghi được dữ liệu.
     @Published var storageWarning: String?
 
@@ -28,6 +35,12 @@ final class Store: ObservableObject {
     private var accountsTouchedWhileSending = false
     private var nextUpdateId = 1
     private var knownCommentIds: Set<String> = []
+    private var ordersCache: [Order]?
+    private var readyGroupsCache: (day: Date, groups: [Vtp.Group])?
+    private var normalizedKeywords: [String] = Store.defaultKeywords.map { PriceParser.stripAccents($0.lowercased()) }
+    private var closingCache: [String: Bool] = [:]
+    private let writeQueue = DispatchQueue(label: "chotlive.store.write", qos: .utility)
+    private var saveGeneration: UInt64 = 0
 
     private static let defaultKeywords = ["chốt", "lấy"]
     /// Trên máy giữ chừng này bình luận mới nhất; toàn bộ lịch sử nằm trên server.
@@ -64,7 +77,7 @@ final class Store: ObservableObject {
     /// Đăng nhập hoặc đăng xuất: ghi nốt dữ liệu tài khoản cũ rồi nạp dữ liệu tài khoản mới.
     func switchAccount(_ account: String?) {
         guard account != accountKey else { return }
-        closeOpenSession()
+        closeOpenSession(persist: false)
         save()
         comments = []
         customers = []
@@ -81,6 +94,7 @@ final class Store: ObservableObject {
         knownCommentIds = []
         saveBlocked = false
         saveFailed = false
+        saveGeneration &+= 1
         accountKey = account
         load()
     }
@@ -130,12 +144,20 @@ final class Store: ObservableObject {
         scheduleSave()
     }
 
+    private func rebuildKeywordCache() {
+        normalizedKeywords = keywords.filter { !$0.isEmpty }.map { PriceParser.stripAccents($0.lowercased()) }
+        closingCache.removeAll(keepingCapacity: true)
+    }
+
     /// Bình luận chốt đơn: đã chốt tay, có từ khoá chốt, hoặc chỉ ghi mã. "Mã 130 giá sao" chỉ là hỏi giá.
     func isClosingComment(_ c: LiveComment) -> Bool {
         if c.printed { return true }
+        if let hit = closingCache[c.text] { return hit }
         let text = PriceParser.stripAccents(c.text.lowercased())
-        if keywords.contains(where: { !$0.isEmpty && text.contains(PriceParser.stripAccents($0.lowercased())) }) { return true }
-        return PriceParser.isOnlyCodes(c.text)
+        let matched = normalizedKeywords.contains(where: { text.contains($0) }) || PriceParser.isOnlyCodes(c.text)
+        if closingCache.count >= 10_000 { closingCache.removeAll(keepingCapacity: true) }
+        closingCache[c.text] = matched
+        return matched
     }
 
     // MARK: - Phiên live
@@ -169,18 +191,20 @@ final class Store: ObservableObject {
         if !tiktok.isEmpty && tiktok.lowercased() != unsavedLiveId {
             addAccount(uniqueId: tiktok, displayName: "", activate: activeAccountId == nil)
         }
-        save()
+        saveAsync()
     }
 
-    private func closeOpenSession() {
+    private func closeOpenSession(persist: Bool = true) {
         guard sessions.contains(where: \.isLive) else { return }
         let now = Clock.now
-        for i in sessions.indices where sessions[i].isLive {
+        var next = sessions
+        for i in next.indices where next[i].isLive {
             // App bị tắt giữa phiên: lấy mốc hoạt động cuối thay vì lúc mở lại app.
-            let last = sessions[i].lastActivity ?? sessions[i].start
-            sessions[i].end = now.timeIntervalSince(last) > 600 ? last : now
+            let last = next[i].lastActivity ?? next[i].start
+            next[i].end = now.timeIntervalSince(last) > 600 ? last : now
         }
-        save()
+        sessions = next
+        if persist { saveAsync() }
     }
 
     /// Lần live gần nhất của một tài khoản.
@@ -238,7 +262,7 @@ final class Store: ObservableObject {
             customers.append(Customer(id: key, uniqueId: c.uniqueId, userId: c.userId, nickname: c.nickname, items: items))
         }
         touchCustomer(customers.first { $0.items.contains { $0.commentId == c.id || $0.id == c.id } }?.id ?? key)
-        save()
+        saveAsync()
         return items
     }
 
@@ -283,7 +307,7 @@ final class Store: ObservableObject {
         clearManualCod(customerIndex: idx)
         if customers[idx].items.isEmpty { customers.remove(at: idx) }
         touchCustomer(customerId, deletedItems: [itemId])
-        save()
+        saveAsync()
     }
 
     /// Khách của bình luận, cùng cách nhận khách như `saveToCustomer`.
@@ -328,7 +352,7 @@ final class Store: ObservableObject {
             customers.append(c)
         }
         touchCustomer(r.customer.id)
-        save()
+        saveAsync()
     }
 
     func deleteOrder(_ o: Order) {
@@ -337,7 +361,7 @@ final class Store: ObservableObject {
         customers[idx].items.removeAll { ids.contains($0.id) }
         if customers[idx].items.isEmpty { customers.remove(at: idx) }
         touchCustomer(o.customer.id, deletedItems: ids)
-        save()
+        saveAsync()
     }
 
     /// Thay toàn bộ sản phẩm của đơn bằng danh sách đã sửa.
@@ -349,7 +373,7 @@ final class Store: ObservableObject {
         if edited.reduce(0, { $0 + $1.lineTotal }) != o.total { clearManualCod(customerIndex: idx) }
         if customers[idx].items.isEmpty { customers.remove(at: idx) }
         touchCustomer(o.customer.id, deletedItems: ids.subtracting(edited.map(\.id)))
-        save()
+        saveAsync()
     }
 
     /// Tạo đơn tay. Trả về id đơn.
@@ -373,7 +397,7 @@ final class Store: ObservableObject {
             customers.append(Customer(id: cid, uniqueId: handle, userId: "", nickname: name.isEmpty ? handle : name, items: items))
         }
         touchCustomer(cid)
-        save()
+        saveAsync()
         return cid + "|" + group
     }
 
@@ -381,40 +405,49 @@ final class Store: ObservableObject {
         guard let idx = customers.firstIndex(where: { $0.id == customerId }) else { return }
         customers[idx].address = a
         touchCustomer(customerId)
-        save()
+        saveAsync()
     }
 
     func markPrinted(itemId: String) {
-        for ci in customers.indices {
-            if let ii = customers[ci].items.firstIndex(where: { $0.id == itemId }) {
-                customers[ci].items[ii].printed = true
-                touchCustomer(customers[ci].id)
+        var next = customers
+        var touched: [String] = []
+        for ci in next.indices {
+            if let ii = next[ci].items.firstIndex(where: { $0.id == itemId }) {
+                next[ci].items[ii].printed = true
+                touched.append(next[ci].id)
             }
         }
-        save()
+        guard !touched.isEmpty else { return }
+        customers = next
+        touched.forEach { touchCustomer($0) }
+        saveAsync()
     }
 
     /// Giao hàng: chưa giao → đang giao → đã giao → (bấm lại) về chưa giao.
     func advanceDelivery(_ o: Order) {
         let ids = Set(o.items.map(\.id))
         let status = o.status
-        for ci in customers.indices where customers[ci].id == o.customer.id {
-            for ii in customers[ci].items.indices where ids.contains(customers[ci].items[ii].id) {
+        var next = customers
+        var changed = false
+        for ci in next.indices where next[ci].id == o.customer.id {
+            for ii in next[ci].items.indices where ids.contains(next[ci].items[ii].id) {
+                changed = true
                 switch status {
                 case .new, .printed:
-                    customers[ci].items[ii].shipping = true
-                    customers[ci].items[ii].delivered = false
+                    next[ci].items[ii].shipping = true
+                    next[ci].items[ii].delivered = false
                 case .shipping:
-                    customers[ci].items[ii].shipping = false
-                    customers[ci].items[ii].delivered = true
+                    next[ci].items[ii].shipping = false
+                    next[ci].items[ii].delivered = true
                 case .delivered:
-                    customers[ci].items[ii].shipping = false
-                    customers[ci].items[ii].delivered = false
+                    next[ci].items[ii].shipping = false
+                    next[ci].items[ii].delivered = false
                 }
             }
         }
+        if changed { customers = next }
         touchCustomer(o.customer.id)
-        save()
+        saveAsync()
     }
 
     // MARK: - Duyệt đơn & Viettel Post
@@ -422,22 +455,31 @@ final class Store: ObservableObject {
     /// Ghi thông tin giao vào mọi món của từng đơn (id đơn → ship). `shipping`: true chuyển Đang giao,
     /// false đưa về chưa giao, nil giữ nguyên. Server đọc `ship` để web thấy đúng trạng thái.
     func setShip(_ changes: [String: ShipInfo], shipping: Bool? = nil) {
+        var orderLookup: [String: (customerId: String, itemIds: Set<String>)] = [:]
+        for orderId in changes.keys {
+            if let o = order(id: orderId) {
+                orderLookup[orderId] = (o.customer.id, Set(o.items.map(\.id)))
+            }
+        }
+        guard !orderLookup.isEmpty else { return }
+        var next = customers
         var touched: Set<String> = []
         for (orderId, ship) in changes {
-            guard let o = order(id: orderId), let ci = customers.firstIndex(where: { $0.id == o.customer.id }) else { continue }
-            let ids = Set(o.items.map(\.id))
-            for ii in customers[ci].items.indices where ids.contains(customers[ci].items[ii].id) {
-                customers[ci].items[ii].ship = ship
+            guard let info = orderLookup[orderId],
+                  let ci = next.firstIndex(where: { $0.id == info.customerId }) else { continue }
+            for ii in next[ci].items.indices where info.itemIds.contains(next[ci].items[ii].id) {
+                next[ci].items[ii].ship = ship
                 if let shipping {
-                    customers[ci].items[ii].shipping = shipping
-                    customers[ci].items[ii].delivered = false
+                    next[ci].items[ii].shipping = shipping
+                    next[ci].items[ii].delivered = false
                 }
             }
-            touched.insert(o.customer.id)
+            touched.insert(info.customerId)
         }
         guard !touched.isEmpty else { return }
+        customers = next
         touched.forEach { touchCustomer($0) }
-        save()
+        saveAsync()
     }
 
     /// Bảng Duyệt đơn: chuyển các đơn được tick sang Chờ gửi (`ready`) hoặc Gom sau (`hold`).
@@ -554,17 +596,33 @@ final class Store: ObservableObject {
     func setDelivered(_ o: Order, _ delivered: Bool) {
         let ids = Set(o.items.map(\.id))
         guard let ci = customers.firstIndex(where: { $0.id == o.customer.id }) else { return }
-        for ii in customers[ci].items.indices where ids.contains(customers[ci].items[ii].id) {
-            customers[ci].items[ii].delivered = delivered
-            customers[ci].items[ii].shipping = !delivered
+        var next = customers
+        for ii in next[ci].items.indices where ids.contains(next[ci].items[ii].id) {
+            next[ci].items[ii].delivered = delivered
+            next[ci].items[ii].shipping = !delivered
         }
+        customers = next
         touchCustomer(o.customer.id)
-        save()
+        saveAsync()
     }
 
     /// Mọi đơn, mới nhất trước.
     func allOrders() -> [Order] {
-        customers.flatMap(orders(of:)).sorted { $0.lastTs > $1.lastTs }
+        if let cached = ordersCache { return cached }
+        let built = customers.flatMap(orders(of:)).sorted { $0.lastTs > $1.lastTs }
+        ordersCache = built
+        return built
+    }
+
+    /// Các khách có đơn đã duyệt Chờ gửi (`ready`), cache theo ngày hiện tại cho tới khi `customers` đổi.
+    func readyGroups() -> [Vtp.Group] {
+        let today = Calendar.current.startOfDay(for: Clock.now)
+        if Clock.fixed == nil, let cached = readyGroupsCache, cached.day == today {
+            return cached.groups
+        }
+        let built = Vtp.readyGroups(allOrders())
+        if Clock.fixed == nil { readyGroupsCache = (today, built) }
+        return built
     }
 
     func orders(of customer: Customer) -> [Order] {
@@ -599,6 +657,24 @@ final class Store: ObservableObject {
         }
     }
 
+    /// Doanh thu từng ngày trong `days` ngày kết thúc ở `today`, từ cũ tới mới (duyệt một lượt).
+    func dailyRevenues(days: Int, through today: Date) -> [(Date, Int)] {
+        guard days > 0 else { return [] }
+        let cal = Calendar.current
+        let targetDays = (0..<days).reversed().map { off in
+            cal.date(byAdding: .day, value: -off, to: today) ?? today
+        }
+        let earliest = cal.startOfDay(for: targetDays[0])
+        let latest = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: today)) ?? today
+        var totals: [Date: Int] = [:]
+        for c in customers {
+            for it in c.items where it.ts >= earliest && it.ts < latest {
+                totals[cal.startOfDay(for: it.ts), default: 0] += it.lineTotal
+            }
+        }
+        return targetDays.map { d in (d, totals[cal.startOfDay(for: d)] ?? 0) }
+    }
+
     /// Doanh thu từ đầu tháng của `date` tới hết ngày thứ `throughDay` trong tháng.
     func revenue(monthOf date: Date, throughDay: Int) -> Int {
         let cal = Calendar.current
@@ -630,13 +706,13 @@ final class Store: ObservableObject {
         if activate || activeAccountId == nil { activeAccountId = id }
         syncState.deletedAccounts.remove(id)
         touchAccounts()
-        save()
+        saveAsync()
     }
 
     func selectAccount(_ id: String) {
         activeAccountId = id
         touchAccounts()
-        save()
+        saveAsync()
     }
 
     func removeAccount(_ id: String) {
@@ -644,12 +720,12 @@ final class Store: ObservableObject {
         if activeAccountId == id { activeAccountId = accounts.first?.id }
         syncState.deletedAccounts.insert(id)
         touchAccounts()
-        save()
+        saveAsync()
     }
 
     func setKeywords(_ list: [String]) {
         keywords = list
-        save()
+        saveAsync()
     }
 
     // MARK: - Theo dõi thay đổi để gửi lên server
@@ -724,6 +800,7 @@ final class Store: ObservableObject {
 
     private func load() {
         guard let url = fileURL else { return }
+        writeQueue.sync {}
         let adopted = adoptLegacyFile(to: url)
         if FileManager.default.fileExists(atPath: url.path) { read(url) }
         if adopted { migrateLegacy() }
@@ -749,6 +826,9 @@ final class Store: ObservableObject {
         accounts = snap.accounts
         activeAccountId = snap.activeAccountId
         if let k = snap.keywords { keywords = k }
+        ordersCache = nil
+        readyGroupsCache = nil
+        rebuildKeywordCache()
         syncState = snap.sync ?? SyncState()
         knownCommentIds = Set(snap.comments.map(\.id))
     }
@@ -810,29 +890,61 @@ final class Store: ObservableObject {
         save()
     }
 
-    /// Bình luận về dồn dập nên gom ghi file; thao tác của người dùng thì ghi ngay.
+    /// Bình luận về dồn dập nên gom ghi file; thao tác của người dùng cũng ghi ở hàng đợi nền.
     private func scheduleSave() {
         saveWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.save() }
+        let work = DispatchWorkItem { [weak self] in self?.saveAsync() }
         saveWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
     }
 
-    func save() {
+    private func makeSnapshotForDisk() -> (Snapshot, URL)? {
         saveWork?.cancel()
         saveWork = nil
-        guard persistEnabled, !saveBlocked, let url = fileURL else { return }
+        guard persistEnabled, !saveBlocked, let url = fileURL else { return nil }
         let snap = Snapshot(comments: comments, customers: customers, sessions: sessions, accounts: accounts,
                             activeAccountId: activeAccountId, keywords: keywords, sync: syncState)
+        return (snap, url)
+    }
+
+    private static func write(_ snap: Snapshot, to url: URL) -> Bool {
         do {
             let data = try JSONEncoder().encode(snap)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
-            saveFailed = false
+            return true
         } catch {
+            return false
+        }
+    }
+
+    private func reportSaveResult(_ ok: Bool) {
+        if ok {
+            saveFailed = false
+        } else {
             // Báo một lần cho mỗi đợt lỗi, bình luận về liên tục cũng không hiện lại.
             if !saveFailed { storageWarning = "Không lưu được dữ liệu. Bạn hãy kiểm tra dung lượng trống của máy." }
             saveFailed = true
         }
+    }
+
+    private func saveAsync() {
+        guard let (snap, url) = makeSnapshotForDisk() else { return }
+        saveGeneration &+= 1
+        let gen = saveGeneration
+        writeQueue.async { [weak self] in
+            let ok = Self.write(snap, to: url)
+            DispatchQueue.main.async {
+                guard let self, self.saveGeneration == gen else { return }
+                self.reportSaveResult(ok)
+            }
+        }
+    }
+
+    func save() {
+        guard let (snap, url) = makeSnapshotForDisk() else { return }
+        saveGeneration &+= 1
+        let ok = writeQueue.sync { Self.write(snap, to: url) }
+        reportSaveResult(ok)
     }
 }
