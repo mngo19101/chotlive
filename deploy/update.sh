@@ -64,7 +64,7 @@ prepare() {
   as_app test -r "$NEW_DIR/server.js" || die "Người dùng $APP_USER không đọc được $NEW_DIR."
 
   say "Chụp một bản sao CSDL trước khi cập nhật"
-  as_app node --no-warnings "$NEW_DIR/deploy/backup.mjs" "$DATA_DIR" "$BACKUP_DIR" 14
+  as_app node --no-warnings "$NEW_DIR/deploy/backup.mjs" "$DATA_DIR" "$BACKUP_DIR" 5
 
   if [ -f "$DATA_DIR/vtp-connections.json" ] && ! grep -q 'enc:v1:' "$DATA_DIR/vtp-connections.json"; then
     cp -p "$DATA_DIR/vtp-connections.json" "$PLAIN_VTP"

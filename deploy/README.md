@@ -137,14 +137,14 @@ Code cũ được giữ ở `/opt/chotlive-old` cho tới lần cập nhật sau
 
 ## Sao lưu và khôi phục
 
-Bản sao nằm ở `/var/backups/chotlive`, tạo lúc 3 giờ sáng (giờ VPS), giữ 14 bản. **Các bản này vẫn nằm trên cùng VPS**, nên VPS hỏng là mất cả. Hãy bật sao lưu lên Google Drive theo [backup/README.md](../backup/README.md): mỗi ngày một bản đã mã hoá, có cảnh báo Telegram khi bị trễ.
+Bản sao nằm ở `/var/backups/chotlive`, tạo lúc 3 giờ sáng (giờ VPS), giữ 5 bản. **Các bản này vẫn nằm trên cùng VPS**, nên VPS hỏng là mất cả. Hãy bật sao lưu lên Google Drive theo [backup/README.md](../backup/README.md): mỗi ngày một bản đã mã hoá, có cảnh báo Telegram khi bị trễ.
 
 Bản sao chỉ chứa CSDL `susu.db`, không chứa token Viettel Post, nên tải bản sao về máy khác không làm lộ token. Token nằm ở `/var/lib/chotlive/vtp-connections.json`, được mã hoá bằng khoá `VTP_SECRET_KEY` trong `/etc/chotlive.env`. Khôi phục sang VPS mới mà không mang theo hai file này thì mỗi shop dán lại token Viettel Post một lần.
 
 Sao lưu ngay:
 
 ```bash
-cd /opt/chotlive && sudo -u chotlive node --no-warnings deploy/backup.mjs /var/lib/chotlive /var/backups/chotlive 14
+cd /opt/chotlive && sudo -u chotlive node --no-warnings deploy/backup.mjs /var/lib/chotlive /var/backups/chotlive 5
 ```
 
 Khôi phục (đổi `TEN_BAN_SAO` thành tên file trong thư mục sao lưu):

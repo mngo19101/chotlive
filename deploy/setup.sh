@@ -97,9 +97,9 @@ sed "s|__APP_DIR__|$APP_DIR|g" "$APP_DIR/deploy/chotlive.service" > /etc/systemd
 sed "s|__DOMAIN__|$DOMAIN|g" "$APP_DIR/deploy/Caddyfile" > /etc/caddy/Caddyfile
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
-# 3 giờ sáng mỗi ngày, giữ 14 bản.
+# 3 giờ sáng mỗi ngày, giữ 5 bản.
 cat > /etc/cron.d/chotlive-backup <<EOF
-0 3 * * * chotlive cd $APP_DIR && /usr/bin/env node --no-warnings deploy/backup.mjs $DATA_DIR $BACKUP_DIR 14 >/dev/null
+0 3 * * * chotlive cd $APP_DIR && /usr/bin/env node --no-warnings deploy/backup.mjs $DATA_DIR $BACKUP_DIR 5 >/dev/null
 EOF
 chmod 644 /etc/cron.d/chotlive-backup
 

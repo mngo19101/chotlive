@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 const dataDir = path.resolve(process.argv[2] || process.env.DATA_DIR || 'data');
 const backupDir = path.resolve(process.argv[3] || path.join(dataDir, 'backups'));
-const keep = Number(process.argv[4]) || 14;
+const keep = Number(process.argv[4]) || 5;
 
 const source = path.join(dataDir, 'susu.db');
 if (!fs.existsSync(source)) {
