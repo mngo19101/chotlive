@@ -46,15 +46,17 @@ final class VtpDraftClient: ObservableObject {
         static let location = "https://location.viettelpost.vn/location/v1.0/address?system=VTP"
     }
 
+    /// deviceId, DeviceToken và khoá ký dùng chung cho mọi tài khoản trên máy (như một trình duyệt đăng nhập
+    /// nhiều tài khoản). Phiên, tên, kho thì riêng từng tài khoản: tài khoản đầu tiên (`accountId` rỗng) giữ
+    /// đúng tên khoá cũ để phiên đã đăng nhập từ bản trước vẫn dùng được.
     private enum Keys {
         static let deviceId = "vtpDraft.deviceId"
         static let deviceToken = "vtpDraft.deviceToken"
-        static let userName = "vtpDraft.userName"
-        static let khoId = "vtpDraft.khoId"
         static let key = "key"
-        static let token = "token"
-        static let refresh = "refresh"
     }
+
+    private func dkey(_ name: String) -> String { accountId.isEmpty ? "vtpDraft.\(name)" : "vtpDraft.\(accountId).\(name)" }
+    private func skey(_ name: String) -> String { accountId.isEmpty ? name : "\(accountId).\(name)" }
 
     @Published private(set) var loggedIn = false
     /// Tên đăng nhập Viettel Post (thường là số điện thoại). Hiện ra màn hình thì dùng `phone` (đã che).
@@ -67,14 +69,33 @@ final class VtpDraftClient: ObservableObject {
     @Published private(set) var sessionExpired = false
     @Published private(set) var kho: [VtpDraftKho] = []
     @Published var khoId: String? {
-        didSet { defaults.set(khoId, forKey: Keys.khoId) }
+        didSet { defaults.set(khoId, forKey: dkey("khoId")) }
     }
+    /// Tên đăng nhập đã gõ (thường là số điện thoại). Viettel Post trả `UserName` là họ tên, nên phải giữ riêng
+    /// để so với tài khoản phần 1 và để hiện số đã che.
+    @Published private(set) var login: String
     @Published private(set) var log: [VtpDraftLogEntry] = []
 
-    var phone: String { VtpMask.text(userName) }
+    /// Số đăng nhập đã che ("0987 *** 321"); rỗng khi chưa biết (phiên từ bản cũ chưa lưu số).
+    var phone: String {
+        let raw = !login.isEmpty ? login : (userName.filter(\.isNumber).count >= 9 ? userName : "")
+        return VtpMask.text(raw)
+    }
+    /// Họ tên Viettel Post trả về (khác số điện thoại).
+    var displayName: String { userName.filter(\.isNumber).count >= 9 ? "" : userName }
+    /// Nhãn ghi vào đơn khi đẩy nháp (`draftAccount`): số đã che, chưa biết số thì họ tên.
+    var accountLabel: String { phone.isEmpty ? userName : phone }
+    /// Nháp ghi `draftAccount` này có phải của tài khoản này không (nhãn cũ có thể là họ tên).
+    func owns(_ draftAccount: String) -> Bool {
+        let a = draftAccount.trimmingCharacters(in: .whitespaces)
+        guard !a.isEmpty else { return false }
+        return a == phone || a == userName || a == accountLabel
+    }
     var selectedKho: VtpDraftKho? { kho.first { $0.id == khoId } ?? kho.first }
     var tokenExpiry: Date? { VtpJ.jwtExpiry(token) }
 
+    /// Khoá phân biệt tài khoản trên máy này ("" = tài khoản đầu tiên, dùng khoá cũ).
+    let accountId: String
     let deviceId: String
     private let deviceToken: String
     private let key: P256.Signing.PrivateKey
@@ -86,8 +107,9 @@ final class VtpDraftClient: ObservableObject {
     private var nonce: String?
     private var refreshTask: Task<Void, Error>?
 
-    init(secrets: VtpDraftSecrets = VtpDraftKeychain(), defaults: UserDefaults = .standard,
+    init(accountId: String = "", secrets: VtpDraftSecrets = VtpDraftKeychain(), defaults: UserDefaults = .standard,
          transport: @escaping VtpDraftTransport = VtpDraftHttp.live) {
+        self.accountId = accountId
         self.secrets = secrets
         self.defaults = defaults
         self.transport = transport
@@ -112,10 +134,13 @@ final class VtpDraftClient: ObservableObject {
             secrets.set(k.rawRepresentation, Keys.key)
             key = k
         }
-        userName = defaults.string(forKey: Keys.userName) ?? ""
-        khoId = defaults.string(forKey: Keys.khoId)
-        token = secrets.get(Keys.token).map { String(decoding: $0, as: UTF8.self) }
-        refreshToken = secrets.get(Keys.refresh).map { String(decoding: $0, as: UTF8.self) }
+        let dk = { (n: String) in accountId.isEmpty ? "vtpDraft.\(n)" : "vtpDraft.\(accountId).\(n)" }
+        let sk = { (n: String) in accountId.isEmpty ? n : "\(accountId).\(n)" }
+        userName = defaults.string(forKey: dk("userName")) ?? ""
+        login = defaults.string(forKey: dk("login")) ?? ""
+        khoId = defaults.string(forKey: dk("khoId"))
+        token = secrets.get(sk("token")).map { String(decoding: $0, as: UTF8.self) }
+        refreshToken = secrets.get(sk("refresh")).map { String(decoding: $0, as: UTF8.self) }
         loggedIn = token != nil
     }
 
@@ -225,7 +250,11 @@ final class VtpDraftClient: ObservableObject {
         save(token: tk, refresh: VtpJ.str(d["refreshToken"]))
         let name = VtpJ.str(d["UserName"]) ?? VtpJ.str(d["Phone"]) ?? user
         userName = name
-        defaults.set(name, forKey: Keys.userName)
+        defaults.set(name, forKey: dkey("userName"))
+        // Số đăng nhập: ưu tiên số Viettel Post trả về, không có thì đúng chuỗi người dùng đã gõ.
+        let phoneNo = VtpJ.str(d["Phone"]) ?? VtpJ.str(d["PHONE"]) ?? ""
+        login = phoneNo.filter(\.isNumber).count >= 9 ? phoneNo : user
+        defaults.set(login, forKey: dkey("login"))
         pendingUser = ""
         await loadKho()
     }
@@ -246,6 +275,21 @@ final class VtpDraftClient: ObservableObject {
         guard token != nil else { throw VtpDraftError.notLoggedIn }
         if sessionExpired { throw VtpDraftError.sessionExpired }
         if let exp = tokenExpiry, exp.timeIntervalSinceNow < 30 * 60 { try await refresh() }
+    }
+
+    /// Gọi khi mở app: làm mới nếu sắp hết, lỗi thì im lặng (đã hiện ở trạng thái phiên).
+    func refreshQuietly() async {
+        guard loggedIn, !sessionExpired else { return }
+        try? await ensureFresh()
+    }
+
+    /// Bỏ hẳn tài khoản khỏi máy: xoá phiên, tên, kho. Khoá ký dùng chung nên giữ lại.
+    func forget() {
+        save(token: nil, refresh: nil)
+        for n in ["userName", "login", "khoId"] { defaults.removeObject(forKey: dkey(n)) }
+        userName = ""
+        login = ""
+        kho = []
     }
 
     func refreshNow() async {
@@ -280,8 +324,8 @@ final class VtpDraftClient: ObservableObject {
     private func save(token t: String?, refresh rt: String?) {
         token = t
         refreshToken = rt
-        secrets.set(t.map { Data($0.utf8) }, Keys.token)
-        secrets.set(rt.map { Data($0.utf8) }, Keys.refresh)
+        secrets.set(t.map { Data($0.utf8) }, skey("token"))
+        secrets.set(rt.map { Data($0.utf8) }, skey("refresh"))
         loggedIn = t != nil
         sessionExpired = false
     }

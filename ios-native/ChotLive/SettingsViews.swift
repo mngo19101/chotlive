@@ -10,6 +10,7 @@ struct SettingsView: View {
     @EnvironmentObject var ui: AppUI
     @EnvironmentObject var appearance: Appearance
     @EnvironmentObject var vtpDraft: VtpDraftClient
+    @EnvironmentObject var vtpDrafts: VtpDraftHub
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
@@ -171,9 +172,10 @@ struct SettingsView: View {
 
     /// Dòng thứ hai bên phải mục ViettelPost: phiên đẩy nháp trên máy này.
     private var draftStatus: (text: String, color: Color) {
-        if !vtpDraft.loggedIn { return ("Nháp: chưa đăng nhập", Theme.muted) }
-        if vtpDraft.sessionExpired { return ("Nháp: cần đăng nhập lại", Theme.red) }
-        return ("Nháp: đã đăng nhập", Theme.green)
+        let all = vtpDrafts.loggedInClients
+        if all.isEmpty { return ("Nháp: chưa đăng nhập", Theme.muted) }
+        if all.contains(where: \.sessionExpired) { return ("Nháp: cần đăng nhập lại", Theme.red) }
+        return (all.count > 1 ? "Nháp: \(all.count) tài khoản" : "Nháp: đã đăng nhập", Theme.green)
     }
 
     private func settingRow(_ icon: IconName, _ title: String, trailing: String? = nil, trailingColor: Color = Theme.muted,

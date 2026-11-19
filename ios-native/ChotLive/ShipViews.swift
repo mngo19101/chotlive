@@ -543,6 +543,7 @@ struct VtpExportSheet: View {
     @EnvironmentObject var client: LiveClient
     @EnvironmentObject var ui: AppUI
     @EnvironmentObject var vtpDraft: VtpDraftClient
+    @EnvironmentObject var vtpDrafts: VtpDraftHub
     /// Nằm luôn trong tab Chờ gửi (thay cho bảng "Nháp vận đơn" bật lên trước đây).
     let embedded: Bool
     /// Ô tìm của tab Đơn hàng: lọc danh sách khách khi nằm trong tab.
@@ -1034,7 +1035,7 @@ struct VtpExportSheet: View {
         case .failed:
             return ("Lỗi đẩy nháp", Theme.red, Theme.redSoft)
         case .notPushed:
-            return embedded && vtpDraft.loggedIn && !g.isBad ? ("Chưa đẩy", Theme.muted, Theme.grayBadge) : nil
+            return embedded && vtpDrafts.anyLoggedIn && !g.isBad ? ("Chưa đẩy", Theme.muted, Theme.grayBadge) : nil
         }
     }
 
@@ -1168,7 +1169,7 @@ struct VtpExportSheet: View {
                 }
             }
             // Đã đăng nhập Viettel Post trên máy (đẩy nháp được) thì bỏ đường Excel cho đỡ chỗ.
-            if api && !(embedded && vtpDraft.loggedIn) {
+            if api && !(embedded && vtpDrafts.anyLoggedIn) {
                 Button { export(list.filter { pick.contains($0.id) }) } label: {
                     T("Hoặc xuất file Excel như cũ", 13, .bold, Theme.accent)
                 }
@@ -1243,7 +1244,7 @@ struct VtpExportSheet: View {
     /// Xoá nháp trên Viettel Post (lệnh web chưa thử thật). Chỉ bỏ nhãn trong app khi Viettel Post báo xoá được.
     private func deleteDrafts(_ list: [Vtp.Group]) {
         guard !list.isEmpty, !deletingDrafts else { return }
-        guard vtpDraft.loggedIn, !vtpDraft.sessionExpired else {
+        guard vtpDrafts.anyLoggedIn else {
             ui.push(.vtpDraft)
             ui.notify("Đăng nhập Viettel Post trên máy này (phần 2 · Đẩy nháp) rồi xoá nháp.")
             return
@@ -1256,18 +1257,11 @@ struct VtpExportSheet: View {
             Task { @MainActor in
                 var failed: [String] = []
                 for g in list {
-                    var ok = true
-                    for c in VtpDraftBody.codes(g) {
-                        do {
-                            try await vtpDraft.deleteDraft(c)
-                        } catch {
-                            ok = false
-                            let name = g.summary.receiver.isEmpty ? g.customer.nickname : g.summary.receiver
-                            failed.append("\(name) (\(c)): \(error.localizedDescription)")
-                            if let e = error as? VtpDraftError, e == .blocked || e == .sessionExpired { break }
-                        }
-                    }
-                    if ok { store.clearDraft(g.orders) }
+                    // Mỗi mã nháp xoá bằng đúng tài khoản đã đẩy mã đó.
+                    let left = await vtpDrafts.deleteDrafts(of: g)
+                    let name = g.summary.receiver.isEmpty ? g.customer.nickname : g.summary.receiver
+                    failed += left.map { "\(name) (\($0.code)): \($0.reason)" }
+                    if left.isEmpty { store.clearDraft(g.orders) }
                 }
                 deletingDrafts = false
                 if failed.isEmpty {
@@ -1291,10 +1285,15 @@ struct VtpExportSheet: View {
     /// Đẩy các khách đã chọn vào mục Đơn nháp trên Viettel Post, từ máy này. Chưa đăng nhập phần 2 thì mở màn đăng nhập.
     private func pushDrafts(_ chosen: [Vtp.Group]) {
         guard !chosen.isEmpty else { return }
-        guard vtpDraft.loggedIn, !vtpDraft.sessionExpired else {
+        // Tài khoản đang dùng chưa đăng nhập mà có tài khoản khác đăng nhập: dùng tài khoản đó.
+        if !vtpDraft.loggedIn || vtpDraft.sessionExpired,
+           let other = vtpDrafts.loggedInClients.first(where: { !$0.sessionExpired }) {
+            vtpDrafts.select(other.accountId)
+        }
+        guard vtpDrafts.current.loggedIn, !vtpDrafts.current.sessionExpired else {
             ui.dismissSheet()
             ui.push(.vtpDraft)
-            ui.notify(vtpDraft.sessionExpired ? "Phiên Viettel Post trên máy này đã hết. Đăng nhập lại rồi đẩy nháp."
+            ui.notify(vtpDrafts.current.sessionExpired ? "Phiên Viettel Post trên máy này đã hết. Đăng nhập lại rồi đẩy nháp."
                                               : "Đăng nhập Viettel Post trên máy này (phần 2 · Đẩy nháp) rồi đẩy nháp.")
             return
         }
@@ -1369,20 +1368,15 @@ struct VtpExportSheet: View {
     private func removeDraftsAfterWaybill(_ list: [Vtp.Group]) async {
         guard !list.isEmpty else { return }
         let codes = list.flatMap { VtpDraftBody.codes($0) }
-        guard vtpDraft.loggedIn, !vtpDraft.sessionExpired else {
+        guard vtpDrafts.anyLoggedIn else {
             ui.notify("Còn \(codes.count) nháp trên viettelpost.vn của khách vừa lên vận đơn (\(codes.joined(separator: ", "))). Hãy xoá tay trong mục Đơn nháp để không bị duyệt trùng.")
             return
         }
         var left: [String] = []
         for g in list {
-            var ok = true
-            for c in VtpDraftBody.codes(g) {
-                do { try await vtpDraft.deleteDraft(c) } catch {
-                    ok = false
-                    left.append(c)
-                }
-            }
-            if ok { store.clearDraft(g.orders) }
+            let failed = await vtpDrafts.deleteDrafts(of: g)
+            left += failed.map(\.code)
+            if failed.isEmpty { store.clearDraft(g.orders) }
         }
         if !left.isEmpty {
             ui.notify("Đã lên vận đơn, nhưng chưa xoá được nháp cũ \(left.joined(separator: ", ")) trên viettelpost.vn. Hãy xoá tay để không bị duyệt trùng.")

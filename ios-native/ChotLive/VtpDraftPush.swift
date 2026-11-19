@@ -16,6 +16,7 @@ struct VtpDraftPushSheet: View {
     let groups: [Vtp.Group]
     let service: String
     @EnvironmentObject var vtpDraft: VtpDraftClient
+    @EnvironmentObject var vtpDrafts: VtpDraftHub
     @EnvironmentObject var store: Store
     @EnvironmentObject var ui: AppUI
 
@@ -90,18 +91,42 @@ struct VtpDraftPushSheet: View {
                 .frame(width: 38, height: 38)
                 .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(VtpDraftColors.brand))
             VStack(alignment: .leading, spacing: 2) {
-                T("Đăng nhập trên máy này", 14, .bold)
-                T([vtpDraft.phone, vtpDraft.selectedKho?.name ?? "chưa có kho", "phiên tự làm mới"]
+                T(vtpDraft.displayName.isEmpty ? (vtpDraft.phone.isEmpty ? "Tài khoản Viettel Post" : vtpDraft.phone)
+                                               : vtpDraft.displayName, 14, .bold).lineLimit(1)
+                T([vtpDraft.displayName.isEmpty ? "" : vtpDraft.phone, vtpDraft.selectedKho?.name ?? "chưa có kho"]
                     .filter { !$0.isEmpty }.joined(separator: " · "), 12, .medium, Theme.muted)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            if !running {
-                Button {
-                    ui.dismissSheet()
-                    ui.push(.vtpDraft)
-                } label: { T("Đổi", 13, .bold, Theme.accent) }
-                .buttonStyle(.plain)
+            if !running && !finished {
+                let others = vtpDrafts.loggedInClients
+                if others.count > 1 {
+                    // Nhiều tài khoản: đổi ngay trong bảng, không phải rời bảng.
+                    Menu {
+                        ForEach(others, id: \.accountId) { c in
+                            Button {
+                                vtpDrafts.select(c.accountId)
+                            } label: {
+                                let name = c.displayName.isEmpty ? c.accountLabel : "\(c.displayName) · \(c.phone)"
+                                if c.accountId == vtpDrafts.currentId {
+                                    Label(name, systemImage: "checkmark")
+                                } else {
+                                    Text(name)
+                                }
+                            }
+                        }
+                        Button("Quản lý tài khoản…") {
+                            ui.dismissSheet()
+                            ui.push(.vtpDraft)
+                        }
+                    } label: { T("Đổi", 13, .bold, Theme.accent) }
+                } else {
+                    Button {
+                        ui.dismissSheet()
+                        ui.push(.vtpDraft)
+                    } label: { T("Đổi", 13, .bold, Theme.accent) }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .padding(12)
@@ -205,12 +230,14 @@ struct VtpDraftPushSheet: View {
         outcomes = []
         haltReason = nil
         let svc = service
-        let account = vtpDraft.phone
+        // Giữ đúng tài khoản lúc bấm Đẩy cho cả lượt (đổi tài khoản giữa chừng không ảnh hưởng).
+        let client = vtpDraft
+        let account = client.accountLabel
         let list = groups
         Task { @MainActor in
             for (i, g) in list.enumerated() {
                 if stopRequested { break }
-                let r = await pushOne(g, kho: kho, service: svc, account: account)
+                let r = await pushOne(g, client: client, kho: kho, service: svc, account: account)
                 outcomes.append(r.outcome)
                 done = i + 1
                 if let halt = r.halt {
@@ -227,7 +254,7 @@ struct VtpDraftPushSheet: View {
 
     /// Một khách: kiểm lỗi, xoá nháp cũ nếu đã sửa, tra mã địa chỉ, lưu nháp, ghi vào đơn.
     /// Lỗi chung (bị chặn, hết phiên) trả `halt` để dừng cả lượt và không ghi lỗi vào đơn của khách.
-    private func pushOne(_ g: Vtp.Group, kho: VtpDraftKho, service: String,
+    private func pushOne(_ g: Vtp.Group, client: VtpDraftClient, kho: VtpDraftKho, service: String,
                          account: String) async -> (outcome: Outcome, halt: String?) {
         let name = g.summary.receiver.isEmpty ? g.customer.nickname : g.summary.receiver
         var out = Outcome(id: g.customer.id, name: name)
@@ -236,29 +263,34 @@ struct VtpDraftPushSheet: View {
             out.error = problems.joined(separator: " · ")
             return (out, nil)
         }
-        var oldCodes: [String] = []
+        var stale = false
         switch VtpDraftBody.status(g, service: service) {
         case .pushed(let code, _):
-            out.code = code
-            out.skipped = true
-            return (out, nil)
+            // Đã có nháp khớp nhưng ở tài khoản khác: đẩy sang tài khoản đang chọn (xoá nháp ở tài khoản cũ).
+            let acc = g.orders.compactMap(\.ship).first { $0.draftCode == code }?.draftAccount ?? ""
+            if acc.isEmpty || client.owns(acc) {
+                out.code = code
+                out.skipped = true
+                return (out, nil)
+            }
+            stale = true
         case .stale:
-            oldCodes = VtpDraftBody.codes(g)
+            stale = true
         default:
             break
         }
         do {
-            // Nháp cũ: xoá trước để không còn hai nháp cho cùng khách. Xoá lỗi thì vẫn đẩy mới và báo để xoá tay.
-            var leftover: [String] = []
-            for c in oldCodes {
-                do { try await vtpDraft.deleteDraft(c) } catch { leftover.append(c) }
+            // Nháp cũ: xoá trước (bằng đúng tài khoản đã đẩy) để không còn hai nháp cho cùng khách.
+            // Xoá lỗi thì vẫn đẩy mới và báo để xoá tay.
+            if stale {
+                let leftover = await vtpDrafts.deleteDrafts(of: g)
+                if !leftover.isEmpty {
+                    out.note = "Chưa xoá được nháp cũ \(leftover.map(\.code).joined(separator: ", ")) trên Viettel Post, hãy xoá tay trên web."
+                }
             }
-            if !leftover.isEmpty {
-                out.note = "Chưa xoá được nháp cũ \(leftover.joined(separator: ", ")) trên Viettel Post, hãy xoá tay trên web."
-            }
-            let place = try await vtpDraft.locate(VtpDraftBody.addressLine(g))
+            let place = try await client.locate(VtpDraftBody.addressLine(g))
             let body = VtpDraftBody.make(g, kho: kho, place: place, service: service)
-            let code = try await vtpDraft.insertDraft(body)
+            let code = try await client.insertDraft(body)
             store.markDraft(g.orders, code: code, hash: VtpDraftBody.hash(g, service: service), account: account)
             out.code = code
             return (out, nil)

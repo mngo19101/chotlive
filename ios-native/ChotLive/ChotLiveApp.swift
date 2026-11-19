@@ -8,8 +8,9 @@ struct ChotLiveApp: App {
     @StateObject private var printer = PrinterManager()
     @StateObject private var client = LiveClient()
     @StateObject private var appearance = Appearance()
-    /// Đẩy nháp Viettel Post ngay trên máy (phiên web riêng của máy này, không qua máy chủ).
-    @StateObject private var vtpDraft = VtpDraftClient()
+    /// Đẩy nháp Viettel Post ngay trên máy (phiên web riêng của máy này, không qua máy chủ), nhiều tài khoản.
+    /// Màn hình dùng `VtpDraftClient` là tài khoản đang dùng; đổi tài khoản thì cả app nhận client mới.
+    @StateObject private var vtpDrafts = VtpDraftHub()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -19,7 +20,8 @@ struct ChotLiveApp: App {
                 .environmentObject(printer)
                 .environmentObject(client)
                 .environmentObject(appearance)
-                .environmentObject(vtpDraft)
+                .environmentObject(vtpDrafts)
+                .environmentObject(vtpDrafts.current)
                 .onAppear {
                     KeyboardDismisser.shared.install()
                     SupportNotifier.shared.install()
@@ -52,6 +54,7 @@ struct ChotLiveApp: App {
                     if phase == .active {
                         KeyboardDismisser.shared.install()
                         client.checkSocket()
+                        Task { @MainActor in await vtpDrafts.refreshAll() }
                     } else {
                         store.save()
                     }

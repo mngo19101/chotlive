@@ -8,6 +8,7 @@ import UIKit
 /// mật khẩu và OTP không lưu ở đâu.
 struct VtpDraftSection: View {
     @EnvironmentObject var vtpDraft: VtpDraftClient
+    @EnvironmentObject var vtpDrafts: VtpDraftHub
     @EnvironmentObject var client: LiveClient
     @EnvironmentObject var ui: AppUI
     /// Người dùng đã tự chọn kho cho nháp: thôi tự khớp theo điểm lấy hàng ở phần 1.
@@ -19,6 +20,7 @@ struct VtpDraftSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gap) {
+            if vtpDrafts.clients.count > 1 { accountsCard }
             if vtpDraft.otpStep != nil {
                 otpCard
             } else if !vtpDraft.loggedIn || vtpDraft.sessionExpired {
@@ -26,12 +28,79 @@ struct VtpDraftSection: View {
             }
             if vtpDraft.loggedIn { accountCard }
             if vtpDraft.loggedIn, let warn = accountMismatch { mismatchCard(warn) }
+            if vtpDraft.loggedIn && vtpDrafts.clients.count == 1 { addAccountButton }
         }
         .onAppear {
-            if user.isEmpty { user = vtpDraft.userName.isEmpty ? (client.vtp?.phone ?? "") : vtpDraft.userName }
+            prefillUser()
             if vtpDraft.loggedIn && vtpDraft.kho.isEmpty { Task { @MainActor in await vtpDraft.loadKho() } }
         }
         .onChange(of: vtpDraft.kho) { _ in matchKhoToSender() }
+        .onChange(of: vtpDrafts.currentId) { _ in
+            user = ""
+            password = ""
+            code = ""
+            sentAt = nil
+            prefillUser()
+            if vtpDraft.loggedIn && vtpDraft.kho.isEmpty { Task { @MainActor in await vtpDraft.loadKho() } }
+        }
+    }
+
+    /// Tài khoản đầu tiên: gợi ý số ở phần 1. Tài khoản thêm sau: để trống cho gõ số khác.
+    private func prefillUser() {
+        guard user.isEmpty else { return }
+        if !vtpDraft.login.isEmpty {
+            user = vtpDraft.login
+        } else if vtpDrafts.loggedInClients.isEmpty {
+            user = client.vtp?.phone ?? ""
+        }
+    }
+
+    // MARK: Danh sách tài khoản
+
+    private var accountsCard: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                T("Tài khoản đẩy nháp", 15, .bold)
+                Spacer()
+                T("chạm để dùng", 12, .semibold, Theme.muted)
+            }
+            .padding(.bottom, 4)
+            ForEach(vtpDrafts.clients, id: \.accountId) { c in
+                VtpDraftAccountRow(c: c, on: c.accountId == vtpDrafts.currentId) { vtpDrafts.select(c.accountId) }
+            }
+            if !vtpDrafts.clients.contains(where: { !$0.loggedIn }) {
+                Button { vtpDrafts.addAccount() } label: {
+                    HStack(spacing: 8) {
+                        Icon(name: .plus, size: 14, weight: 2.4, color: Theme.accent)
+                        T("Thêm tài khoản Viettel Post", 13.5, .bold, Theme.accent)
+                    }
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle(20)
+    }
+
+    private var addAccountButton: some View {
+        Button { vtpDrafts.addAccount() } label: {
+            HStack(spacing: 8) {
+                Icon(name: .plus, size: 14, weight: 2.4, color: Theme.accent)
+                T("Thêm tài khoản Viettel Post khác", 13.5, .bold, Theme.accent)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 46)
+            .cardStyle(16)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Đăng nhập (kể cả qua OTP) xong: báo hub để bỏ chỗ cũ trùng số.
+    private func afterLogin(_ c: VtpDraftClient) {
+        if c.loggedIn && c.otpStep == nil { vtpDrafts.didLogin(c) }
     }
 
     // MARK: Chưa đăng nhập / phiên hết
@@ -39,7 +108,7 @@ struct VtpDraftSection: View {
     private var loginCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                T("Đăng nhập trên máy này", 15, .bold)
+                T(adding ? "Thêm tài khoản" : "Đăng nhập trên máy này", 15, .bold)
                 Spacer()
                 if vtpDraft.sessionExpired {
                     Badge(text: "Cần đăng nhập lại", color: Theme.red, fill: Theme.redSoft)
@@ -47,20 +116,29 @@ struct VtpDraftSection: View {
                     Badge(text: "Chưa đăng nhập", color: Theme.muted, fill: Theme.grayBadge)
                 }
             }
-            T("Dùng cùng tài khoản Viettel Post ở phần 1. Mật khẩu chỉ gửi thẳng tới Viettel Post, không lưu trên máy chủ ChốtLive. Lần đầu trên máy này Viettel Post sẽ gửi mã OTP.",
+            T(adding
+              ? "Đăng nhập thêm một tài khoản Viettel Post để đẩy nháp. Tài khoản đang có vẫn giữ phiên. Mật khẩu chỉ gửi thẳng tới Viettel Post. Lần đầu Viettel Post sẽ gửi mã OTP."
+              : "Nên dùng cùng tài khoản Viettel Post ở phần 1. Mật khẩu chỉ gửi thẳng tới Viettel Post, không lưu trên máy chủ ChốtLive. Lần đầu trên máy này Viettel Post sẽ gửi mã OTP.",
               12.5, .medium, Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
             LabeledField(label: "Số điện thoại / tên đăng nhập", placeholder: "0987…", text: $user,
                          keyboard: .asciiCapable, capitalize: false, contentType: .username)
             PasswordField(label: "Mật khẩu Viettel Post", text: $password)
             errorText
-            PrimaryButton(title: vtpDraft.loading ? "Đang đăng nhập…" : "Đăng nhập", fontSize: 15,
-                          enabled: !vtpDraft.loading && !user.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty) {
-                let u = user, p = password
-                Task { @MainActor in
-                    await vtpDraft.startLogin(user: u, password: p)
-                    // Mật khẩu chỉ cần cho một lần gửi: xoá khỏi ô ngay, kể cả khi lỗi.
-                    password = ""
+            HStack(spacing: 8) {
+                if adding {
+                    OutlineButton(title: "Huỷ") { vtpDrafts.remove(vtpDraft.accountId) }
+                }
+                PrimaryButton(title: vtpDraft.loading ? "Đang đăng nhập…" : "Đăng nhập", fontSize: 15, height: adding ? 44 : 52,
+                              enabled: !vtpDraft.loading && !user.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty) {
+                    let u = user, p = password
+                    let c = vtpDraft
+                    Task { @MainActor in
+                        await c.startLogin(user: u, password: p)
+                        // Mật khẩu chỉ cần cho một lần gửi: xoá khỏi ô ngay, kể cả khi lỗi.
+                        password = ""
+                        afterLogin(c)
+                    }
                 }
             }
         }
@@ -101,10 +179,12 @@ struct VtpDraftSection: View {
                 }
                 PrimaryButton(title: vtpDraft.loading ? "Đang xác nhận…" : "Xác nhận", fontSize: 15, height: 44,
                               enabled: !vtpDraft.loading && step?.sentType != nil && code.filter(\.isNumber).count >= 4) {
-                    let c = code.filter(\.isNumber)
+                    let digits = code.filter(\.isNumber)
+                    let c = vtpDraft
                     Task { @MainActor in
-                        await vtpDraft.verifyOtp(c)
-                        if vtpDraft.otpStep == nil { code = "" }
+                        await c.verifyOtp(digits)
+                        if c.otpStep == nil { code = "" }
+                        afterLogin(c)
                     }
                 }
             }
@@ -169,8 +249,10 @@ struct VtpDraftSection: View {
                     .frame(width: 36, height: 36)
                     .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(hex: 0xEE0033)))
                 VStack(alignment: .leading, spacing: 2) {
-                    T(vtpDraft.phone.isEmpty ? "Tài khoản Viettel Post" : vtpDraft.phone, 14, .bold)
-                    T(vtpDraft.selectedKho?.name ?? "", 12, .medium, Theme.muted).lineLimit(1)
+                    T(vtpDraft.displayName.isEmpty ? (vtpDraft.phone.isEmpty ? "Tài khoản Viettel Post" : vtpDraft.phone)
+                                                   : vtpDraft.displayName, 14, .bold).lineLimit(1)
+                    T(vtpDraft.phone.isEmpty ? "Chưa biết số: đăng xuất rồi đăng nhập lại một lần" : vtpDraft.phone,
+                      12, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
                 }
             }
             khoList
@@ -185,9 +267,11 @@ struct VtpDraftSection: View {
                     if let url = URL(string: "https://viettelpost.vn/") { UIApplication.shared.open(url) }
                 }
                 OutlineButton(title: "Đăng xuất", color: Theme.red) {
-                    ui.confirm = ConfirmItem(title: "Đăng xuất Viettel Post trên máy này?",
-                                             message: "Không đẩy nháp được tới khi đăng nhập lại. Nháp đã đẩy và vận đơn không bị ảnh hưởng.",
-                                             action: "Đăng xuất") { vtpDraft.logout() }
+                    let id = vtpDraft.accountId
+                    let name = vtpDraft.accountLabel
+                    ui.confirm = ConfirmItem(title: "Đăng xuất \(name.isEmpty ? "Viettel Post" : name) trên máy này?",
+                                             message: "Tài khoản này không đẩy hay xoá nháp được tới khi đăng nhập lại. Nháp đã đẩy và vận đơn không bị ảnh hưởng.",
+                                             action: "Đăng xuất") { vtpDrafts.remove(id) }
                 }
             }
         }
@@ -263,9 +347,16 @@ struct VtpDraftSection: View {
     /// Phần 2 đăng nhập khác số với tài khoản đối tác ở phần 1: nháp và vận đơn sẽ nằm ở hai tài khoản.
     private var accountMismatch: String? {
         guard let partner = client.vtp?.phone, client.vtpConnected else { return nil }
-        let a = Self.phoneKey(partner), b = Self.phoneKey(vtpDraft.userName)
+        let a = Self.phoneKey(partner), b = Self.phoneKey(vtpDraft.login.isEmpty ? vtpDraft.userName : vtpDraft.login)
         guard a.count >= 9, b.count >= 9, a != b else { return nil }
-        return "Phần 2 đang đăng nhập \(VtpMask.text(vtpDraft.userName)), khác phần 1 (\(VtpMask.text(partner))). Nháp sẽ nằm ở tài khoản khác với vận đơn. Đăng xuất rồi đăng nhập lại cho trùng."
+        let same = vtpDrafts.loggedInClients.contains { Self.phoneKey($0.login) == a }
+        return "Tài khoản đang dùng để đẩy nháp (\(vtpDraft.phone)) khác phần 1 (\(VtpMask.text(partner))). Nháp sẽ nằm ở tài khoản khác với vận đơn."
+            + (same ? " Chạm tài khoản trùng số ở trên nếu muốn nháp và vận đơn cùng chỗ." : "")
+    }
+
+    /// Đang thêm tài khoản thứ hai trở đi (đã có tài khoản khác đăng nhập).
+    private var adding: Bool {
+        !vtpDraft.loggedIn && vtpDrafts.loggedInClients.contains { $0 !== vtpDraft }
     }
 
     /// 9 số cuối của số điện thoại, để so 0987… với +84987….
@@ -305,5 +396,42 @@ struct VtpSectionHeader: View {
             T(hint, 12, .semibold, Theme.muted).lineLimit(1)
         }
         .padding(.top, 6)
+    }
+}
+
+/// Một dòng trong danh sách tài khoản đẩy nháp. Theo dõi riêng client đó để tên, trạng thái phiên cập nhật ngay.
+struct VtpDraftAccountRow: View {
+    @ObservedObject var c: VtpDraftClient
+    let on: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            HStack(spacing: 10) {
+                TickCircle(on: on)
+                VStack(alignment: .leading, spacing: 2) {
+                    T(title, 14, .bold).lineLimit(1)
+                    T(subtitle, 12, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+                }
+                Spacer(minLength: 6)
+                if !c.loggedIn {
+                    Badge(text: "Chưa đăng nhập", color: Theme.muted, fill: Theme.grayBadge)
+                } else if c.sessionExpired {
+                    Badge(text: "Cần đăng nhập lại", color: Theme.red, fill: Theme.redSoft)
+                }
+            }
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var title: String {
+        if !c.loggedIn && c.userName.isEmpty { return "Tài khoản mới" }
+        return c.displayName.isEmpty ? (c.phone.isEmpty ? "Tài khoản Viettel Post" : c.phone) : c.displayName
+    }
+
+    private var subtitle: String {
+        [c.displayName.isEmpty ? "" : c.phone, c.selectedKho?.name ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }
