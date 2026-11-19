@@ -1335,15 +1335,44 @@ struct VtpExportSheet: View {
             sending = false
             if let e = r.error { return ui.notify(e) }
             // Máy chủ đã ghi mã vận đơn vào đơn; ghi luôn trên máy để không phải chờ đồng bộ.
+            var withDraft: [Vtp.Group] = []
             for res in r.results {
                 guard let g = chosen.first(where: { $0.id == res.key }) else { continue }
                 if res.ok && !res.code.isEmpty {
                     store.applyVtpCreated(g.orders, code: res.code, fee: res.fee, cod: res.cod, goods: res.goods, service: svc)
+                    if !VtpDraftBody.codes(g).isEmpty { withDraft.append(g) }
                 } else if !res.ok {
                     store.applyVtpError(g.orders, error: res.error)
                 }
             }
             result = (chosen, r.results)
+            await removeDraftsAfterWaybill(withDraft)
+        }
+    }
+
+    /// Khách đã có nháp mà vừa lên vận đơn (đường API đối tác): xoá nháp cũ trên Viettel Post để không ai duyệt
+    /// nháp đó thành vận đơn thứ hai. Chưa đăng nhập phần 2 hoặc xoá lỗi thì báo để xoá tay.
+    /// (Duyệt thẳng nháp thành vận đơn, UpdateOrder TYPE 1, chưa thử thật nên chưa dùng.)
+    private func removeDraftsAfterWaybill(_ list: [Vtp.Group]) async {
+        guard !list.isEmpty else { return }
+        let codes = list.flatMap { VtpDraftBody.codes($0) }
+        guard vtpDraft.loggedIn, !vtpDraft.sessionExpired else {
+            ui.notify("Còn \(codes.count) nháp trên viettelpost.vn của khách vừa lên vận đơn (\(codes.joined(separator: ", "))). Hãy xoá tay trong mục Đơn nháp để không bị duyệt trùng.")
+            return
+        }
+        var left: [String] = []
+        for g in list {
+            var ok = true
+            for c in VtpDraftBody.codes(g) {
+                do { try await vtpDraft.deleteDraft(c) } catch {
+                    ok = false
+                    left.append(c)
+                }
+            }
+            if ok { store.clearDraft(g.orders) }
+        }
+        if !left.isEmpty {
+            ui.notify("Đã lên vận đơn, nhưng chưa xoá được nháp cũ \(left.joined(separator: ", ")) trên viettelpost.vn. Hãy xoá tay để không bị duyệt trùng.")
         }
     }
 
