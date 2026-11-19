@@ -561,6 +561,8 @@ struct VtpExportSheet: View {
     @State private var quoting: Set<String> = []
     /// Nháp đang mở để soát chi tiết (mã khách); nil là đang ở danh sách nháp.
     @State private var detailId: String?
+    /// Đang xoá nháp trên Viettel Post (một khách hoặc nhiều khách).
+    @State private var deletingDrafts = false
 
     /// `openDetail`: mở thẳng nháp của khách này (dùng khi vừa sửa Hàng & tiền xong).
     init(openDetail: String? = nil, embedded: Bool = false, search: String = "") {
@@ -767,6 +769,7 @@ struct VtpExportSheet: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 10) {
+                    if embedded { draftBox(g) }
                     detailBox("NGƯỜI NHẬN") {
                         HStack(alignment: .firstTextBaseline) {
                             T(name, 16, .bold).lineLimit(1)
@@ -843,9 +846,15 @@ struct VtpExportSheet: View {
             HStack(spacing: 10) {
                 OutlineButton(title: embedded ? "Quay lại" : "Để nháp", height: 52) { detailId = nil }
                     .frame(width: (Metrics.screenWidth - 50) / 3)
-                PrimaryButton(title: sending ? "Đang tạo vận đơn…" : busy ? "Đang tính cước…" : "Tạo vận đơn này",
-                              icon: .truck, fontSize: 15, enabled: !g.isBad && !sending && !busy) {
-                    create([g])
+                if api || !embedded {
+                    PrimaryButton(title: sending ? "Đang tạo vận đơn…" : busy ? "Đang tính cước…" : embedded ? "Lên vận đơn" : "Tạo vận đơn này",
+                                  icon: .truck, fontSize: 15, enabled: !g.isBad && !sending && !busy) {
+                        create([g])
+                    }
+                } else {
+                    PrimaryButton(title: "Đẩy nháp VTP", icon: .arrowRight, fontSize: 15, enabled: !g.isBad) {
+                        pushDrafts([g])
+                    }
                 }
             }
             .padding(.horizontal, Metrics.gutter)
@@ -887,6 +896,15 @@ struct VtpExportSheet: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(okIds.isEmpty)
+                let withDraft = list.filter { pick.contains($0.id) && !VtpDraftBody.codes($0).isEmpty }
+                if embedded && !withDraft.isEmpty {
+                    Button { deleteDrafts(withDraft) } label: {
+                        T(deletingDrafts ? "Đang xoá…" : "Xoá nháp (\(withDraft.count))", 13, .bold, Theme.red)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(deletingDrafts)
+                    .padding(.leading, 12)
+                }
             }
             .padding(.horizontal, Metrics.gutter + 4)
             .padding(.top, embedded ? 8 : 12)
@@ -964,9 +982,9 @@ struct VtpExportSheet: View {
                     } else {
                         if api { quoteLine(g) }
                         T(detail(s), 12, .medium, Theme.muted).fixedSize(horizontal: false, vertical: true)
-                        if api {
+                        if api || embedded {
                             HStack(alignment: .firstTextBaseline) {
-                                T(feeText(g), 12.5, .bold, Theme.ink).lineLimit(1).minimumScaleFactor(0.8)
+                                if api { T(feeText(g), 12.5, .bold, Theme.ink).lineLimit(1).minimumScaleFactor(0.8) }
                                 Spacer(minLength: 8)
                                 Button { detailId = g.id } label: {
                                     T("Soát chi tiết ›", 12.5, .bold, Theme.accent).fixedSize()
@@ -1150,6 +1168,111 @@ struct VtpExportSheet: View {
         .padding(.top, 14)
         .padding(.bottom, embedded ? 12 : 0)
         .background(Theme.card.overlay(alignment: .top) { HairLine() })
+    }
+
+    // MARK: Nháp Viettel Post của một khách
+
+    /// Khung "NHÁP VIETTEL POST" trong Soát chi tiết: mã nháp, giờ đẩy, nháp cũ hay còn khớp, và các nút xử lý.
+    private func draftBox(_ g: Vtp.Group) -> some View {
+        let st = VtpDraftBody.status(g, service: service)
+        let codes = VtpDraftBody.codes(g)
+        let ship = g.orders.compactMap(\.ship).first { ($0.draftCode ?? "").isEmpty == false }
+        return detailBox("NHÁP VIETTEL POST") {
+            switch st {
+            case .notPushed:
+                T("Chưa đẩy nháp. Bấm Đẩy nháp để đơn vào mục Đơn nháp trên viettelpost.vn (chưa gọi bưu tá).",
+                  12.5, .medium, Theme.muted).fixedSize(horizontal: false, vertical: true)
+            case .failed(let e):
+                T("Lần đẩy trước lỗi: \(e)", 12.5, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
+            case .pushed, .stale:
+                kv("Mã nháp", codes.joined(separator: ", "), strong: true)
+                if let at = ship?.draftAt {
+                    let d = Date(timeIntervalSince1970: at / 1000)
+                    kv("Đẩy lúc", "\(timeText(d)) \(dayMonth(d))")
+                }
+                if let acc = ship?.draftAccount, !acc.isEmpty { kv("Tài khoản", acc) }
+                if case .stale = st {
+                    T("Nháp trên Viettel Post là bản cũ: đơn đã sửa hoặc thêm đơn sau khi đẩy. Đẩy lại để thay.",
+                      12.5, .bold, Theme.gomInk).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    T("✓ Khớp với đơn hiện tại", 12.5, .bold, Theme.green)
+                }
+            }
+            HStack(spacing: 8) {
+                switch st {
+                case .pushed:
+                    OutlineButton(title: "Xem trên VTP") { viewDraft(codes) }
+                    OutlineButton(title: deletingDrafts ? "Đang xoá…" : "Xoá nháp", color: Theme.red) { deleteDrafts([g]) }
+                case .stale:
+                    OutlineButton(title: "Đẩy lại nháp", color: VtpDraftColors.brand) { pushDrafts([g]) }
+                    OutlineButton(title: deletingDrafts ? "Đang xoá…" : "Xoá nháp", color: Theme.red) { deleteDrafts([g]) }
+                default:
+                    OutlineButton(title: "Đẩy nháp VTP", color: VtpDraftColors.brand) { pushDrafts([g]) }
+                }
+            }
+            .disabled(g.isBad || deletingDrafts)
+            if !codes.isEmpty {
+                Button { clearDraftLabel(g) } label: {
+                    T("Bỏ nhãn nháp (đã tự xoá trên web)", 12.5, .bold, Theme.muted)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Sao chép mã nháp rồi mở viettelpost.vn để tìm trong mục Đơn nháp.
+    private func viewDraft(_ codes: [String]) {
+        UIPasteboard.general.string = codes.joined(separator: " ")
+        ui.notify("Đã sao chép mã nháp. Trên viettelpost.vn mở Quản lý vận đơn › Đơn nháp rồi dán mã để tìm.")
+        if let url = URL(string: "https://viettelpost.vn/") { UIApplication.shared.open(url) }
+    }
+
+    /// Xoá nháp trên Viettel Post (lệnh web chưa thử thật). Chỉ bỏ nhãn trong app khi Viettel Post báo xoá được.
+    private func deleteDrafts(_ list: [Vtp.Group]) {
+        guard !list.isEmpty, !deletingDrafts else { return }
+        guard vtpDraft.loggedIn, !vtpDraft.sessionExpired else {
+            ui.push(.vtpDraft)
+            ui.notify("Đăng nhập Viettel Post trên máy này (phần 2 · Đẩy nháp) rồi xoá nháp.")
+            return
+        }
+        let count = list.reduce(0) { $0 + VtpDraftBody.codes($1).count }
+        ui.confirm = ConfirmItem(title: "Xoá \(count) nháp trên Viettel Post?",
+                                 message: "Nháp bị xoá khỏi mục Đơn nháp trên viettelpost.vn. Đơn trong app vẫn ở Chờ gửi.",
+                                 action: "Xoá nháp") {
+            deletingDrafts = true
+            Task { @MainActor in
+                var failed: [String] = []
+                for g in list {
+                    var ok = true
+                    for c in VtpDraftBody.codes(g) {
+                        do {
+                            try await vtpDraft.deleteDraft(c)
+                        } catch {
+                            ok = false
+                            let name = g.summary.receiver.isEmpty ? g.customer.nickname : g.summary.receiver
+                            failed.append("\(name) (\(c)): \(error.localizedDescription)")
+                            if let e = error as? VtpDraftError, e == .blocked || e == .sessionExpired { break }
+                        }
+                    }
+                    if ok { store.clearDraft(g.orders) }
+                }
+                deletingDrafts = false
+                if failed.isEmpty {
+                    ui.notify("Đã xoá nháp trên Viettel Post.")
+                } else {
+                    ui.notify("Chưa xoá được \(failed.count) nháp:\n" + failed.prefix(5).joined(separator: "\n"))
+                }
+            }
+        }
+    }
+
+    /// Bỏ nhãn nháp trong app, không gọi Viettel Post (dùng khi đã tự xoá nháp trên web).
+    private func clearDraftLabel(_ g: Vtp.Group) {
+        ui.confirm = ConfirmItem(title: "Bỏ nhãn nháp?",
+                                 message: "Chỉ bỏ nhãn trong app. Nếu nháp còn trên viettelpost.vn thì phải tự xoá ở đó.",
+                                 action: "Bỏ nhãn") {
+            store.clearDraft(g.orders)
+        }
     }
 
     /// Đẩy các khách đã chọn vào mục Đơn nháp trên Viettel Post, từ máy này. Chưa đăng nhập phần 2 thì mở màn đăng nhập.
