@@ -272,7 +272,8 @@ test('app nhận ship và mã đơn của web, gửi ship lên thì web thấy �
   assert.equal(item.orderCode, 'HD26110701');
   assert.deepEqual(item.ship, {
     state: 'hold', pay: 'cod', payer: 'receiver', deposit: 50000, shipFee: null, codOverride: null,
-    weightG: 1500, exportedAt: null, batchId: null, lengthCm: null, widthCm: null, heightCm: null
+    weightG: 1500, exportedAt: null, batchId: null, lengthCm: null, widthCm: null, heightCm: null,
+    draftCode: null, draftAt: null, draftHash: null, draftAccount: null, draftError: null, draftErrorAt: null
   });
 
   // Đơn chưa có ship: gửi null để app biết là chưa duyệt.
@@ -436,4 +437,27 @@ test('gợi ý mã vận đơn từ webhook: gửi xuống app mã mới nhất 
   assert.equal(ship.vtpKind, 'unknown');
   assert.equal(ship.vtpHints, undefined);
   assert.equal(ship.vtpAttempt, undefined, 'dấu lần tạo chỉ máy chủ dùng');
+});
+
+test('nháp Viettel Post app đẩy từ máy: máy chủ lưu, gửi lại app, bỏ nhãn thì xoá', () => {
+  const state = baseState();
+  state.orders[0].ship = { state: 'ready', pay: 'cod' };
+  const snap = toNativeSnapshot(state);
+  const cust = snap.customers.find((c) => c.id === 'linh.nguyen');
+  const item = cust.items[0];
+  const draft = { draftCode: 157700000001, draftAt: 1794000000000, draftHash: 'ab12cd34ef56ab12',
+    draftAccount: '0987 *** 321', draftError: null, draftErrorAt: null };
+  applyNativeUpdate(state, { customers: [{ ...cust, items: [{ ...item, ship: { ...item.ship, ...draft } }] }] });
+  assert.equal(state.orders[0].ship.draftCode, '157700000001');
+  assert.equal(state.orders[0].ship.draftHash, 'ab12cd34ef56ab12');
+  assert.equal('draftError' in state.orders[0].ship, false);
+
+  const back = toNativeSnapshot(state).customers.find((c) => c.id === 'linh.nguyen').items[0].ship;
+  assert.equal(back.draftCode, '157700000001');
+  assert.equal(back.draftAt, 1794000000000);
+  assert.equal(back.draftAccount, '0987 *** 321');
+
+  // Bỏ nhãn nháp trên app: các trường nháp không còn gửi lên, máy chủ xoá.
+  applyNativeUpdate(state, { customers: [{ ...cust, items: [{ ...item, ship: { state: 'ready', pay: 'cod' } }] }] });
+  assert.equal(state.orders[0].ship.draftCode, undefined);
 });

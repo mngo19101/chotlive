@@ -77,6 +77,7 @@ function nativeAddress(rec) {
 
 const SHIP_STATES = ['ask', 'hold', 'ready', 'exported'];
 const numOrNull = (v) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+const textOrNull = (v, max) => (v === undefined || v === null || v === '' ? null : String(v).slice(0, max));
 const moneyOrNull = (v) => (numOrNull(v) === null ? null : Math.max(0, Math.round(Number(v))));
 
 /**
@@ -98,7 +99,14 @@ export function nativeShip(ship) {
     // Kích thước kiện (cm), app bắt buộc nhập khi nặng từ 10kg.
     lengthCm: moneyOrNull(ship.lengthCm),
     widthCm: moneyOrNull(ship.widthCm),
-    heightCm: moneyOrNull(ship.heightCm)
+    heightCm: moneyOrNull(ship.heightCm),
+    // Nháp Viettel Post do app đẩy từ máy: app ghi, máy chủ chỉ lưu và đồng bộ lại.
+    draftCode: textOrNull(ship.draftCode, 40),
+    draftAt: numOrNull(ship.draftAt),
+    draftHash: textOrNull(ship.draftHash, 40),
+    draftAccount: textOrNull(ship.draftAccount, 40),
+    draftError: textOrNull(ship.draftError, 200),
+    draftErrorAt: numOrNull(ship.draftErrorAt)
   };
 }
 

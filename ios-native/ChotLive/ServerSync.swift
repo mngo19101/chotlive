@@ -169,6 +169,7 @@ extension Store {
             let hadItems = !c.items.isEmpty
             c.items.removeAll { sync.deletedItems.contains($0.id) }
             if hadItems && c.items.isEmpty { continue }
+            keepLocalDrafts(&c)
             nextCustomers.append(c)
         }
         nextCustomers.append(contentsOf: customers.filter { protected.contains($0.id) })
@@ -210,6 +211,26 @@ extension Store {
         }
         syncState = sync
         saveSoon()
+    }
+
+    /// Máy chủ chưa lưu nháp Viettel Post (bản cũ lọc bỏ các trường nháp): giữ nháp đang có trên máy,
+    /// để đồng bộ xong không xoá mất nhãn "Nháp VTP" vừa đẩy.
+    func keepLocalDrafts(_ c: inout Customer) {
+        guard let local = customers.first(where: { $0.id == c.id }) else { return }
+        var mine: [String: ShipInfo] = [:]
+        for it in local.items { if let s = it.ship, s.draftCode != nil || s.draftError != nil { mine[it.id] = s } }
+        guard !mine.isEmpty else { return }
+        for i in c.items.indices {
+            guard let m = mine[c.items[i].id], var s = c.items[i].ship, !s.draftKnown else { continue }
+            s.draftCode = m.draftCode
+            s.draftAt = m.draftAt
+            s.draftHash = m.draftHash
+            s.draftAccount = m.draftAccount
+            s.draftError = m.draftError
+            s.draftErrorAt = m.draftErrorAt
+            s.draftKnown = m.draftKnown
+            c.items[i].ship = s
+        }
     }
 
     /// Gói các thay đổi chưa gửi. Mỗi lúc chỉ gửi một gói; nil nếu không có gì hoặc đang chờ xác nhận.

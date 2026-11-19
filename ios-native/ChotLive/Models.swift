@@ -167,6 +167,9 @@ struct ShipInfo: Codable, Equatable {
     var draftAccount: String? = nil
     var draftError: String? = nil
     var draftErrorAt: Double? = nil
+    /// Gói từ máy chủ có mang các trường nháp (kể cả null). Máy chủ bản cũ bỏ hẳn các trường này:
+    /// khi đó app giữ nháp đang có trên máy thay vì coi là đã bỏ nhãn. Không ghi ra JSON.
+    var draftKnown = false
 
     init(state: String? = nil, pay: String? = nil, payer: String? = nil, deposit: Int? = nil, shipFee: Int? = nil,
          codOverride: Int? = nil, weightG: Int? = nil, exportedAt: Double? = nil, batchId: String? = nil,
@@ -233,6 +236,7 @@ struct ShipInfo: Codable, Equatable {
         draftAccount = Self.text(c, .draftAccount)
         draftError = Self.text(c, .draftError)
         draftErrorAt = Self.number(c, .draftErrorAt)
+        draftKnown = c.contains(.draftCode)
     }
 
     /// Ghi cả giá trị rỗng (null) để server xoá đúng trường đã bỏ, ví dụ COD nhập tay.

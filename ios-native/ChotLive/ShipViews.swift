@@ -1084,31 +1084,43 @@ struct VtpExportSheet: View {
         let total = picked.reduce(0) { $0 + $1.summary.cod }
         let busy = api && picked.contains { isQuoting($0) }
         let feeTotal = picked.reduce(0) { $0 + (quote($1).flatMap { $0.ok ? $0.fee : nil } ?? 0) }
-        return VStack(spacing: 14) {
-            HStack(alignment: .bottom) {
+        // Trong tab Chờ gửi: chân gọn hơn (không nhãn "Dịch vụ", nút thấp hơn) để danh sách khách có thêm chỗ.
+        let compact = embedded
+        let btnH: CGFloat = compact ? 44 : 52
+        return VStack(spacing: compact ? 10 : 14) {
+            HStack(alignment: compact ? .center : .bottom) {
                 VStack(alignment: .leading, spacing: 5) {
-                    fieldLabel("Dịch vụ")
+                    if !compact { fieldLabel("Dịch vụ") }
                     Button { picking.toggle() } label: {
                         HStack(spacing: 4) {
-                            T(serviceName, 14, .bold).lineLimit(1).fixedSize()
+                            T(serviceName, compact ? 13 : 14, .bold).lineLimit(1).fixedSize()
                             Icon(name: picking ? .chevronUp : .chevronDown, size: 14, color: Theme.muted)
                         }
-                        .padding(.horizontal, 12)
-                        .frame(height: 38)
-                        .cardStyle(12, fill: Theme.field)
+                        .padding(.horizontal, compact ? 10 : 12)
+                        .frame(height: compact ? 32 : 38)
+                        .cardStyle(compact ? 10 : 12, fill: Theme.field)
                     }
                     .buttonStyle(.plain)
                     .overlay(alignment: .bottomLeading) {
-                        if picking { servicePicker.offset(y: -46).fixedSize() }
+                        if picking { servicePicker.offset(y: compact ? -40 : -46).fixedSize() }
                     }
                 }
                 .zIndex(1)
                 Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 2) {
-                    T(api ? "Tổng thu hộ · \(pick.count) khách" : "Tổng thu hộ", 12, .semibold, Theme.muted)
-                    T(money(total), 22, .heavy, Theme.ink, track: -0.4).lineLimit(1).minimumScaleFactor(0.7)
-                    if api && feeTotal > 0 {
-                        T("Cước dự tính \(money(feeTotal))", 12, .semibold, Theme.muted).lineLimit(1)
+                if compact {
+                    VStack(alignment: .trailing, spacing: 0) {
+                        T(money(total), 18, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.7)
+                        T(["\(pick.count) khách", api && feeTotal > 0 ? "cước \(money(feeTotal))" : ""]
+                            .filter { !$0.isEmpty }.joined(separator: " · "), 11.5, .semibold, Theme.muted)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                } else {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        T(api ? "Tổng thu hộ · \(pick.count) khách" : "Tổng thu hộ", 12, .semibold, Theme.muted)
+                        T(money(total), 22, .heavy, Theme.ink, track: -0.4).lineLimit(1).minimumScaleFactor(0.7)
+                        if api && feeTotal > 0 {
+                            T("Cước dự tính \(money(feeTotal))", 12, .semibold, Theme.muted).lineLimit(1)
+                        }
                     }
                 }
             }
@@ -1117,12 +1129,12 @@ struct VtpExportSheet: View {
                 HStack(spacing: 10) {
                     Button { pushDrafts(picked) } label: {
                         HStack(spacing: 6) {
-                            Icon(name: .arrowRight, size: 15, weight: 2.4, color: VtpDraftColors.brand)
-                            T("Đẩy nháp VTP", 15, .bold, VtpDraftColors.brand).lineLimit(1).minimumScaleFactor(0.8)
+                            Icon(name: .arrowRight, size: 14, weight: 2.4, color: VtpDraftColors.brand)
+                            T("Đẩy nháp VTP", 14.5, .bold, VtpDraftColors.brand).lineLimit(1).minimumScaleFactor(0.8)
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(VtpDraftColors.brand, lineWidth: 2))
+                        .frame(height: btnH)
+                        .background(RoundedRectangle(cornerRadius: btnH / 2, style: .continuous).strokeBorder(VtpDraftColors.brand, lineWidth: 1.5))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -1130,11 +1142,11 @@ struct VtpExportSheet: View {
                     .opacity(pick.isEmpty || sending ? 0.45 : 1)
                     if api {
                         PrimaryButton(title: sending ? "Đang tạo…" : busy ? "Đang tính cước…" : "Lên vận đơn",
-                                      icon: .truck, fontSize: 15, enabled: !pick.isEmpty && !sending && !busy) {
+                                      icon: .truck, fontSize: 14.5, height: btnH, enabled: !pick.isEmpty && !sending && !busy) {
                             create(picked)
                         }
                     } else {
-                        PrimaryButton(title: "Xuất Excel", icon: .download, fontSize: 15, enabled: !pick.isEmpty) {
+                        PrimaryButton(title: "Xuất Excel", icon: .download, fontSize: 14.5, height: btnH, enabled: !pick.isEmpty) {
                             export(picked)
                         }
                     }
@@ -1155,7 +1167,8 @@ struct VtpExportSheet: View {
                     }
                 }
             }
-            if api {
+            // Đã đăng nhập Viettel Post trên máy (đẩy nháp được) thì bỏ đường Excel cho đỡ chỗ.
+            if api && !(embedded && vtpDraft.loggedIn) {
                 Button { export(list.filter { pick.contains($0.id) }) } label: {
                     T("Hoặc xuất file Excel như cũ", 13, .bold, Theme.accent)
                 }
@@ -1165,8 +1178,8 @@ struct VtpExportSheet: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
-        .padding(.top, 14)
-        .padding(.bottom, embedded ? 12 : 0)
+        .padding(.top, compact ? 10 : 14)
+        .padding(.bottom, compact ? 8 : 0)
         .background(Theme.card.overlay(alignment: .top) { HairLine() })
     }
 

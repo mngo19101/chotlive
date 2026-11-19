@@ -138,6 +138,39 @@ final class SyncTests: XCTestCase {
         XCTAssertNil(store.customers.first { $0.id == "b" })
     }
 
+    /// Máy chủ bản cũ lọc bỏ các trường nháp: đồng bộ xong vẫn phải còn nhãn "Nháp VTP" vừa đẩy trên máy.
+    func testDraftLabelSurvivesServerWithoutDraftFields() throws {
+        let store = makeStore()
+        markSynced(store)
+        var c = serverCustomer("a", items: ["a1"])
+        c.items[0].ship = ShipInfo(state: "ready", pay: "cod")
+        store.applyServer(ServerSnapshot(customers: [c]))
+        let order = try XCTUnwrap(store.allOrders().first)
+        store.markDraft([order], code: "157700000001", hash: "ab12", account: "0987 *** 321")
+        let update = try XCTUnwrap(store.makeSyncUpdate())
+        store.acknowledgeSync(id: update.id)
+
+        // Máy chủ cũ gửi lại ship không có trường nháp nào.
+        store.applyServer(ServerSnapshot(customers: [c]))
+        XCTAssertEqual(store.allOrders().first?.ship?.draftCode, "157700000001")
+        XCTAssertEqual(store.allOrders().first?.ship?.draftHash, "ab12")
+
+        // Máy chủ mới có mang trường nháp: máy chủ là bản chuẩn (máy khác đã bỏ nhãn thì máy này cũng bỏ).
+        var cleared = c
+        cleared.items[0].ship?.draftKnown = true
+        store.applyServer(ServerSnapshot(customers: [cleared]))
+        XCTAssertNil(store.allOrders().first?.ship?.draftCode)
+    }
+
+    func testDecodeKnowsWhenServerSendsDraftFields() throws {
+        let old = try JSONDecoder().decode(ShipInfo.self, from: Data(#"{"state":"ready"}"#.utf8))
+        XCTAssertFalse(old.draftKnown)
+        let new = try JSONDecoder().decode(ShipInfo.self, from: Data(#"{"state":"ready","draftCode":null}"#.utf8))
+        XCTAssertTrue(new.draftKnown)
+        let pushed = try JSONDecoder().decode(ShipInfo.self, from: Data(#"{"state":"ready","draftCode":157700000001}"#.utf8))
+        XCTAssertEqual(pushed.draftCode, "157700000001")
+    }
+
     func testOnlyChangedCustomersAreSent() {
         let store = makeStore()
         markSynced(store)
