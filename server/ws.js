@@ -1,6 +1,6 @@
 /** Xử lý từng kết nối WebSocket: đăng nhập, đồng bộ, bật và tắt theo dõi live. */
 import { isObject } from '../validate.js';
-import { MAX_UNAUTHENTICATED_WS_BYTES, STATE_TOO_LARGE_MESSAGE, SYNC_TOO_FAST_MESSAGE } from '../limits.js';
+import { MAX_UNAUTHENTICATED_WS_BYTES, SYNC_TOO_FAST_MESSAGE } from '../limits.js';
 import { accessOf } from '../access.js';
 import { toNativeSnapshot } from '../native-sync.js';
 import { liveKey } from '../live-manager.js';
@@ -137,10 +137,7 @@ const onConnection = safely('ws connection', (ws, req) => {
     }
 
     if (msg.type === 'native_update') {
-      if (!applyNativeUpdateForUser(ws.userId, msg, ws)) {
-        send({ type: 'sync_error', code: 'STATE_TOO_LARGE', id: msg.id ?? null, message: STATE_TOO_LARGE_MESSAGE });
-        return;
-      }
+      applyNativeUpdateForUser(ws.userId, msg, ws);
       send({ type: 'native_ack', id: msg.id ?? null, clientsCount: countOnlineClientsForUser(ws.userId) });
     } else if (msg.type === 'sync_update' && msg.state) {
       const updated = applyIncomingStateForUser(
@@ -150,10 +147,6 @@ const onConnection = safely('ws connection', (ws, req) => {
         msg.clientId || '',
         ws
       );
-      if (!updated) {
-        send({ type: 'sync_error', code: 'STATE_TOO_LARGE', message: STATE_TOO_LARGE_MESSAGE });
-        return;
-      }
       send({
         type: 'sync_ack',
         rev: updated.rev,

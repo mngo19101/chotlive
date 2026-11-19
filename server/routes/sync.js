@@ -1,7 +1,7 @@
 /** API đồng bộ dữ liệu giữa web và app: lấy dữ liệu, lịch sử bình luận, gửi thay đổi, đặt lại. */
 import express from 'express';
 import * as sqlite from '../../db.js';
-import { STATE_TOO_LARGE_MESSAGE, SYNC_TOO_FAST_MESSAGE } from '../../limits.js';
+import { SYNC_TOO_FAST_MESSAGE } from '../../limits.js';
 import { nativeComment } from '../../native-sync.js';
 import { db } from '../database.js';
 import { isDefaultAdminUser } from '../accounts.js';
@@ -62,7 +62,6 @@ router.post('/api/sync', requireAuth, syncJson, (req, res) => {
     return res.status(429).json({ error: SYNC_TOO_FAST_MESSAGE, code: 'SYNC_TOO_FAST' });
   }
   const updated = applyIncomingStateForUser(userId, incoming, action, clientId);
-  if (!updated) return res.status(413).json({ error: STATE_TOO_LARGE_MESSAGE, code: 'STATE_TOO_LARGE' });
   res.json({
     ok: true,
     rev: updated.rev,

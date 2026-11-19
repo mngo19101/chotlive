@@ -4,7 +4,7 @@
  */
 import { WebSocketServer } from 'ws';
 import { snapCollections, diffCollections, snapScalars, diffScalars } from '../delta.js';
-import { MAX_STATE_BYTES, MAX_UNAUTHENTICATED_WS_BYTES, restoreState, stateBytes } from '../limits.js';
+import { MAX_UNAUTHENTICATED_WS_BYTES } from '../limits.js';
 import { accessOf } from '../access.js';
 import { toNativeSnapshot } from '../native-sync.js';
 import { MAX_WS_MESSAGE_BYTES } from './config.js';
@@ -185,11 +185,8 @@ export function broadcastClientCountForUser(userId) {
 
 /**
  * Thay đổi dữ liệu của một tài khoản rồi báo cho mọi thiết bị của tài khoản đó.
- * `fromDevice`: dữ liệu do thiết bị gửi lên. Nếu làm dữ liệu vượt MAX_STATE_BYTES thì trả lại như cũ
- * và trả về null. Thay đổi làm dữ liệu nhỏ đi vẫn được nhận, để tài khoản đã quá lớn còn dọn bớt được.
- * Bình luận trong gói đã được ghi vào bảng bình luận ngay trong `fn`, nên không bị mất khi trả lại.
  */
-export function mutateState(userId, action, clientId, excludeWs, fn, { fromDevice = false } = {}) {
+export function mutateState(userId, action, clientId, excludeWs, fn) {
   const targetState = getStateForUser(userId);
   const beforeCols = snapCollections(targetState);
   const beforeScalars = snapScalars(targetState);
@@ -198,14 +195,6 @@ export function mutateState(userId, action, clientId, excludeWs, fn, { fromDevic
   fn(targetState);
 
   const afterCols = snapCollections(targetState);
-  if (fromDevice) {
-    const after = stateBytes(afterCols, snapScalars(targetState));
-    if (after > MAX_STATE_BYTES && after > stateBytes(beforeCols, beforeScalars)) {
-      restoreState(targetState, beforeCols, beforeScalars);
-      console.warn(`[sync] ${userId}: từ chối thay đổi làm dữ liệu lên ${Math.round(after / 1024 / 1024)}MB`);
-      return null;
-    }
-  }
 
   targetState.rev = (targetState.rev || 1) + 1;
   targetState.updatedAt = Date.now();

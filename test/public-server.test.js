@@ -520,7 +520,7 @@ test('API đồng bộ vẫn nhận gói vài MB của tài khoản đã đăng 
   assert.equal(st.body.state.orders.length, 2000);
 });
 
-test('dữ liệu một tài khoản không được vượt 30MB; thay đổi bị từ chối, dữ liệu cũ còn nguyên', async () => {
+test('dữ liệu một tài khoản vượt 30MB vẫn được lưu bình thường', async () => {
   const { body } = await register('khach.lam.day', 'mat-khau-tot', newIp());
   const token = body.token;
   assert.equal((await post('/api/sync', { state: { orders: [{ id: 'giu', code: 'D1', items: [] }] } }, { token })).status, 200);
@@ -531,15 +531,14 @@ test('dữ liệu một tài khoản không được vượt 30MB; thay đổi b
   const orders = Array.from({ length: 31 }, (_, i) => ({ id: `big${i}`, note: chunk, items: [] }));
   const comments = [{ id: 'cmt-trong-goi-lon', uniqueId: 'khach1', nickname: 'Khách', comment: 'chốt 50', ts: Date.now() }];
   sock.ws.send(JSON.stringify({ type: 'sync_update', state: { orders, comments } }));
-  const err = await until(() => sock.messages.find((m) => m.type === 'sync_error'), 'báo lỗi quá lớn');
-  assert.equal(err.code, 'STATE_TOO_LARGE');
+  await until(() => sock.messages.find((m) => m.type === 'sync_ack'), 'xác nhận lưu gói trên 30MB');
+  assert.equal(sock.messages.some((m) => m.type === 'sync_error'), false);
 
   const st = await get('/api/state', token);
-  assert.deepEqual(st.body.state.orders.map((o) => o.id), ['giu']);
-  // Bình luận trong gói bị từ chối vẫn được lưu.
+  assert.equal(st.body.state.orders.length, 31);
+  assert.equal(st.body.state.orders[0].id, 'big0');
   const cmts = await get('/api/comments', token);
   assert.ok(cmts.body.comments.some((c) => c.id === 'cmt-trong-goi-lon'));
-  // Gói nhỏ sau đó vẫn được nhận.
   assert.equal((await post('/api/sync', { state: { orders: [] } }, { token })).status, 200);
   sock.ws.close();
 });

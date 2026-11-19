@@ -176,7 +176,7 @@ export function applyIncomingStateForUser(userId, rawIncoming, action = 'update'
       targetState.activeSessionId = incoming.activeSessionId;
     }
     targetState.isCleanAccount = isClean;
-  }, { fromDevice: true });
+  });
 }
 
 /** Thay đổi từ app iOS: chỉ gồm những khách vừa đổi và các món đã xoá. */
@@ -200,7 +200,7 @@ export function applyNativeUpdateForUser(userId, rawUpdate, excludeWs) {
     }
     if (Array.isArray(update.printedCommentIds)) printed.push(...update.printedCommentIds);
     markCommentsPrinted(userId, st, printed);
-  }, { fromDevice: true });
+  });
 }
 
 function priceOptionsOf(st) {
