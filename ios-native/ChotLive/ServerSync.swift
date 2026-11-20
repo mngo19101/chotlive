@@ -170,6 +170,7 @@ extension Store {
             c.items.removeAll { sync.deletedItems.contains($0.id) }
             if hadItems && c.items.isEmpty { continue }
             keepLocalDrafts(&c)
+            keepLocalApprovedWaybills(&c)
             nextCustomers.append(c)
         }
         nextCustomers.append(contentsOf: customers.filter { protected.contains($0.id) })
@@ -233,6 +234,35 @@ extension Store {
             s.draftError = m.draftError
             s.draftErrorAt = m.draftErrorAt
             s.draftKnown = m.draftKnown
+            c.items[i].ship = s
+        }
+    }
+
+    /// Máy chủ bản cũ chưa có API nhận mã vận đơn duyệt từ nháp (`vtpd_`): giữ mã vận đơn đã duyệt trên máy
+    /// khi bản chụp từ server vẫn còn `state = exported` và cùng `batchId`. Nếu bị huỷ hoặc có cập nhật từ server thì theo server.
+    func keepLocalApprovedWaybills(_ c: inout Customer) {
+        guard let local = customers.first(where: { $0.id == c.id }) else { return }
+        var mine: [String: ShipInfo] = [:]
+        for it in local.items {
+            if let s = it.ship, !(s.vtpCode ?? "").isEmpty, (s.batchId ?? "").hasPrefix("vtpd_") {
+                mine[it.id] = s
+            }
+        }
+        guard !mine.isEmpty else { return }
+        for i in c.items.indices {
+            guard let m = mine[c.items[i].id], var s = c.items[i].ship else { continue }
+            guard s.state == ShipState.exported.rawValue, s.batchId == m.batchId,
+                  (s.vtpCode ?? "").isEmpty, (s.vtpOldCode ?? "").isEmpty, (s.vtpKind ?? "").isEmpty else { continue }
+            s.vtpCode = m.vtpCode
+            s.vtpFee = m.vtpFee
+            s.vtpCod = m.vtpCod
+            s.vtpGoods = m.vtpGoods
+            s.vtpService = m.vtpService
+            s.vtpStatus = m.vtpStatus
+            s.vtpStatusName = m.vtpStatusName
+            s.vtpStatusAt = m.vtpStatusAt
+            s.vtpKind = m.vtpKind
+            s.vtpNote = m.vtpNote
             c.items[i].ship = s
         }
     }

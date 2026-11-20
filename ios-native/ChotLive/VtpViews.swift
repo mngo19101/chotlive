@@ -383,13 +383,18 @@ struct VtpResultView: View {
     private func done() { if let onDone { onDone() } else { ui.dismissSheet() } }
 
     private var okList: [VtpCreateResult] { results.filter(\.ok) }
+    private var allFromDraft: Bool { !okList.isEmpty && okList.allSatisfy(\.fromDraft) }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
-                    T("Đã tạo \(okList.count)/\(results.count) vận đơn", 20, .heavy, Theme.ink, track: -0.3)
-                    T(okList.isEmpty ? "Chưa tạo được vận đơn nào" : "\(okList.count) khách đã chuyển sang Đang giao", 13, .medium, Theme.muted)
+                    T(allFromDraft ? "Đã duyệt \(okList.count)/\(results.count) đơn nháp"
+                                   : "Đã tạo \(okList.count)/\(results.count) vận đơn", 20, .heavy, Theme.ink, track: -0.3)
+                    T(okList.isEmpty ? "Chưa tạo được vận đơn nào"
+                                     : (allFromDraft ? "\(okList.count) khách giữ nguyên mã nháp · đã chuyển Đang giao"
+                                                     : "\(okList.count) khách đã chuyển sang Đang giao"),
+                      13, .medium, Theme.muted)
                 }
                 Spacer()
                 Button { done() } label: {
@@ -421,7 +426,7 @@ struct VtpResultView: View {
             .frame(maxHeight: .infinity)
 
             VStack(spacing: 10) {
-                if !okList.isEmpty {
+                if !okList.isEmpty && client.vtpConnected {
                     PrimaryButton(title: "In tem \(okList.count) vận đơn", icon: .printer, fontSize: 15) {
                         VtpActions.printLabels(okList.map(\.code), client: client, ui: ui)
                     }
@@ -456,10 +461,16 @@ struct VtpResultView: View {
                     HStack(spacing: 6) {
                         T("Mã \(VtpTrack.pretty(r.code))", 13, .semibold, Theme.ink)
                         if r.fee > 0 { T("· cước \(money(r.fee))", 12, .medium, Theme.muted) }
-                        if r.already { T("· đã có từ trước", 12, .medium, Theme.muted) }
+                        if r.fromDraft {
+                            T("· từ nháp", 12, .semibold, Theme.green)
+                        } else if r.already {
+                            T("· đã có từ trước", 12, .medium, Theme.muted)
+                        }
                     }
                 } else {
-                    T("ViettelPost báo: \(r.error)", 12.5, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
+                    let errMsg = (r.error.hasPrefix("Nháp ") || r.error.hasPrefix("Phiên "))
+                        ? r.error : "ViettelPost báo: \(r.error)"
+                    T(errMsg, 12.5, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
                     if let g = groups.first(where: { $0.id == r.key }) {
                         Button {
                             ui.dismissSheet()

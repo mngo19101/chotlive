@@ -241,8 +241,22 @@ final class VtpDraftTests: XCTestCase {
         let mock = MockVtp()
         mock.handler = { _ in (200, #"{"error":false,"message":"OK"}"#) }
         let c = client(token: jwt(expiresIn: 3600), mock: mock)
-        try await c.approveDraft("157491796322")
+        let r = try await c.approveDraft("157491796322")
         XCTAssertEqual(VtpJ.int(body(mock.requests[0])["TYPE"]), 1)
+        XCTAssertEqual(r, VtpDraftApproveResult(code: "157491796322", fee: 0))
+    }
+
+    @MainActor
+    func testApproveDraftReturnsCodeAndFee() async throws {
+        let mock = MockVtp()
+        mock.handler = { _ in
+            (200, #"{"error":false,"data":{"ORDER_NUMBER":"157800001111","MONEY_TOTAL":24500}}"#)
+        }
+        let c = client(token: jwt(expiresIn: 3600), mock: mock)
+        let r = try await c.approveDraft("157800001111")
+        XCTAssertEqual(VtpJ.int(body(mock.requests[0])["TYPE"]), 1)
+        XCTAssertEqual(body(mock.requests[0])["ORDER_NUMBER"] as? String, "157800001111")
+        XCTAssertEqual(r, VtpDraftApproveResult(code: "157800001111", fee: 24500))
     }
 
     @MainActor

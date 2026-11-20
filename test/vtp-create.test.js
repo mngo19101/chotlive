@@ -29,6 +29,15 @@ const server = http.createServer((req, res) => {
       return send({ status: 200, error: false, message: 'OK', data: { ORDER_NUMBER: '15' + calls.length, MONEY_TOTAL: 18480, RECEIVER_PROVINCE: 0, RECEIVER_DISTRICT: 0, RECEIVER_WARDS: ward, SORT_CODE: 'X' } });
     }
     if (req.url === '/v2/order/UpdateOrder') {
+      if (json.TYPE === 1) {
+        if (json.ORDER_NUMBER === '157800002222') {
+          return send({ status: 200, error: false, message: 'OK', data: { ORDER_NUMBER: '157800002222', MONEY_TOTAL: 21000 } });
+        }
+        if (json.ORDER_NUMBER === '157800009999') {
+          return send({ status: 200, error: true, message: 'Đơn đã duyệt trước đó' });
+        }
+        return send({ status: 200, error: false, message: 'OK', data: null });
+      }
       if (json.ORDER_NUMBER === '999') return send({ status: 200, error: true, message: 'Đơn hàng đã hủy!' });
       if (json.ORDER_NUMBER === '998') return send({ status: 200, error: true, message: 'Trạng thái đơn hàng không hợp lệ' });
       return send({ status: 200, error: false, message: 'OK', data: null });
@@ -171,4 +180,63 @@ test('nháp: Viettel Post hiểu sang tỉnh khác thì báo addrOk=false', asyn
   assert.equal(q.ok, true);
   assert.equal(q.addrOk, false);
   assert.equal(q.parsed, 'Phường Hoàn Kiếm, Thành phố Hà Nội');
+});
+
+test('duyệt nháp UpdateOrder TYPE 1 giữ nguyên mã nháp và đọc cước trả về', async () => {
+  const n = calls.length;
+  const r1 = await vtp.vtpApproveDraft(store, 'u1', '157800001111');
+  assert.deepEqual(r1, { ok: true, code: '157800001111', fee: 0 });
+  const sent = calls.slice(n).find((c) => c.url === '/v2/order/UpdateOrder');
+  assert.equal(sent.body.TYPE, 1);
+  assert.equal(sent.body.ORDER_NUMBER, '157800001111');
+
+  const r2 = await vtp.vtpApproveDraft(store, 'u1', '157800002222');
+  assert.deepEqual(r2, { ok: true, code: '157800002222', fee: 21000 });
+
+  const bad = await vtp.vtpApproveDraft(store, 'u1', '157800009999');
+  assert.equal(bad.ok, false);
+  assert.equal(bad.error, 'Đơn đã duyệt trước đó');
+});
+
+test('applyVtpAdopted chuyển đơn sang Đang giao, ghi vtpCode và xoá nhãn nháp cũ', () => {
+  const state = {
+    orders: [
+      {
+        id: 'o1',
+        status: 'printed',
+        ship: {
+          state: 'ready',
+          pay: 'cod',
+          draftCode: '157800002222',
+          draftHash: 'abc',
+          draftAt: 1000,
+          draftAccount: '0900 *** 111',
+          draftError: 'old err',
+          draftErrorAt: 900
+        }
+      }
+    ]
+  };
+  const done = vtp.applyVtpAdopted(state, ['o1'], {
+    code: '157800002222',
+    fee: 21000,
+    cod: 230000,
+    goods: 230000,
+    service: 'VSL9',
+    batchId: 'vtpd_1',
+    now: 2000
+  });
+  assert.deepEqual(done, ['o1']);
+  const o = state.orders[0];
+  assert.equal(o.status, 'shipping');
+  assert.equal(o.ship.state, 'exported');
+  assert.equal(o.ship.vtpCode, '157800002222');
+  assert.equal(o.ship.vtpFee, 21000);
+  assert.equal(o.ship.vtpCod, 230000);
+  assert.equal(o.ship.vtpGoods, 230000);
+  assert.equal(o.ship.batchId, 'vtpd_1');
+  assert.equal(o.ship.draftCode, undefined);
+  assert.equal(o.ship.draftHash, undefined);
+  assert.equal(o.ship.draftAccount, undefined);
+  assert.equal(o.ship.draftError, undefined);
 });

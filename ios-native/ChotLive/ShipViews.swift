@@ -856,8 +856,17 @@ struct VtpExportSheet: View {
             HStack(spacing: 10) {
                 OutlineButton(title: embedded ? "Quay lại" : "Để nháp", height: 52) { detailId = nil }
                     .frame(width: (Metrics.screenWidth - 50) / 3)
-                if api || !embedded {
-                    PrimaryButton(title: sending ? "Đang tạo vận đơn…" : busy ? "Đang tính cước…" : embedded ? "Lên vận đơn" : "Tạo vận đơn này",
+                let hasPushedDraft: Bool = {
+                    if case .pushed = VtpDraftBody.status(g, service: service) { return true }
+                    return false
+                }()
+                if api || !embedded || (hasPushedDraft && vtpDrafts.anyLoggedIn) {
+                    let btnTitle = sending
+                        ? (hasPushedDraft ? "Đang duyệt nháp…" : "Đang tạo vận đơn…")
+                        : busy ? "Đang tính cước…"
+                        : hasPushedDraft ? "Duyệt nháp lên đơn"
+                        : (embedded ? "Lên vận đơn" : "Tạo vận đơn này")
+                    PrimaryButton(title: btnTitle,
                                   icon: .truck, fontSize: 15, enabled: !g.isBad && !sending && !busy) {
                         create([g])
                     }
@@ -928,7 +937,7 @@ struct VtpExportSheet: View {
                             .padding(.vertical, 30)
                     }
                     if embedded && !list.isEmpty {
-                        T("Đẩy nháp: vào mục Đơn nháp trên viettelpost.vn, chưa gọi bưu tá. Lên vận đơn: tạo vận đơn thật, bưu tá tới lấy.",
+                        T("Đẩy nháp: vào mục Đơn nháp trên viettelpost.vn, chưa gọi bưu tá. Lên vận đơn: duyệt thẳng nháp giữ nguyên mã (hoặc tạo mới nếu chưa có nháp).",
                           12.5, .medium, Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1140,6 +1149,11 @@ struct VtpExportSheet: View {
                 }
             }
             .zIndex(1)
+            let allPushedDrafts = !picked.isEmpty && picked.allSatisfy {
+                if case .pushed = VtpDraftBody.status($0, service: service) { return true }
+                return false
+            }
+            let canApproveOnly = !api && vtpDrafts.anyLoggedIn && allPushedDrafts
             if embedded {
                 HStack(spacing: 10) {
                     Button { pushDrafts(picked) } label: {
@@ -1155,8 +1169,8 @@ struct VtpExportSheet: View {
                     .buttonStyle(.plain)
                     .disabled(pick.isEmpty || sending)
                     .opacity(pick.isEmpty || sending ? 0.45 : 1)
-                    if api {
-                        PrimaryButton(title: sending ? "Đang tạo…" : busy ? "Đang tính cước…" : "Lên vận đơn",
+                    if api || canApproveOnly {
+                        PrimaryButton(title: sending ? (allPushedDrafts ? "Đang duyệt…" : "Đang tạo…") : busy ? "Đang tính cước…" : "Lên vận đơn",
                                       icon: .truck, fontSize: 14.5, height: btnH, enabled: !pick.isEmpty && !sending && !busy) {
                             create(picked)
                         }
@@ -1170,8 +1184,9 @@ struct VtpExportSheet: View {
                 HStack(spacing: 10) {
                     OutlineButton(title: "Huỷ", height: 52) { ui.dismissSheet() }
                         .frame(width: (Metrics.screenWidth - 50) / 3)
-                    if api {
-                        PrimaryButton(title: sending ? "Đang tạo \(pick.count) vận đơn…" : busy ? "Đang tính cước…" : "Tạo \(pick.count) vận đơn",
+                    if api || canApproveOnly {
+                        PrimaryButton(title: sending ? (allPushedDrafts ? "Đang duyệt \(pick.count) nháp…" : "Đang tạo \(pick.count) vận đơn…")
+                                                     : busy ? "Đang tính cước…" : "Tạo \(pick.count) vận đơn",
                                       icon: .truck, fontSize: 15, enabled: !pick.isEmpty && !sending && !busy) {
                             create(list.filter { pick.contains($0.id) })
                         }
@@ -1182,8 +1197,8 @@ struct VtpExportSheet: View {
                     }
                 }
             }
-            // Đã đăng nhập Viettel Post trên máy (đẩy nháp được) thì bỏ đường Excel cho đỡ chỗ.
-            if api && !(embedded && vtpDrafts.anyLoggedIn) {
+            // Đã đăng nhập Viettel Post trên máy (đẩy nháp được) thì bỏ đường Excel cho đỡ chỗ; trừ khi chưa nối Phần 1.
+            if (api && !(embedded && vtpDrafts.anyLoggedIn)) || canApproveOnly {
                 Button { export(list.filter { pick.contains($0.id) }) } label: {
                     T("Hoặc xuất file Excel như cũ", 13, .bold, Theme.accent)
                 }
@@ -1357,56 +1372,149 @@ struct VtpExportSheet: View {
         .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
     }
 
-    /// Tạo vận đơn thẳng trên Viettel Post (qua máy chủ ChốtLive), mỗi khách một vận đơn.
+    /// Lên vận đơn: khách đã đẩy nháp khớp đơn hiện tại thì duyệt thẳng nháp (giữ nguyên mã nháp đã in);
+    /// khách chưa có nháp thì tạo vận đơn mới qua API đối tác (máy chủ ChốtLive).
     private func create(_ chosen: [Vtp.Group]) {
         guard !chosen.isEmpty, !sending else { return }
-        guard client.vtp?.sender != nil else {
+        let svc = service
+        var draftGroups: [(index: Int, group: Vtp.Group, code: String)] = []
+        var staleGroups: [(index: Int, group: Vtp.Group, code: String)] = []
+        var apiGroups: [(index: Int, group: Vtp.Group)] = []
+        for (i, g) in chosen.enumerated() {
+            switch VtpDraftBody.status(g, service: svc) {
+            case .pushed(let code, _):
+                draftGroups.append((i, g, code))
+            case .stale(let code):
+                staleGroups.append((i, g, code))
+            case .notPushed, .failed:
+                apiGroups.append((i, g))
+            }
+        }
+        if !apiGroups.isEmpty && client.vtp?.sender == nil {
             ui.dismissSheet()
             ui.push(.vtp)
-            ui.notify("Chọn điểm lấy hàng trước khi gửi.")
+            ui.notify("Chọn điểm lấy hàng trước khi tạo vận đơn mới.")
             return
         }
         sending = true
-        let svc = service
+        let quoteFees: [String: Int] = Dictionary(uniqueKeysWithValues: chosen.map { g in
+            let f = quote(g).flatMap { $0.ok ? $0.fee : nil } ?? 0
+            return (g.id, f)
+        })
         Task { @MainActor in
             await client.vtpFlush(store)
-            let r = await client.vtpCreate(service: svc, groups: chosen.map { VtpTrack.payload($0) })
-            sending = false
-            if let e = r.error { return ui.notify(e) }
-            // Máy chủ đã ghi mã vận đơn vào đơn; ghi luôn trên máy để không phải chờ đồng bộ.
-            var withDraft: [Vtp.Group] = []
-            for res in r.results {
-                guard let g = chosen.first(where: { $0.id == res.key }) else { continue }
-                if res.ok && !res.code.isEmpty {
-                    store.applyVtpCreated(g.orders, code: res.code, fee: res.fee, cod: res.cod, goods: res.goods, service: svc)
-                    if !VtpDraftBody.codes(g).isEmpty { withDraft.append(g) }
-                } else if !res.ok {
-                    store.applyVtpError(g.orders, error: res.error)
+            var byIndex: [Int: VtpCreateResult] = [:]
+
+            for item in staleGroups {
+                let msg = "Nháp \(item.code) là bản cũ (đơn đã sửa, thêm món hoặc khác gói dịch vụ). Bấm “Đẩy nháp VTP” để cập nhật nháp, hoặc “Xoá nháp” rồi mới Lên vận đơn."
+                store.applyVtpError(item.group.orders, error: msg)
+                byIndex[item.index] = VtpCreateResult(key: item.group.id, ok: false, error: msg)
+            }
+
+            var draftBlocked = false
+            let batchPrefix = "vtpd_" + String(Int64(Clock.now.timeIntervalSince1970 * 1000), radix: 36)
+            for (offset, item) in draftGroups.enumerated() {
+                if draftBlocked {
+                    let msg = "Viettel Post đang giới hạn gửi liên tục từ máy này, thử lại sau."
+                    byIndex[item.index] = VtpCreateResult(key: item.group.id, ok: false, error: msg)
+                    continue
+                }
+                if offset > 0 { try? await Task.sleep(nanoseconds: 300_000_000) }
+                let batch = "\(batchPrefix)_\(offset)"
+                let res = await approveOneDraft(item.group, code: item.code, service: svc,
+                                                  estimatedFee: quoteFees[item.group.id] ?? 0, batchId: batch)
+                byIndex[item.index] = res.result
+                if res.blocked { draftBlocked = true }
+            }
+
+            if !apiGroups.isEmpty {
+                let r = await client.vtpCreate(service: svc, groups: apiGroups.map { VtpTrack.payload($0.group) })
+                if let e = r.error {
+                    if draftGroups.isEmpty && staleGroups.isEmpty {
+                        sending = false
+                        ui.notify(e)
+                        return
+                    }
+                    for item in apiGroups {
+                        byIndex[item.index] = VtpCreateResult(key: item.group.id, ok: false, error: e)
+                    }
+                } else {
+                    for item in apiGroups {
+                        if let res = r.results.first(where: { $0.key == item.group.id }) {
+                            if res.ok && !res.code.isEmpty {
+                                store.applyVtpCreated(item.group.orders, code: res.code, fee: res.fee, cod: res.cod,
+                                                      goods: res.goods, service: svc)
+                            } else if !res.ok {
+                                store.applyVtpError(item.group.orders, error: res.error)
+                            }
+                            byIndex[item.index] = res
+                        } else {
+                            byIndex[item.index] = VtpCreateResult(key: item.group.id, ok: false, error: "Không nhận được phản hồi từ máy chủ")
+                        }
+                    }
                 }
             }
-            result = (chosen, r.results)
-            await removeDraftsAfterWaybill(withDraft)
+
+            sending = false
+            let ordered = chosen.indices.map { i in
+                byIndex[i] ?? VtpCreateResult(key: chosen[i].id, ok: false, error: "Lỗi không rõ")
+            }
+            result = (chosen, ordered)
         }
     }
 
-    /// Khách đã có nháp mà vừa lên vận đơn (đường API đối tác): xoá nháp cũ trên Viettel Post để không ai duyệt
-    /// nháp đó thành vận đơn thứ hai. Chưa đăng nhập phần 2 hoặc xoá lỗi thì báo để xoá tay.
-    /// (Duyệt thẳng nháp thành vận đơn, UpdateOrder TYPE 1, chưa thử thật nên chưa dùng.)
-    private func removeDraftsAfterWaybill(_ list: [Vtp.Group]) async {
-        guard !list.isEmpty else { return }
-        let codes = list.flatMap { VtpDraftBody.codes($0) }
-        guard vtpDrafts.anyLoggedIn else {
-            ui.notify("Còn \(codes.count) nháp trên viettelpost.vn của khách vừa lên vận đơn (\(codes.joined(separator: ", "))). Hãy xoá tay trong mục Đơn nháp để không bị duyệt trùng.")
-            return
-        }
-        var left: [String] = []
-        for g in list {
-            let failed = await vtpDrafts.deleteDrafts(of: g)
-            left += failed.map(\.code)
-            if failed.isEmpty { store.clearDraft(g.orders) }
-        }
-        if !left.isEmpty {
-            ui.notify("Đã lên vận đơn, nhưng chưa xoá được nháp cũ \(left.joined(separator: ", ")) trên viettelpost.vn. Hãy xoá tay để không bị duyệt trùng.")
+    /// Duyệt một nháp thành vận đơn giữ nguyên mã: ưu tiên dùng đúng phiên Phần 2 đã đẩy trên máy;
+    /// nếu máy này không đăng nhập tài khoản đó mà Phần 1 kết nối đúng cùng tài khoản thì nhờ máy chủ duyệt qua API.
+    private func approveOneDraft(_ g: Vtp.Group, code: String, service svc: String,
+                                 estimatedFee: Int, batchId: String) async -> (result: VtpCreateResult, blocked: Bool) {
+        let outcome = await vtpDrafts.approveDraft(of: g, code: code)
+        switch outcome {
+        case .approved(let approved):
+            let fee = approved.fee > 0 ? approved.fee : estimatedFee
+            store.applyVtpCreated(g.orders, code: approved.code, fee: fee, cod: g.summary.cod, goods: g.summary.goods,
+                                  service: svc, fromDraft: true, batchId: batchId)
+            var p = VtpTrack.payload(g)
+            p["code"] = approved.code
+            p["fee"] = fee
+            p["batchId"] = batchId
+            let adopt = await client.vtpAdoptDraft(service: svc, groups: [p])
+            if adopt.status == 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                _ = await client.vtpAdoptDraft(service: svc, groups: [p])
+            }
+            return (VtpCreateResult(key: g.id, ok: true, code: approved.code, fee: fee,
+                                    cod: g.summary.cod, goods: g.summary.goods,
+                                    already: false, fromDraft: true, error: ""), false)
+
+        case .unavailable(let acc, let reason):
+            if client.vtpConnected, let partnerPhone = client.vtp?.phone, !partnerPhone.isEmpty,
+               acc.isEmpty || VtpDraftClient.phonesMatch(partnerPhone, acc) == true {
+                var p = VtpTrack.payload(g)
+                p["code"] = code
+                p["fee"] = estimatedFee
+                p["batchId"] = batchId
+                let r = await client.vtpApproveDraft(service: svc, groups: [p])
+                if r.status == 200, var first = r.results.first(where: { $0.key == g.id }) ?? r.results.first {
+                    if first.ok && !first.code.isEmpty {
+                        first.fromDraft = true
+                        store.applyVtpCreated(g.orders, code: first.code, fee: first.fee, cod: first.cod,
+                                              goods: first.goods, service: svc, fromDraft: true, batchId: batchId)
+                    } else {
+                        store.applyVtpError(g.orders, error: first.error)
+                    }
+                    return (first, false)
+                }
+                if r.status != 404, let e = r.error {
+                    store.applyVtpError(g.orders, error: e)
+                    return (VtpCreateResult(key: g.id, ok: false, error: e), false)
+                }
+            }
+            store.applyVtpError(g.orders, error: reason)
+            return (VtpCreateResult(key: g.id, ok: false, error: reason), false)
+
+        case .failed(let msg, let blocked):
+            store.applyVtpError(g.orders, error: msg)
+            return (VtpCreateResult(key: g.id, ok: false, error: msg), blocked)
         }
     }
 

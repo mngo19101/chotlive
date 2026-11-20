@@ -37,6 +37,11 @@ struct VtpDraftPlace: Equatable {
     var confidence: Double
 }
 
+struct VtpDraftApproveResult: Equatable {
+    var code: String
+    var fee: Int
+}
+
 private enum VtpDraftDateFormat {
     static let lock = NSLock()
     static let formatter: DateFormatter = {
@@ -597,18 +602,24 @@ final class VtpDraftClient: ObservableObject {
     }
 
     /// Xoá nháp: trang web gọi UpdateOrder với TYPE 11 (DELETE_ORDER).
-    /// CHƯA TEST THẬT với Viettel Post: lỗi nào cũng trả nguyên lời Viettel Post, không tự coi là đã xoá.
+    /// Lỗi nào cũng trả nguyên lời Viettel Post, không tự coi là đã xoá.
     func deleteDraft(_ code: String) async throws {
-        try await updateOrder(code, type: 11, label: "Xoá nháp")
+        _ = try await updateOrder(code, type: 11, label: "Xoá nháp")
     }
 
-    /// Duyệt nháp thành vận đơn: UpdateOrder TYPE 1 (ORDER_APPROVAL) như nút "Duyệt đơn" trên web.
-    /// CHƯA TEST THẬT với nháp: chưa rõ mã vận đơn sau khi duyệt có trùng mã nháp không.
-    func approveDraft(_ code: String) async throws {
-        try await updateOrder(code, type: 1, label: "Duyệt nháp")
+    /// Duyệt nháp thành vận đơn: UpdateOrder TYPE 1 (ORDER_APPROVAL) như nút "Duyệt đơn" trên web, giữ nguyên mã nháp.
+    @discardableResult
+    func approveDraft(_ code: String) async throws -> VtpDraftApproveResult {
+        let trimmed = code.trimmingCharacters(in: .whitespaces)
+        let j = try await updateOrder(trimmed, type: 1, label: "Duyệt nháp")
+        let data = VtpJ.dict(j["data"])
+        let returned = VtpJ.str(data?["ORDER_NUMBER"])?.trimmingCharacters(in: .whitespaces)
+        let finalCode = returned.flatMap { $0.isEmpty ? nil : $0 } ?? trimmed
+        let fee = max(0, VtpJ.int(data?["MONEY_TOTAL"]) ?? 0)
+        return VtpDraftApproveResult(code: finalCode, fee: fee)
     }
 
-    private func updateOrder(_ code: String, type: Int, label: String) async throws {
+    private func updateOrder(_ code: String, type: Int, label: String) async throws -> [String: Any] {
         let code = code.trimmingCharacters(in: .whitespaces)
         guard !code.isEmpty else { throw VtpDraftError.server("Thiếu mã nháp") }
         let r = try await authed("/api/tmdt/UpdateOrder") {
@@ -622,6 +633,7 @@ final class VtpDraftClient: ObservableObject {
         guard ok else {
             throw VtpDraftError.server(VtpJ.str(j["message"]) ?? "Viettel Post không nhận lệnh \(label.lowercased()) (HTTP \(r.status))")
         }
+        return j
     }
 
     nonisolated static func dateText(_ d: Date) -> String {

@@ -1,6 +1,12 @@
 import Combine
 import Foundation
 
+enum VtpDraftApproveOutcome: Equatable {
+    case approved(VtpDraftApproveResult)
+    case unavailable(account: String, reason: String)
+    case failed(String, blocked: Bool)
+}
+
 /// Nhiều tài khoản Viettel Post đẩy nháp trên cùng máy. Mỗi tài khoản là một `VtpDraftClient` với phiên riêng
 /// trong Keychain; một tài khoản "đang dùng" để đẩy nháp (ghi nhớ riêng theo từng tài khoản ChốtLive).
 /// Xoá nháp thì dùng đúng tài khoản đã đẩy nháp đó.
@@ -191,19 +197,44 @@ final class VtpDraftHub: ObservableObject {
         }
     }
 
+    private func resolveDraftClient(forCode code: String, in g: Vtp.Group, action: String,
+                                    prefixCode: Bool) -> (account: String, client: VtpDraftClient?, reason: String?) {
+        let acc = (g.orders.compactMap(\.ship).first { $0.draftCode == code }?.draftAccount ?? "")
+            .trimmingCharacters(in: .whitespaces)
+        let who = acc.isEmpty ? "tài khoản đã đẩy" : "tài khoản \(acc)"
+        guard let c = client(for: acc), c.loggedIn else {
+            let lead = prefixCode ? "Nháp \(code) đẩy bằng \(who)" : "Nháp đẩy bằng \(who)"
+            return (acc, nil, "\(lead): đăng nhập tài khoản đó ở Tôi › ViettelPost (phần 2) để \(action).")
+        }
+        guard !c.sessionExpired else {
+            return (acc, nil, "Phiên của \(who) đã hết hạn: đăng nhập lại ở Tôi › ViettelPost (phần 2) để \(action).")
+        }
+        return (acc, c, nil)
+    }
+
+    /// Duyệt thẳng một nháp thành vận đơn chính thức bằng đúng tài khoản đã đẩy nháp đó.
+    func approveDraft(of g: Vtp.Group, code: String) async -> VtpDraftApproveOutcome {
+        let resolved = resolveDraftClient(forCode: code, in: g, action: "duyệt giữ nguyên mã vận đơn", prefixCode: true)
+        guard let c = resolved.client else {
+            return .unavailable(account: resolved.account, reason: resolved.reason ?? "")
+        }
+        do {
+            return .approved(try await c.approveDraft(code))
+        } catch let e as VtpDraftError {
+            return .failed(e.errorDescription ?? "Lỗi duyệt nháp", blocked: e == .blocked)
+        } catch {
+            return .failed(error.localizedDescription, blocked: false)
+        }
+    }
+
     /// Xoá mọi nháp của một khách, mỗi mã bằng đúng tài khoản đã đẩy mã đó.
     /// Trả các mã chưa xoá được kèm lý do; rỗng = đã xoá hết.
     func deleteDrafts(of g: Vtp.Group) async -> [(code: String, reason: String)] {
         var failed: [(code: String, reason: String)] = []
         for code in VtpDraftBody.codes(g) {
-            let acc = g.orders.compactMap(\.ship).first { $0.draftCode == code }?.draftAccount
-            let who = (acc ?? "").isEmpty ? "tài khoản đã đẩy" : "tài khoản \(acc ?? "")"
-            guard let c = client(for: acc), c.loggedIn else {
-                failed.append((code, "Nháp đẩy bằng \(who): đăng nhập tài khoản đó ở Tôi › ViettelPost (phần 2) để xoá."))
-                continue
-            }
-            guard !c.sessionExpired else {
-                failed.append((code, "Phiên của \(who) đã hết hạn: đăng nhập lại ở Tôi › ViettelPost (phần 2) để xoá."))
+            let resolved = resolveDraftClient(forCode: code, in: g, action: "xoá", prefixCode: false)
+            guard let c = resolved.client else {
+                failed.append((code, resolved.reason ?? ""))
                 continue
             }
             do {

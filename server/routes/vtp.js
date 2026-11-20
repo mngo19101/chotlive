@@ -125,6 +125,74 @@ function vtpCreateTurn(userId, fn) {
 router.post('/api/vtp/create', requireAuth, (req, res) => vtpCreateTurn(req.user.id, () => vtpCreateHandler(req, res)));
 
 const VTP_SYNC_PENDING_MSG = 'Máy chủ chưa nhận đủ đơn/món của khách này (đang đồng bộ). Đợi đồng bộ xong rồi gửi lại.';
+const VTP_DRAFT_BATCH_RE = /^vtpd_[A-Za-z0-9_-]{1,40}$/;
+
+function resolveGroupOrders(userId, g, { checkSync = true } = {}) {
+  const serverOrders = getStateForUser(userId).orders || [];
+  // Web gửi mã đơn; app iOS gửi mã món (app không biết mã đơn của máy chủ).
+  const itemIds = new Set((Array.isArray(g?.itemIds) ? g.itemIds : []).map(String));
+  const sentOrderIds = (Array.isArray(g?.orderIds) ? g.orderIds : []).map(String);
+  const ids = [
+    ...new Set([
+      ...sentOrderIds,
+      ...serverOrders
+        .filter((o) => o.status !== 'cancelled' && (o.items || []).some((it) => itemIds.has(String(it.id))))
+        .map((o) => String(o.id))
+    ])
+  ];
+  if (checkSync) {
+    // Món hoặc đơn client gửi mà máy chủ chưa có: thay đổi trên máy chưa đồng bộ xong. Không tạo vận đơn cho phần máy
+    // chủ biết với tiền thu hộ tính cả phần chưa tới, kẻo món đó bị tách sang đơn mới và thu tiền hai lần (BL-10).
+    const knownItems = new Set(
+      serverOrders.filter((o) => o.status !== 'cancelled').flatMap((o) => (o.items || []).map((it) => String(it?.id)))
+    );
+    const knownOrders = new Set(serverOrders.map((o) => String(o.id)));
+    if ([...itemIds].some((id) => !knownItems.has(id)) || sentOrderIds.some((id) => !knownOrders.has(id))) {
+      return { error: VTP_SYNC_PENDING_MSG };
+    }
+  }
+  const orders = serverOrders.filter((o) => ids.includes(String(o.id)));
+  if (!orders.length) return { error: 'Không thấy đơn' };
+  return { ids, orders, serverOrders };
+}
+
+function safeDraftCodGoods(orders, g) {
+  let cod = null;
+  let goods = null;
+  if (g?.cod != null && g?.cod !== '') {
+    const chk = vtp.checkGroupCod(orders, g.cod);
+    if (chk.ok) {
+      cod = chk.cod;
+      goods = chk.goods;
+    } else if (typeof g.cod === 'number' && Number.isInteger(g.cod) && g.cod >= 0 && g.cod <= vtp.MAX_COD) {
+      cod = g.cod;
+      if (g.goods != null && Number.isFinite(Number(g.goods))) {
+        goods = Math.max(0, Math.round(Number(g.goods)));
+      }
+    }
+  }
+  return { cod, goods };
+}
+
+function settleAdoptedDraft(userId, { ids, code, fee, cod, goods, service, batchId, label }) {
+  vtpJournal(userId, code, {
+    source: 'draft',
+    state: 'created',
+    orderIds: ids,
+    ref: label,
+    cod,
+    goods,
+    fee: fee || null,
+    service: service || null
+  });
+  let attached = [];
+  mutateState(userId, 'vtp_draft_approved', '', null, (s) => {
+    attached = vtp.applyVtpAdopted(s, ids, { code, fee, cod, goods, service, batchId });
+  });
+  vtpJournal(userId, code, attached.length ? { orderIds: attached } : { state: 'orphan' });
+  flushStates();
+  return attached;
+}
 
 async function vtpCreateHandler(req, res) {
   const userId = req.user.id;
@@ -137,33 +205,12 @@ async function vtpCreateHandler(req, res) {
   const results = [];
   let stalled = false;
   for (const g of groups) {
-    // Web gửi mã đơn; app iOS gửi mã món (app không biết mã đơn của máy chủ).
-    const itemIds = new Set((Array.isArray(g?.itemIds) ? g.itemIds : []).map(String));
-    const ids = [
-      ...new Set([
-        ...(Array.isArray(g?.orderIds) ? g.orderIds : []).map(String),
-        ...(getStateForUser(userId).orders || [])
-          .filter((o) => o.status !== 'cancelled' && (o.items || []).some((it) => itemIds.has(String(it.id))))
-          .map((o) => String(o.id))
-      ])
-    ];
-    // Món hoặc đơn client gửi mà máy chủ chưa có: thay đổi trên máy chưa đồng bộ xong. Không tạo vận đơn cho phần máy
-    // chủ biết với tiền thu hộ tính cả phần chưa tới, kẻo món đó bị tách sang đơn mới và thu tiền hai lần (BL-10).
-    const serverOrders = getStateForUser(userId).orders || [];
-    const knownItems = new Set(
-      serverOrders.filter((o) => o.status !== 'cancelled').flatMap((o) => (o.items || []).map((it) => String(it?.id)))
-    );
-    const knownOrders = new Set(serverOrders.map((o) => String(o.id)));
-    const sentOrderIds = (Array.isArray(g?.orderIds) ? g.orderIds : []).map(String);
-    if ([...itemIds].some((id) => !knownItems.has(id)) || sentOrderIds.some((id) => !knownOrders.has(id))) {
-      results.push({ key: g?.key, ok: false, error: VTP_SYNC_PENDING_MSG });
+    const resolved = resolveGroupOrders(userId, g, { checkSync: true });
+    if (resolved.error) {
+      results.push({ key: g?.key, ok: false, error: resolved.error });
       continue;
     }
-    const orders = serverOrders.filter((o) => ids.includes(String(o.id)));
-    if (!orders.length) {
-      results.push({ key: g?.key, ok: false, error: 'Không thấy đơn' });
-      continue;
-    }
+    const { ids, orders } = resolved;
     // Lần tạo trước của một đơn trong nhóm chưa rõ kết quả: chưa cho tạo lại, kẻo ra hai vận đơn (BL-01).
     if (orders.some(vtp.vtpAttemptOpen)) {
       results.push({ key: g.key, ok: false, unknown: true, error: vtp.VTP_UNKNOWN_MSG });
@@ -231,6 +278,145 @@ async function vtpCreateHandler(req, res) {
   }
   res.json({ ok: true, results });
 }
+
+// App đã duyệt nháp thẳng trên thiết bị (UpdateOrder TYPE 1): ghi mã vận đơn vào máy chủ + sổ để đồng bộ, in tem và nhận webhook.
+// Không đòi hỏi kết nối Phần 1 vì shop có thể chỉ đăng nhập Phần 2 hoặc dùng tài khoản Viettel Post thứ hai.
+router.post('/api/vtp/adopt-draft', requireAuth, (req, res) =>
+  vtpCreateTurn(req.user.id, () => {
+    const userId = req.user.id;
+    const service = String(req.body?.service || 'VSL9').slice(0, 10);
+    const groups = Array.isArray(req.body?.groups) ? req.body.groups.slice(0, 100) : [];
+    const defaultBatchId = 'vtpd_' + Date.now().toString(36);
+    const results = [];
+    for (const g of groups) {
+      const code = String(g?.code || '').trim();
+      if (!vtpCodeOk(code)) {
+        results.push({ key: g?.key, ok: false, error: 'Mã vận đơn không hợp lệ' });
+        continue;
+      }
+      const resolved = resolveGroupOrders(userId, g, { checkSync: false });
+      if (resolved.error) {
+        results.push({ key: g?.key, ok: false, error: resolved.error });
+        continue;
+      }
+      const { ids, orders, serverOrders } = resolved;
+      const idSet = new Set(ids.map(String));
+      if (serverOrders.some((o) => !idSet.has(String(o.id)) && o.ship?.vtpCode === code)) {
+        results.push({ key: g?.key, ok: false, error: `Mã vận đơn ${code} đã gắn với đơn khác trong app` });
+        continue;
+      }
+      const existing = orders.find((o) => o.ship?.vtpCode);
+      if (existing) {
+        if (existing.ship.vtpCode === code) {
+          results.push({
+            key: g.key,
+            ok: true,
+            code,
+            already: true,
+            fromDraft: true,
+            fee: existing.ship.vtpFee ?? 0,
+            cod: existing.ship.vtpCod ?? null,
+            goods: existing.ship.vtpGoods ?? null
+          });
+        } else {
+          results.push({ key: g?.key, ok: false, error: `Đơn đã có vận đơn ${existing.ship.vtpCode}` });
+        }
+        continue;
+      }
+      const fee = Math.max(0, Math.round(Number(g?.fee) || 0));
+      const { cod, goods } = safeDraftCodGoods(orders, g);
+      const batchId = VTP_DRAFT_BATCH_RE.test(String(g?.batchId || '')) ? String(g.batchId) : defaultBatchId;
+      const label = String(g?.ref || g?.key || '').slice(0, 60);
+      settleAdoptedDraft(userId, { ids, code, fee, cod, goods, service, batchId, label });
+      console.log(`[vtp] Ghi nhận nháp đã duyệt ${label} → ${code}`);
+      results.push({ key: g.key, ok: true, code, fee, cod, goods, already: false, fromDraft: true });
+    }
+    res.json({ ok: true, results });
+  })
+);
+
+// Dự phòng khi máy đang bấm không đăng nhập Phần 2 nhưng Phần 1 đang kết nối cùng tài khoản Viettel Post:
+// máy chủ gọi UpdateOrder TYPE 1 thay thiết bị để duyệt nháp giữ nguyên mã vận đơn.
+router.post('/api/vtp/approve-draft', requireAuth, (req, res) =>
+  vtpCreateTurn(req.user.id, async () => {
+    const userId = req.user.id;
+    const conn = vtpStore.get(userId);
+    if (!conn?.siteToken) return res.status(400).json({ error: 'Chưa kết nối Viettel Post' });
+    const service = String(req.body?.service || 'VSL9').slice(0, 10);
+    const groups = Array.isArray(req.body?.groups) ? req.body.groups.slice(0, 100) : [];
+    const defaultBatchId = 'vtpd_' + Date.now().toString(36);
+    const results = [];
+    for (const g of groups) {
+      const code = String(g?.code || '').trim();
+      if (!vtpCodeOk(code)) {
+        results.push({ key: g?.key, ok: false, error: 'Mã vận đơn không hợp lệ' });
+        continue;
+      }
+      const resolved = resolveGroupOrders(userId, g, { checkSync: true });
+      if (resolved.error) {
+        results.push({ key: g?.key, ok: false, error: resolved.error });
+        continue;
+      }
+      const { ids, orders, serverOrders } = resolved;
+      if (orders.some(vtp.vtpAttemptOpen)) {
+        results.push({ key: g.key, ok: false, unknown: true, error: vtp.VTP_UNKNOWN_MSG });
+        continue;
+      }
+      const idSet = new Set(ids.map(String));
+      if (serverOrders.some((o) => !idSet.has(String(o.id)) && o.ship?.vtpCode === code)) {
+        results.push({ key: g?.key, ok: false, error: `Mã vận đơn ${code} đã gắn với đơn khác trong app` });
+        continue;
+      }
+      const existing = orders.find((o) => o.ship?.vtpCode);
+      if (existing) {
+        const { vtpCode, vtpFee, vtpCod, vtpGoods, vtpKind } = existing.ship;
+        if (vtpKind === 'needsCancel') {
+          results.push({
+            key: g.key,
+            ok: false,
+            needsCancel: true,
+            code: vtpCode,
+            error: `Vận đơn ${vtpCode} tạo sai địa chỉ và chưa huỷ được. Huỷ vận đơn đó ở chi tiết đơn rồi mới gửi lại.`
+          });
+        } else if (vtpCode === code) {
+          results.push({
+            key: g.key,
+            ok: true,
+            code: vtpCode,
+            already: true,
+            fromDraft: true,
+            fee: vtpFee ?? 0,
+            cod: vtpCod ?? null,
+            goods: vtpGoods ?? null
+          });
+        } else {
+          results.push({ key: g?.key, ok: false, error: `Đơn đã có vận đơn ${vtpCode}` });
+        }
+        continue;
+      }
+      const r = await vtp.vtpApproveDraft(vtpStore, userId, code);
+      if (!r.ok) {
+        mutateState(userId, 'vtp_error', '', null, (s) => {
+          for (const o of s.orders || []) {
+            if (!ids.includes(String(o.id))) continue;
+            o.ship = { ...(o.ship || {}), vtpError: String(r.error || 'Lỗi').slice(0, 200), vtpErrorAt: Date.now() };
+          }
+        });
+        results.push({ key: g.key, ok: false, error: r.error || 'Không duyệt được nháp' });
+        continue;
+      }
+      const finalCode = r.code;
+      const finalFee = r.fee > 0 ? r.fee : Math.max(0, Math.round(Number(g?.fee) || 0));
+      const { cod, goods } = safeDraftCodGoods(orders, g);
+      const batchId = VTP_DRAFT_BATCH_RE.test(String(g?.batchId || '')) ? String(g.batchId) : defaultBatchId;
+      const label = String(g?.ref || g?.key || '').slice(0, 60);
+      settleAdoptedDraft(userId, { ids, code: finalCode, fee: finalFee, cod, goods, service, batchId, label });
+      console.log(`[vtp] Duyệt nháp ${label} → ${finalCode}`);
+      results.push({ key: g.key, ok: true, code: finalCode, fee: finalFee, cod, goods, already: false, fromDraft: true });
+    }
+    res.json({ ok: true, results });
+  })
+);
 
 /** Các lần tạo "chưa rõ" mà máy chủ còn đang nghe câu trả lời muộn của Viettel Post. */
 const vtpLateWaiting = new Set();

@@ -34,7 +34,12 @@ const fakeVtp = http.createServer((req, res) => {
       return okData({ ORDER_NUMBER: code, MONEY_TOTAL: 18480, RECEIVER_WARDS: 7969 });
     }
     if (req.url === '/v2/order/UpdateOrder') {
-      const n = JSON.parse(body || '{}').ORDER_NUMBER;
+      const p = JSON.parse(body || '{}');
+      if (p.TYPE === 1) {
+        if (p.ORDER_NUMBER === 'DRAFT123456') return okData({ ORDER_NUMBER: 'DRAFT123456', MONEY_TOTAL: 25000 });
+        return send({ status: 200, error: true, message: 'Không tìm thấy đơn nháp' });
+      }
+      const n = p.ORDER_NUMBER;
       if (n === 'GONE12345') return send({ status: 200, error: true, message: 'Đơn hàng đã hủy!' });
       return send({ status: 200, error: true, message: 'Trạng thái đơn hàng không hợp lệ' });
     }
@@ -183,6 +188,96 @@ test('huỷ vận đơn: Viettel Post báo đã huỷ thì đơn về Chờ gử
   assert.equal(o.ship.vtpCode, undefined);
   assert.equal(o.ship.vtpOldCode, 'STUCK12345');
   assert.equal(o.ship.vtpStatusName, 'Shop gỡ vận đơn khỏi app');
+});
+
+test('adopt-draft và approve-draft giữ nguyên mã nháp, không gọi createOrderNlp tạo mã mới', async () => {
+  const prev = (await api('/api/state')).body;
+  const orders = [
+    ...(prev.state || prev).orders,
+    {
+      id: 'o_adopt', code: 'HD_ADOPT', uniqueId: 'lan.nguyen', nickname: 'Lan', status: 'printed', ts: Date.now(), total: 120000,
+      items: [{ id: 'it_adopt', name: 'Mã 120', price: 120000, qty: 1 }],
+      ship: { state: 'ready', pay: 'cod', draftCode: 'ADOPT999888', draftHash: 'hh', draftAccount: '0900 *** 111' }
+    },
+    {
+      id: 'o_other', code: 'HD_OTHER', uniqueId: 'lan.nguyen', nickname: 'Lan', status: 'printed', ts: Date.now(), total: 100000,
+      items: [{ id: 'it_other', name: 'Mã 100', price: 100000, qty: 1 }],
+      ship: { state: 'ready', pay: 'cod' }
+    },
+    {
+      id: 'o_apr', code: 'HD_APR', uniqueId: 'lan.nguyen', nickname: 'Lan', status: 'printed', ts: Date.now(), total: 150000,
+      items: [{ id: 'it_apr', name: 'Mã 150', price: 150000, qty: 1 }],
+      ship: { state: 'ready', pay: 'cod', draftCode: 'DRAFT123456' }
+    },
+    {
+      id: 'o_fail', code: 'HD_FAIL', uniqueId: 'lan.nguyen', nickname: 'Lan', status: 'printed', ts: Date.now(), total: 150000,
+      items: [{ id: 'it_fail', name: 'Mã 150b', price: 150000, qty: 1 }],
+      ship: { state: 'ready', pay: 'cod', draftCode: 'DRAFTFAIL' }
+    }
+  ];
+  assert.equal((await api('/api/sync', { state: { orders, customers: [] } })).status, 200);
+  const find = async (id) => { const s = (await api('/api/state')).body; return (s.state || s).orders.find((o) => o.id === id); };
+  const beforeCreated = created;
+
+  // 1. adopt-draft: thiết bị đã duyệt trên máy, máy chủ ghi nhận mã đó và ghi sổ nguồn "draft".
+  const adopt = await api('/api/vtp/adopt-draft', {
+    service: 'VSL9',
+    groups: [{ key: 'lan', orderIds: ['o_adopt'], code: 'ADOPT999888', fee: 22000, cod: 120000, goods: 120000, batchId: 'vtpd_test1' }]
+  });
+  assert.equal(adopt.status, 200);
+  assert.equal(adopt.body.results[0].ok, true);
+  assert.equal(adopt.body.results[0].code, 'ADOPT999888');
+  assert.equal(adopt.body.results[0].fromDraft, true);
+  assert.equal(adopt.body.results[0].already, false);
+  const adoptedOrder = await find('o_adopt');
+  assert.equal(adoptedOrder.status, 'shipping');
+  assert.equal(adoptedOrder.ship.state, 'exported');
+  assert.equal(adoptedOrder.ship.vtpCode, 'ADOPT999888');
+  assert.equal(adoptedOrder.ship.draftCode, undefined);
+
+  // Idempotent khi gửi lại đúng đơn, và từ chối nếu gắn trùng mã sang đơn khác.
+  const adoptAgain = await api('/api/vtp/adopt-draft', {
+    service: 'VSL9',
+    groups: [{ key: 'lan', orderIds: ['o_adopt'], code: 'ADOPT999888', fee: 22000, cod: 120000, goods: 120000 }]
+  });
+  assert.equal(adoptAgain.body.results[0].ok, true);
+  assert.equal(adoptAgain.body.results[0].already, true);
+  const dup = await api('/api/vtp/adopt-draft', {
+    service: 'VSL9',
+    groups: [{ key: 'other', orderIds: ['o_other'], code: 'ADOPT999888', cod: 100000 }]
+  });
+  assert.equal(dup.body.results[0].ok, false);
+
+  // 2. approve-draft: máy chủ gọi UpdateOrder TYPE 1 thay máy, giữ nguyên mã nháp DRAFT123456.
+  const apr = await api('/api/vtp/approve-draft', {
+    service: 'VSL9',
+    groups: [
+      { key: 'k1', orderIds: ['o_apr'], code: 'DRAFT123456', cod: 150000, ref: 'HD_APR', batchId: 'vtpd_apr1' },
+      { key: 'k2', orderIds: ['o_fail'], code: 'DRAFTFAIL', cod: 150000, ref: 'HD_FAIL' }
+    ]
+  });
+  assert.equal(apr.status, 200);
+  assert.equal(created, beforeCreated, 'không gọi createOrderNlp tạo mã vận đơn khác');
+  assert.equal(apr.body.results[0].ok, true);
+  assert.equal(apr.body.results[0].code, 'DRAFT123456');
+  assert.equal(apr.body.results[0].fee, 25000);
+  assert.equal(apr.body.results[0].fromDraft, true);
+  const aprOrder = await find('o_apr');
+  assert.equal(aprOrder.status, 'shipping');
+  assert.equal(aprOrder.ship.state, 'exported');
+  assert.equal(aprOrder.ship.vtpCode, 'DRAFT123456');
+  assert.equal(aprOrder.ship.vtpFee, 25000);
+  assert.equal(aprOrder.ship.draftCode, undefined);
+
+  assert.equal(apr.body.results[1].ok, false);
+  assert.equal(apr.body.results[1].error, 'Không tìm thấy đơn nháp');
+  const failOrder = await find('o_fail');
+  assert.equal(failOrder.ship.vtpError, 'Không tìm thấy đơn nháp');
+  assert.notEqual(failOrder.status, 'shipping');
+
+  const waybills = (await api('/api/vtp/waybills')).body.waybills;
+  assert.equal(waybills.find((w) => w.code === 'ADOPT999888')?.source, 'draft');
+  assert.equal(waybills.find((w) => w.code === 'DRAFT123456')?.source, 'draft');
 });
 
 test('xoá tài khoản thì xoá luôn kết nối Viettel Post, webhook cũ không dựng lại dữ liệu', async () => {

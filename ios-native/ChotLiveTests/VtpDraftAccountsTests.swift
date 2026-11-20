@@ -304,4 +304,37 @@ final class VtpDraftAccountsTests: XCTestCase {
         XCTAssertTrue(c.owns("0900000111"))
         XCTAssertFalse(c.owns("090•••999"))
     }
+
+    func testApproveUsesTheAccountThatPushedTheDraft() async {
+        let secrets = Secrets(), defaults = freshDefaults()
+        let (_, t2) = twoAccounts(secrets, defaults)
+        let mock = Mock()
+        mock.handler = { _ in (200, #"{"error":false,"data":{"ORDER_NUMBER":"1577","MONEY_TOTAL":28000}}"#) }
+        let hub = VtpDraftHub(secrets: secrets, defaults: defaults, transport: mock.transport)
+        XCTAssertEqual(hub.currentId, "", "đang dùng tài khoản Một")
+
+        let outcome = await hub.approveDraft(of: group(code: "1577", account: "0900 *** 222"), code: "1577")
+        XCTAssertEqual(outcome, .approved(VtpDraftApproveResult(code: "1577", fee: 28000)))
+        XCTAssertEqual(mock.requests.count, 1)
+        XCTAssertEqual(mock.requests[0].value(forHTTPHeaderField: "token"), t2)
+        let body = VtpJ.dict(VtpJ.obj(mock.requests[0].httpBody ?? Data())) ?? [:]
+        XCTAssertEqual(VtpJ.int(body["TYPE"]), 1)
+        XCTAssertEqual(body["ORDER_NUMBER"] as? String, "1577")
+    }
+
+    func testApproveFromMissingAccountReturnsUnavailableWithoutSending() async {
+        let secrets = Secrets(), defaults = freshDefaults()
+        _ = twoAccounts(secrets, defaults)
+        let mock = Mock()
+        let hub = VtpDraftHub(secrets: secrets, defaults: defaults, transport: mock.transport)
+
+        let outcome = await hub.approveDraft(of: group(code: "1577", account: "0900 *** 999"), code: "1577")
+        if case .unavailable(let acc, let reason) = outcome {
+            XCTAssertEqual(acc, "0900 *** 999")
+            XCTAssertTrue(reason.contains("0900 *** 999"))
+        } else {
+            XCTFail("phải trả .unavailable khi không có tài khoản đã đẩy trên máy")
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
+    }
 }

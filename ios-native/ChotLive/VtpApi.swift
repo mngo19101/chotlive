@@ -63,6 +63,7 @@ struct VtpCreateResult: Identifiable, Equatable {
     var cod: Int? = nil
     var goods: Int? = nil
     var already: Bool
+    var fromDraft: Bool = false
     var error: String
 
     var id: String { key }
@@ -75,15 +76,20 @@ struct VtpCreateResult: Identifiable, Equatable {
         cod = (d["cod"] as? NSNumber)?.intValue
         goods = (d["goods"] as? NSNumber)?.intValue
         already = (d["already"] as? Bool) ?? false
+        fromDraft = (d["fromDraft"] as? Bool) ?? false
         error = VtpConnection.string(d["error"]) ?? (ok ? "" : "Lỗi không rõ")
     }
 
-    init(key: String, ok: Bool, code: String = "", fee: Int = 0, already: Bool = false, error: String = "") {
+    init(key: String, ok: Bool, code: String = "", fee: Int = 0, cod: Int? = nil, goods: Int? = nil,
+         already: Bool = false, fromDraft: Bool = false, error: String = "") {
         self.key = key
         self.ok = ok
         self.code = code
         self.fee = fee
+        self.cod = cod
+        self.goods = goods
         self.already = already
+        self.fromDraft = fromDraft
         self.error = error
     }
 }
@@ -334,6 +340,26 @@ extension LiveClient {
         return (nil, (r.1["results"] as? [[String: Any]] ?? []).map { VtpCreateResult($0) })
     }
 
+    private func vtpDraftServerCall(_ path: String, service: String, groups: [[String: Any]], timeout: TimeInterval,
+                                    fallback: String) async -> (status: Int, error: String?, results: [VtpCreateResult]) {
+        let r = await apiCall(path, method: "POST", body: ["service": service, "groups": groups], timeout: timeout)
+        guard let r else { return (0, Self.errorText(nil, fallback), []) }
+        guard r.0 == 200 else { return (r.0, Self.errorText(r, fallback), []) }
+        return (200, nil, (r.1["results"] as? [[String: Any]] ?? []).map { VtpCreateResult($0) })
+    }
+
+    /// Ghi nhận nháp đã được duyệt ngay trên thiết bị lên máy chủ (để đồng bộ, in tem và nhận webhook).
+    func vtpAdoptDraft(service: String, groups: [[String: Any]]) async -> (status: Int, error: String?, results: [VtpCreateResult]) {
+        await vtpDraftServerCall("/api/vtp/adopt-draft", service: service, groups: groups,
+                                 timeout: TimeInterval(20 + groups.count * 5), fallback: "Không ghi được vận đơn đã duyệt")
+    }
+
+    /// Nhờ máy chủ duyệt nháp qua API đối tác (UpdateOrder TYPE 1) khi thiết bị không có phiên Phần 2 phù hợp.
+    func vtpApproveDraft(service: String, groups: [[String: Any]]) async -> (status: Int, error: String?, results: [VtpCreateResult]) {
+        await vtpDraftServerCall("/api/vtp/approve-draft", service: service, groups: groups,
+                                 timeout: TimeInterval(30 + groups.count * 10), fallback: "Không duyệt được nháp")
+    }
+
     /// Nháp: cước dự tính và địa chỉ Viettel Post hiểu cho từng khách, theo `key` của khách. Chưa tạo đơn nào.
     func vtpQuote(service: String, groups: [[String: Any]]) async -> (error: String?, quotes: [String: VtpQuote]) {
         let timeout = TimeInterval(20 + groups.count * 5)
@@ -396,12 +422,13 @@ extension LiveClient {
 // MARK: - Ghi kết quả lên máy ngay, không chờ máy chủ đồng bộ về
 
 extension Store {
-    func applyVtpCreated(_ orders: [Order], code: String, fee: Int, cod: Int? = nil, goods: Int? = nil, service: String, at now: Date = Clock.now) {
+    func applyVtpCreated(_ orders: [Order], code: String, fee: Int, cod: Int? = nil, goods: Int? = nil,
+                         service: String, fromDraft: Bool = false, batchId: String? = nil, at now: Date = Clock.now) {
         let ms = (now.timeIntervalSince1970 * 1000).rounded()
-        let batch = "vtp_" + String(Int64(ms), radix: 36)
+        let batch = batchId ?? ((fromDraft ? "vtpd_" : "vtp_") + String(Int64(ms), radix: 36))
         var changes: [String: ShipInfo] = [:]
         for o in orders {
-            var s = o.ship ?? ShipInfo()
+            var s = order(id: o.id)?.ship ?? o.ship ?? ShipInfo()
             s.state = ShipState.exported.rawValue
             s.exportedAt = ms
             s.batchId = batch
@@ -418,6 +445,14 @@ extension Store {
             s.vtpNote = nil
             s.vtpError = nil
             s.vtpErrorAt = nil
+            if fromDraft {
+                s.draftCode = nil
+                s.draftAt = nil
+                s.draftHash = nil
+                s.draftAccount = nil
+                s.draftError = nil
+                s.draftErrorAt = nil
+            }
             changes[o.id] = s
         }
         setShip(changes, shipping: true)

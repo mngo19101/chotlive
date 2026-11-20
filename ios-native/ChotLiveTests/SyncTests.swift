@@ -401,4 +401,47 @@ final class SyncTests: XCTestCase {
         XCTAssertTrue(store.accounts.isEmpty, "đã xoá trên máy thì không hiện lại")
         XCTAssertEqual(store.makeSyncUpdate()?.deletedAccountIds, ["shop"])
     }
+
+    /// Nháp đã duyệt thẳng trên máy (giữ nguyên mã, batch `vtpd_`): máy chủ cũ bỏ mất `vtpCode` khi đồng bộ vẫn không làm rơi mã vận đơn,
+    /// nhưng khi máy chủ báo huỷ vận đơn (`state = ready`, `vtpOldCode`) hoặc cập nhật mã từ máy chủ thì phải nghe máy chủ.
+    func testApprovedDraftWaybillSurvivesOldServerWithoutVtpCode() throws {
+        let store = makeStore()
+        markSynced(store)
+        var c = serverCustomer("a", items: ["a1"])
+        var ready = ShipInfo(state: "ready", pay: "cod")
+        ready.draftCode = "157700000001"
+        ready.draftHash = "ab12"
+        ready.draftAccount = "0987 *** 321"
+        c.items[0].ship = ready
+        store.applyServer(ServerSnapshot(customers: [c]))
+
+        let order = try XCTUnwrap(store.allOrders().first)
+        store.applyVtpCreated([order], code: "157700000001", fee: 25000, cod: 150_000, goods: 150_000,
+                              service: "VSL9", fromDraft: true, batchId: "vtpd_1")
+        XCTAssertNil(store.allOrders().first?.ship?.draftCode)
+        XCTAssertEqual(store.allOrders().first?.ship?.vtpCode, "157700000001")
+
+        let update = try XCTUnwrap(store.makeSyncUpdate())
+        store.acknowledgeSync(id: update.id)
+
+        // Máy chủ cũ đồng bộ lại: giữ `state = exported`, `batchId = vtpd_1` nhưng lọc bỏ `vtpCode/vtpKind`.
+        var oldServer = c
+        oldServer.items[0].shipping = true
+        oldServer.items[0].ship = ShipInfo(state: "exported", pay: "cod", batchId: "vtpd_1")
+        store.applyServer(ServerSnapshot(customers: [oldServer]))
+        XCTAssertEqual(store.allOrders().first?.ship?.vtpCode, "157700000001")
+        XCTAssertEqual(store.allOrders().first?.ship?.vtpFee, 25000)
+
+        // Máy chủ báo vận đơn đã bị huỷ: máy chủ là bản chuẩn, phải bỏ `vtpCode` và chuyển về Chờ gửi.
+        var cancelled = c
+        var cs = ShipInfo(state: "ready", pay: "cod")
+        cs.vtpOldCode = "157700000001"
+        cs.vtpKind = "cancelled"
+        cancelled.items[0].shipping = false
+        cancelled.items[0].ship = cs
+        store.applyServer(ServerSnapshot(customers: [cancelled]))
+        XCTAssertNil(store.allOrders().first?.ship?.vtpCode)
+        XCTAssertEqual(store.allOrders().first?.ship?.vtpKind, "cancelled")
+        XCTAssertEqual(store.allOrders().first?.ship?.vtpOldCode, "157700000001")
+    }
 }

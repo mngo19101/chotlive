@@ -626,6 +626,27 @@ export async function vtpResolve(store, userId, code, type, note = '') {
   return ok(r) ? { ok: true } : { ok: false, error: why(r) };
 }
 
+/** Duyệt đơn nháp thành vận đơn chính thức (UpdateOrder TYPE 1), giữ nguyên mã nháp. */
+export async function vtpApproveDraft(store, userId, code, note = '') {
+  const orderNumber = String(code || '').trim();
+  if (!orderNumber) return { ok: false, error: 'Thiếu mã nháp' };
+  const r = await vtpCall(store, userId, 'POST', '/v2/order/UpdateOrder', {
+    TYPE: 1,
+    ORDER_NUMBER: orderNumber,
+    NOTE: clipBytes(note, 150)
+  });
+  if (!ok(r)) {
+    console.warn(`[vtp] Duyệt nháp ${orderNumber} lỗi: ${replyForLog(r)}`);
+    return { ok: false, error: why(r) };
+  }
+  const d = r.json?.data && typeof r.json.data === 'object' ? r.json.data : {};
+  return {
+    ok: true,
+    code: String(d.ORDER_NUMBER || '').trim() || orderNumber,
+    fee: Math.max(0, Math.round(Number(d.MONEY_TOTAL) || 0))
+  };
+}
+
 export const newHookId = () => crypto.randomBytes(18).toString('base64url');
 
 /** Đọc một bản tin webhook (chấp nhận cả `DATA` lồng nhau hoặc phẳng). */
@@ -761,6 +782,51 @@ export function settleVtpCreate(state, attempt, r, { batchId, now = Date.now() }
     o.ship = { ...rest, vtpError: String(r.error || '').slice(0, 200), vtpErrorAt: r.error ? now : null };
     // Đơn từng bị huỷ vận đơn thì trở lại đúng nhãn "đã huỷ · gửi lại" như trước lần tạo này.
     if (rest.vtpOldCode) o.ship.vtpKind = 'cancelled';
+  }
+  return done;
+}
+
+/**
+ * Chuyển các đơn của một nháp đã duyệt (trên thiết bị hoặc qua API) sang vận đơn chính thức,
+ * xoá nhãn nháp cũ và ghi mã vận đơn vào đơn để đồng bộ đa thiết bị và nhận webhook.
+ */
+export function applyVtpAdopted(state, ids, { code, fee = 0, cod = null, goods = null, service = '', batchId, now = Date.now() }) {
+  const done = [];
+  const wanted = new Set(ids.map(String));
+  for (const o of state.orders || []) {
+    if (!wanted.has(String(o.id))) continue;
+    const {
+      vtpAttempt,
+      vtpHints,
+      draftCode,
+      draftAt,
+      draftHash,
+      draftAccount,
+      draftError,
+      draftErrorAt,
+      ...rest
+    } = o.ship || {};
+    const next = {
+      ...rest,
+      state: 'exported',
+      exportedAt: now,
+      batchId,
+      vtpCode: String(code),
+      vtpFee: Math.max(0, Math.round(Number(fee) || 0)),
+      vtpService: service || rest.vtpService || '',
+      vtpStatus: 0,
+      vtpStatusName: 'Chờ lấy hàng',
+      vtpStatusAt: now,
+      vtpKind: 'created',
+      vtpNote: '',
+      vtpError: '',
+      vtpErrorAt: null
+    };
+    if (cod != null && Number.isFinite(Number(cod))) next.vtpCod = Math.max(0, Math.round(Number(cod)));
+    if (goods != null && Number.isFinite(Number(goods))) next.vtpGoods = Math.max(0, Math.round(Number(goods)));
+    o.ship = next;
+    o.status = 'shipping';
+    done.push(String(o.id));
   }
   return done;
 }
