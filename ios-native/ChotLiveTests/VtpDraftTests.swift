@@ -268,4 +268,96 @@ final class VtpDraftTests: XCTestCase {
             XCTAssertEqual(error as? VtpDraftError, .notLoggedIn)
         }
     }
+
+    @MainActor
+    func testKhoCachePersistsAndFailureDoesNotWipeCache() async {
+        let mock = MockVtp()
+        mock.handler = { _ in
+            (200, #"[{"GROUPADDRESS_ID":"123","CUS_ID":"45","NAME":"Kho A","PHONE":"0900000000","ADDRESS":"1 Lê Lợi","PROVINCE_ID":"1","DISTRICT_ID":2,"WARDS_ID":3}]"#)
+        }
+        let secrets = MemorySecrets()
+        let defaults = UserDefaults(suiteName: "vtpdraft-kho-" + UUID().uuidString)!
+        let tk = jwt(expiresIn: 3600)
+        secrets.set(Data(tk.utf8), "token")
+        secrets.set(Data("rt-old".utf8), "refresh")
+        let c = VtpDraftClient(secrets: secrets, defaults: defaults, transport: mock.transport)
+        await c.loadKho()
+        XCTAssertEqual(c.kho.map(\.id), ["123"])
+        XCTAssertTrue(c.khoLoadedThisSession)
+        XCTAssertNil(c.lastError)
+
+        // Mở lại app với máy chủ lỗi: vẫn giữ kho đã cache và báo lỗi rõ ràng.
+        let failMock = MockVtp()
+        failMock.handler = { _ in (500, #"{"error":true,"message":"Lỗi hệ thống"}"#) }
+        let relaunched = VtpDraftClient(secrets: secrets, defaults: defaults, transport: failMock.transport)
+        XCTAssertEqual(relaunched.kho.map(\.id), ["123"])
+        XCTAssertFalse(relaunched.khoLoadedThisSession)
+        await relaunched.loadKho()
+        XCTAssertEqual(relaunched.kho.map(\.id), ["123"])
+        XCTAssertEqual(relaunched.lastError, "Lỗi hệ thống")
+        XCTAssertFalse(relaunched.khoLoadedThisSession)
+    }
+
+    @MainActor
+    func testPersistent401MarksSessionExpired() async {
+        let mock = MockVtp()
+        let fresh = jwt(expiresIn: 3600)
+        mock.handler = { req in
+            if req.url!.path == "/api/sessions/refresh/v1" {
+                return (200, #"{"error":false,"data":{"token":"\#(fresh)","refreshToken":"rt-new"}}"#)
+            }
+            return (401, #"{"error":true,"messageKey":"EXPIRED_TOKEN","message":"Hết phiên"}"#)
+        }
+        let c = client(token: jwt(expiresIn: 3600), mock: mock)
+        do {
+            _ = try await c.insertDraft([:])
+            XCTFail("401 lặp lại phải đánh dấu hết phiên")
+        } catch {
+            XCTAssertEqual(error as? VtpDraftError, .sessionExpired)
+            XCTAssertTrue(c.sessionExpired)
+        }
+    }
+
+    @MainActor
+    func testReloginWithDifferentAccountClearsOldKho() async {
+        let mock = MockVtp()
+        let tk1 = jwt(expiresIn: 3600), tk2 = jwt(expiresIn: 3600)
+        mock.handler = { req in
+            let reqBody = VtpJ.dict(VtpJ.obj(req.httpBody ?? Data())) ?? [:]
+            switch req.url!.path {
+            case "/api/v2/Login/PasswordCaptcha":
+                let isSecond = VtpJ.str(reqBody["username"]) == "0900000222"
+                let phone = isSecond ? "0900000222" : "0900000111"
+                let sso = isSecond ? "sso-2" : "sso-1"
+                return (200, #"{"status":true,"accessToken":"\#(sso)","phoneNumber":"\#(phone)"}"#)
+            case "/api/user/ssoUpdateUser":
+                let isSecond = VtpJ.str(reqBody["TokenSSO"]) == "sso-2"
+                let uid = isSecond ? "200" : "100"
+                let phone = isSecond ? "0900000222" : "0900000111"
+                let tk = isSecond ? tk2 : tk1
+                let label = isSecond ? "Shop 2" : "Shop 1"
+                return (200, #"{"error":false,"data":{"TokenKey":"\#(tk)","refreshToken":"rt","UserName":"\#(label)","Phone":"\#(phone)","UserId":"\#(uid)"}}"#)
+            case "/api/setting/listInventoryV2":
+                let isSecond = VtpJ.str(reqBody["token"]) == tk2
+                let kid = isSecond ? "222" : "111"
+                let label = isSecond ? "Kho 2" : "Kho 1"
+                return (200, #"[{"GROUPADDRESS_ID":"\#(kid)","CUS_ID":1,"NAME":"\#(label)","PHONE":"0900000000","ADDRESS":"A","PROVINCE_ID":1,"DISTRICT_ID":2,"WARDS_ID":3}]"#)
+            default:
+                return (404, "{}")
+            }
+        }
+        let secrets = MemorySecrets()
+        let defaults = UserDefaults(suiteName: "vtpdraft-switch-" + UUID().uuidString)!
+        let c = VtpDraftClient(secrets: secrets, defaults: defaults, transport: mock.transport)
+        await c.startLogin(user: "0900000111", password: "pw")
+        c.pickKho("111")
+        XCTAssertTrue(c.khoPicked)
+        XCTAssertEqual(c.kho.map(\.id), ["111"])
+
+        // Đăng nhập đè bằng tài khoản Viettel Post khác trên cùng slot: xoá kho và lựa chọn kho cũ.
+        await c.startLogin(user: "0900000222", password: "pw")
+        XCTAssertEqual(c.kho.map(\.id), ["222"])
+        XCTAssertEqual(c.khoId, "222")
+        XCTAssertFalse(c.khoPicked)
+    }
 }

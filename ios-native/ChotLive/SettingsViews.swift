@@ -9,7 +9,6 @@ struct SettingsView: View {
     @EnvironmentObject var printer: PrinterManager
     @EnvironmentObject var ui: AppUI
     @EnvironmentObject var appearance: Appearance
-    @EnvironmentObject var vtpDraft: VtpDraftClient
     @EnvironmentObject var vtpDrafts: VtpDraftHub
 
     private var version: String {

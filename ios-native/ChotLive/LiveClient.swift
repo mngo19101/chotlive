@@ -82,7 +82,7 @@ final class LiveClient: ObservableObject {
     private var syncWork: Task<Void, Never>?
     private var accessCheck: Task<Void, Never>?
 
-    private var currentAccountKey: String { AuthStorage.accountKey(server: baseURL, user: username) }
+    var currentAccountKey: String { AuthStorage.accountKey(server: baseURL, user: username) }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

@@ -280,8 +280,10 @@ extension LiveClient {
 
     /// Hỏi máy chủ tài khoản đã kết nối Viettel Post chưa.
     func refreshVtp() {
+        let key = currentAccountKey
         Task { @MainActor [weak self] in
-            guard let self, let r = await self.apiCall("/api/vtp/status"), r.0 == 200 else { return }
+            guard let self, let r = await self.apiCall("/api/vtp/status"), r.0 == 200,
+                  self.currentAccountKey == key else { return }
             let next = VtpConnection(r.1)
             if self.vtp != next { self.vtp = next }
         }
@@ -289,7 +291,9 @@ extension LiveClient {
 
     /// Dán token: máy chủ đăng nhập thử Viettel Post, được thì lưu và trả về danh sách điểm lấy hàng.
     func vtpConnect(token: String) async -> (error: String?, senders: [VtpConnection.Sender]) {
+        let key = currentAccountKey
         let r = await apiCall("/api/vtp/connect", method: "POST", body: ["siteToken": token], timeout: 40)
+        guard self.currentAccountKey == key else { return ("Đã chuyển tài khoản ChốtLive khác.", []) }
         guard let r, r.0 == 200, (r.1["ok"] as? Bool) == true else {
             return (Self.errorText(r, "Token không dùng được"), [])
         }
@@ -305,14 +309,18 @@ extension LiveClient {
     }
 
     func vtpSetSender(_ id: String) async -> String? {
+        let key = currentAccountKey
         let r = await apiCall("/api/vtp/sender", method: "POST", body: ["id": id], timeout: 30)
+        guard self.currentAccountKey == key else { return nil }
         guard let r, r.0 == 200 else { return Self.errorText(r, "Không chọn được điểm lấy hàng") }
         vtp = VtpConnection(r.1)
         return nil
     }
 
     func vtpDisconnect() async -> String? {
+        let key = currentAccountKey
         let r = await apiCall("/api/vtp/disconnect", method: "POST", body: [:])
+        guard self.currentAccountKey == key else { return nil }
         guard let r, r.0 == 200 else { return Self.errorText(r, "Không ngắt được kết nối") }
         vtp = VtpConnection(connected: false)
         return nil

@@ -10,7 +10,7 @@ struct ChotLiveApp: App {
     @StateObject private var appearance = Appearance()
     /// Đẩy nháp Viettel Post ngay trên máy (phiên web riêng của máy này, không qua máy chủ), nhiều tài khoản.
     /// Màn hình dùng `VtpDraftClient` là tài khoản đang dùng; đổi tài khoản thì cả app nhận client mới.
-    @StateObject private var vtpDrafts = VtpDraftHub()
+    @StateObject private var vtpDrafts = VtpDraftHub(appAccount: AuthStorage.currentAccountKey())
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -29,7 +29,10 @@ struct ChotLiveApp: App {
                         store.addComment(c, tiktok: client.liveUsername)
                         if store.isClosingComment(c) { CommentAlert.play() }
                     }
-                    client.onAccountChange = { [store] account in store.switchAccount(account) }
+                    client.onAccountChange = { [store, vtpDrafts] account in
+                        store.switchAccount(account)
+                        vtpDrafts.switchAppAccount(account)
+                    }
                     client.onSnapshot = { [store] snap in store.applyServer(snap) }
                     client.onSyncAck = { [store, client] id in
                         if store.acknowledgeSync(id: id) { client.flushSync(store) }
@@ -49,6 +52,12 @@ struct ChotLiveApp: App {
                         client.flushSync(store)
                         Task { @MainActor in await client.catchUpComments(into: store) }
                     }
+                }
+                .onChange(of: client.vtp?.phone) { _ in
+                    vtpDrafts.syncWithPartner(phone: client.vtpConnected ? client.vtp?.phone : nil)
+                }
+                .onChange(of: client.vtp?.connected) { on in
+                    if on == true { vtpDrafts.syncWithPartner(phone: client.vtp?.phone) }
                 }
                 .onChange(of: scenePhase) { phase in
                     if phase == .active {

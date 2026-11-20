@@ -18,7 +18,7 @@ struct VtpDraftOtpStep: Equatable {
     var sentType: String?
 }
 
-struct VtpDraftKho: Identifiable, Hashable {
+struct VtpDraftKho: Identifiable, Hashable, Codable {
     var id: String          // GROUPADDRESS_ID
     var cusId: Int
     var name: String
@@ -57,9 +57,8 @@ final class VtpDraftClient: ObservableObject {
         static let location = "https://location.viettelpost.vn/location/v1.0/address?system=VTP"
     }
 
-    /// deviceId, DeviceToken và khoá ký dùng chung cho mọi tài khoản trên máy (như một trình duyệt đăng nhập
-    /// nhiều tài khoản). Phiên, tên, kho thì riêng từng tài khoản: tài khoản đầu tiên (`accountId` rỗng) giữ
-    /// đúng tên khoá cũ để phiên đã đăng nhập từ bản trước vẫn dùng được.
+    /// Khoá fallback của bản 1.2.0 cho tài khoản thứ 2 trở đi từng dùng chung deviceId/DPoP key.
+    /// Tài khoản đầu tiên (`accountId` rỗng) dùng đúng tên khoá gốc ("vtpDraft.deviceId", "key"...).
     private enum Keys {
         static let deviceId = "vtpDraft.deviceId"
         static let deviceToken = "vtpDraft.deviceToken"
@@ -70,7 +69,7 @@ final class VtpDraftClient: ObservableObject {
     private func skey(_ name: String) -> String { accountId.isEmpty ? name : "\(accountId).\(name)" }
 
     @Published private(set) var loggedIn = false
-    /// Tên đăng nhập Viettel Post (thường là số điện thoại). Hiện ra màn hình thì dùng `phone` (đã che).
+    /// Tên đăng nhập Viettel Post (thường là họ tên hoặc số điện thoại). Hiện ra màn hình thì dùng `phone` (đã che).
     @Published private(set) var userName: String
     @Published private(set) var loading = false
     @Published private(set) var loadingKho = false
@@ -82,34 +81,132 @@ final class VtpDraftClient: ObservableObject {
     @Published var khoId: String? {
         didSet { defaults.set(khoId, forKey: dkey("khoId")) }
     }
+    @Published var khoPicked: Bool {
+        didSet { defaults.set(khoPicked, forKey: dkey("khoPicked")) }
+    }
     /// Tên đăng nhập đã gõ (thường là số điện thoại). Viettel Post trả `UserName` là họ tên, nên phải giữ riêng
     /// để so với tài khoản phần 1 và để hiện số đã che.
     @Published private(set) var login: String
+    /// Mã UserId của Viettel Post trả về từ `ssoUpdateUser`, dùng để nhận diện cùng một tài khoản kể cả khi gõ email/SĐT.
+    @Published private(set) var vtpUserId: String
     @Published private(set) var log: [VtpDraftLogEntry] = []
 
     /// Số đăng nhập đã che ("0987 *** 321"); rỗng khi chưa biết (phiên từ bản cũ chưa lưu số).
     var phone: String {
         let raw = !login.isEmpty ? login : (userName.filter(\.isNumber).count >= 9 ? userName : "")
-        return VtpMask.text(raw)
+        let normalized = raw.filter(\.isNumber).count >= 9 ? Self.normalizePhone(raw) : raw
+        return VtpMask.text(normalized)
     }
     /// Họ tên Viettel Post trả về (khác số điện thoại).
     var displayName: String { userName.filter(\.isNumber).count >= 9 ? "" : userName }
     /// Nhãn ghi vào đơn khi đẩy nháp (`draftAccount`): số đã che, chưa biết số thì họ tên.
     var accountLabel: String { phone.isEmpty ? userName : phone }
-    /// Nháp ghi `draftAccount` này có phải của tài khoản này không (nhãn cũ có thể là họ tên).
+    /// Nháp ghi `draftAccount` này có phải của tài khoản này không (nhãn cũ có thể là họ tên hoặc dạng che khác).
     func owns(_ draftAccount: String) -> Bool {
         let a = draftAccount.trimmingCharacters(in: .whitespaces)
         guard !a.isEmpty else { return false }
-        return a == phone || a == userName || a == accountLabel
+        if a == phone || a == userName || a == accountLabel { return true }
+        if !login.isEmpty && a.caseInsensitiveCompare(login) == .orderedSame { return true }
+        let ref = !login.isEmpty ? login : userName
+        if let m = Self.phonesMatch(a, ref) { return m }
+        return false
     }
+
+    /// Hai slot có phải cùng một tài khoản Viettel Post không (theo UserId, SĐT hoặc tên đăng nhập).
+    func matchesSameAccount(as other: VtpDraftClient) -> Bool {
+        if !vtpUserId.isEmpty && !other.vtpUserId.isEmpty {
+            return vtpUserId == other.vtpUserId
+        }
+        let a = login.isEmpty ? userName : login
+        let b = other.login.isEmpty ? other.userName : other.login
+        let ka = Self.phoneKey(a), kb = Self.phoneKey(b)
+        if ka.count >= 9 && kb.count >= 9 { return ka == kb }
+        if !login.isEmpty && !other.login.isEmpty {
+            return login.caseInsensitiveCompare(other.login) == .orderedSame
+        }
+        return false
+    }
+
+    func pickKho(_ id: String) {
+        khoId = id
+        khoPicked = true
+    }
+
     var selectedKho: VtpDraftKho? { kho.first { $0.id == khoId } ?? kho.first }
     var tokenExpiry: Date? { VtpJ.jwtExpiry(token) }
 
+    /// Chuẩn hoá số điện thoại Việt Nam về dạng 0xxxxxxxxx; chuỗi không phải SĐT giữ nguyên.
+    nonisolated static func normalizePhone(_ s: String) -> String {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        let allowed = CharacterSet(charactersIn: "0123456789+-.() ")
+        guard !trimmed.isEmpty, trimmed.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+            return trimmed
+        }
+        var digits = trimmed.filter(\.isNumber)
+        if digits.hasPrefix("84"), (10...11).contains(digits.count) {
+            digits = "0" + digits.dropFirst(2)
+        }
+        if (9...11).contains(digits.count), digits.hasPrefix("0") {
+            return digits
+        }
+        return trimmed
+    }
+
+    /// 9 số cuối của số điện thoại, để so 0987… với +84987….
+    nonisolated static func phoneKey(_ s: String) -> String { String(s.filter(\.isNumber).suffix(9)) }
+
+    private enum ParsedPhone {
+        case full(String)
+        case masked(prefix: String, suffix: String)
+    }
+
+    private nonisolated static func parsePhone(_ s: String) -> ParsedPhone? {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let firstMask = trimmed.firstIndex(where: { $0 == "•" || $0 == "*" }),
+           let lastMask = trimmed.lastIndex(where: { $0 == "•" || $0 == "*" }) {
+            let allowed = CharacterSet(charactersIn: "0123456789+-.() •*")
+            guard trimmed.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
+            let rawPrefix = String(trimmed[..<firstMask]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawSuffix = String(trimmed[trimmed.index(after: lastMask)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            var prefix = rawPrefix.filter(\.isNumber)
+            if (rawPrefix.hasPrefix("+84") || rawPrefix.hasPrefix("84")) && prefix.hasPrefix("84") {
+                prefix = "0" + prefix.dropFirst(2)
+            }
+            let suffix = rawSuffix.filter(\.isNumber)
+            guard prefix.count >= 2, suffix.count >= 3 else { return nil }
+            return .masked(prefix: prefix, suffix: suffix)
+        }
+        let allowed = CharacterSet(charactersIn: "0123456789+-.() ")
+        guard trimmed.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
+        let norm = normalizePhone(trimmed)
+        let digits = norm.filter(\.isNumber)
+        guard digits.count >= 9 else { return nil }
+        let full = digits.count == 9 && !digits.hasPrefix("0") ? "0" + digits : digits
+        return .full(full)
+    }
+
+    /// So hai số điện thoại kể cả khi một hoặc hai số đã bị che (vd: "090•••222" vs "0900000222").
+    /// Trả `nil` nếu một trong hai chuỗi không phải số điện thoại (ví dụ email).
+    nonisolated static func phonesMatch(_ a: String, _ b: String) -> Bool? {
+        guard let pa = parsePhone(a), let pb = parsePhone(b) else { return nil }
+        switch (pa, pb) {
+        case (.full(let fa), .full(let fb)):
+            return String(fa.suffix(9)) == String(fb.suffix(9))
+        case (.full(let f), .masked(let p, let s)), (.masked(let p, let s), .full(let f)):
+            return f.hasPrefix(p) && f.hasSuffix(s)
+        case (.masked(let pa, let sa), .masked(let pb, let sb)):
+            let pLen = min(pa.count, pb.count)
+            let sLen = min(sa.count, sb.count)
+            return pa.prefix(pLen) == pb.prefix(pLen) && sa.suffix(sLen) == sb.suffix(sLen)
+        }
+    }
+
     /// Khoá phân biệt tài khoản trên máy này ("" = tài khoản đầu tiên, dùng khoá cũ).
     let accountId: String
-    let deviceId: String
-    private let deviceToken: String
-    private let key: P256.Signing.PrivateKey
+    private(set) var deviceId: String
+    private var deviceToken: String
+    private var key: P256.Signing.PrivateKey
     private let secrets: VtpDraftSecrets
     private let defaults: UserDefaults
     private let transport: VtpDraftTransport
@@ -117,6 +214,11 @@ final class VtpDraftClient: ObservableObject {
     private var refreshToken: String?
     private var nonce: String?
     private var refreshTask: Task<Void, Error>?
+    private var usingLegacyIdentity = false
+    private var forgotten = false
+    private var pendingUser = ""
+    private var pendingPhone = ""
+    private(set) var khoLoadedThisSession = false
 
     init(accountId: String = "", secrets: VtpDraftSecrets = VtpDraftKeychain(), defaults: UserDefaults = .standard,
          transport: @escaping VtpDraftTransport = VtpDraftHttp.live) {
@@ -124,35 +226,75 @@ final class VtpDraftClient: ObservableObject {
         self.secrets = secrets
         self.defaults = defaults
         self.transport = transport
-        if let id = defaults.string(forKey: Keys.deviceId) {
-            deviceId = id
-        } else {
-            let id = String(Int(Date().timeIntervalSince1970 * 1000), radix: 36) + String(UUID().uuidString.prefix(8)).lowercased()
-            defaults.set(id, forKey: Keys.deviceId)
-            deviceId = id
-        }
-        if let t = defaults.string(forKey: Keys.deviceToken) {
-            deviceToken = t
-        } else {
-            let t = UUID().uuidString.lowercased()
-            defaults.set(t, forKey: Keys.deviceToken)
-            deviceToken = t
-        }
-        if let raw = secrets.get(Keys.key), let k = try? P256.Signing.PrivateKey(rawRepresentation: raw) {
-            key = k
-        } else {
-            let k = P256.Signing.PrivateKey()
-            secrets.set(k.rawRepresentation, Keys.key)
-            key = k
-        }
         let dk = { (n: String) in accountId.isEmpty ? "vtpDraft.\(n)" : "vtpDraft.\(accountId).\(n)" }
         let sk = { (n: String) in accountId.isEmpty ? n : "\(accountId).\(n)" }
+
+        let loadedToken = secrets.get(sk("token")).map { String(decoding: $0, as: UTF8.self) }
+        token = loadedToken
+        refreshToken = secrets.get(sk("refresh")).map { String(decoding: $0, as: UTF8.self) }
+        loggedIn = loadedToken != nil
+
+        let ownDevId = defaults.string(forKey: dk("deviceId"))
+        let ownDevToken = defaults.string(forKey: dk("deviceToken"))
+        let ownKeyData = secrets.get(sk("key"))
+
+        // Tài khoản thứ 2+ đã đăng nhập ở bản 1.2.0 dùng chung deviceId/key gốc: giữ tạm để phiên DPoP cũ
+        // không bị gãy ngay khi cập nhật app; khi đăng nhập lại sẽ tách sang bộ nhận diện riêng.
+        if !accountId.isEmpty, loadedToken != nil, ownKeyData == nil,
+           let raw = secrets.get(Keys.key), let legacyKey = try? P256.Signing.PrivateKey(rawRepresentation: raw),
+           let lid = defaults.string(forKey: Keys.deviceId),
+           let ldt = defaults.string(forKey: Keys.deviceToken) {
+            deviceId = ownDevId ?? lid
+            deviceToken = ownDevToken ?? ldt
+            key = legacyKey
+            usingLegacyIdentity = true
+        } else {
+            if let id = ownDevId {
+                deviceId = id
+            } else {
+                let id = String(Int(Date().timeIntervalSince1970 * 1000), radix: 36) + String(UUID().uuidString.prefix(8)).lowercased()
+                defaults.set(id, forKey: dk("deviceId"))
+                deviceId = id
+            }
+            if let t = ownDevToken {
+                deviceToken = t
+            } else {
+                let t = UUID().uuidString.lowercased()
+                defaults.set(t, forKey: dk("deviceToken"))
+                deviceToken = t
+            }
+            if let raw = ownKeyData, let k = try? P256.Signing.PrivateKey(rawRepresentation: raw) {
+                key = k
+            } else {
+                let k = P256.Signing.PrivateKey()
+                secrets.set(k.rawRepresentation, sk("key"))
+                key = k
+            }
+        }
+
         userName = defaults.string(forKey: dk("userName")) ?? ""
         login = defaults.string(forKey: dk("login")) ?? ""
+        vtpUserId = defaults.string(forKey: dk("vtpUserId")) ?? ""
         khoId = defaults.string(forKey: dk("khoId"))
-        token = secrets.get(sk("token")).map { String(decoding: $0, as: UTF8.self) }
-        refreshToken = secrets.get(sk("refresh")).map { String(decoding: $0, as: UTF8.self) }
-        loggedIn = token != nil
+        khoPicked = defaults.bool(forKey: dk("khoPicked"))
+        if loadedToken != nil, let data = defaults.data(forKey: dk("kho")),
+           let cached = try? JSONDecoder().decode([VtpDraftKho].self, from: data) {
+            kho = cached
+        }
+    }
+
+    private func rotateIdentity() {
+        let id = String(Int(Date().timeIntervalSince1970 * 1000), radix: 36) + String(UUID().uuidString.prefix(8)).lowercased()
+        let dt = UUID().uuidString.lowercased()
+        let k = P256.Signing.PrivateKey()
+        defaults.set(id, forKey: dkey("deviceId"))
+        defaults.set(dt, forKey: dkey("deviceToken"))
+        secrets.set(k.rawRepresentation, skey("key"))
+        deviceId = id
+        deviceToken = dt
+        key = k
+        nonce = nil
+        usingLegacyIdentity = false
     }
 
     // MARK: - Đăng nhập
@@ -164,7 +306,11 @@ final class VtpDraftClient: ObservableObject {
             return
         }
         await run("Đăng nhập") {
+            if !self.accountId.isEmpty && self.usingLegacyIdentity {
+                self.rotateIdentity()
+            }
             self.pendingUser = user
+            self.pendingPhone = ""
             var body: [String: Any] = ["clientId": "vtp.web", "clientSecret": "vtp.web", "deviceId": self.deviceId]
             body["username"] = user
             body["password"] = password
@@ -174,6 +320,7 @@ final class VtpDraftClient: ObservableObject {
             self.note("Đăng nhập SSO", r.text, ok: ok)
             let phone = VtpJ.str(j["phoneNumber"]) ?? user
             let email = VtpJ.str(j["email"]) ?? ""
+            if phone.filter(\.isNumber).count >= 9 { self.pendingPhone = phone }
             if ok, let at = VtpJ.str(j["accessToken"]), !at.isEmpty {
                 try await self.finish(accessToken: at, user: user)
             } else if ok, VtpJ.bool(j["checkCaptcha"]) {
@@ -185,8 +332,6 @@ final class VtpDraftClient: ObservableObject {
             }
         }
     }
-
-    private var pendingUser = ""
 
     /// `type`: "PHONE" (SMS) hoặc "EMAIL", đúng tên kênh trên trang Viettel Post.
     func sendOtp(_ type: String) async {
@@ -246,6 +391,7 @@ final class VtpDraftClient: ObservableObject {
 
     /// Đổi token SSO sang phiên web (token gắn với khoá ký của máy qua DPoP).
     private func finish(accessToken: String, user: String) async throws {
+        guard !forgotten else { return }
         var body: [String: Any] = ["TokenSSO": accessToken, "Type": "VTP", "Source": 3]
         body["DeviceName"] = "ChotLive (iPhone)"
         body["DeviceToken"] = deviceToken
@@ -253,20 +399,37 @@ final class VtpDraftClient: ObservableObject {
         body["deviceType"] = "WEB"
         body["browser"] = "Safari"
         let r = try await api("/api/user/ssoUpdateUser", body: body, token: nil)
+        guard !forgotten else { return }
         let j = VtpJ.dict(r.json) ?? [:]
         note("Đổi sang phiên web", r.text, ok: !VtpJ.bool(j["error"]))
         guard !VtpJ.bool(j["error"]), let d = VtpJ.dict(j["data"]), let tk = VtpJ.str(d["TokenKey"]), !tk.isEmpty else {
             throw VtpDraftError.server(VtpJ.str(j["message"]) ?? "Không đổi được sang phiên web Viettel Post")
         }
+        let newUserId = VtpJ.str(d["UserId"]) ?? VtpJ.str(d["USER_ID"]) ?? ""
+        // Số đăng nhập: ưu tiên số Viettel Post trả về, sau đó số từ bước SSO, cuối cùng là chuỗi người dùng đã gõ.
+        let phoneNo = VtpJ.str(d["Phone"]) ?? VtpJ.str(d["PHONE"]) ?? pendingPhone
+        let newLogin = phoneNo.filter(\.isNumber).count >= 9 ? Self.normalizePhone(phoneNo) : user
+        let changedAccount = (!vtpUserId.isEmpty && !newUserId.isEmpty && vtpUserId != newUserId)
+            || (Self.phoneKey(login).count >= 9 && Self.phoneKey(newLogin).count >= 9
+                && Self.phoneKey(login) != Self.phoneKey(newLogin))
+        if changedAccount {
+            kho = []
+            khoId = nil
+            khoPicked = false
+            khoLoadedThisSession = false
+            defaults.removeObject(forKey: dkey("kho"))
+        }
         save(token: tk, refresh: VtpJ.str(d["refreshToken"]))
         let name = VtpJ.str(d["UserName"]) ?? VtpJ.str(d["Phone"]) ?? user
         userName = name
         defaults.set(name, forKey: dkey("userName"))
-        // Số đăng nhập: ưu tiên số Viettel Post trả về, không có thì đúng chuỗi người dùng đã gõ.
-        let phoneNo = VtpJ.str(d["Phone"]) ?? VtpJ.str(d["PHONE"]) ?? ""
-        login = phoneNo.filter(\.isNumber).count >= 9 ? phoneNo : user
+        login = newLogin
         defaults.set(login, forKey: dkey("login"))
+        vtpUserId = newUserId
+        if newUserId.isEmpty { defaults.removeObject(forKey: dkey("vtpUserId")) }
+        else { defaults.set(newUserId, forKey: dkey("vtpUserId")) }
         pendingUser = ""
+        pendingPhone = ""
         await loadKho()
     }
 
@@ -274,8 +437,12 @@ final class VtpDraftClient: ObservableObject {
     func logout() {
         save(token: nil, refresh: nil)
         kho = []
+        khoLoadedThisSession = false
+        defaults.removeObject(forKey: dkey("kho"))
         otpStep = nil
         lastError = nil
+        pendingUser = ""
+        pendingPhone = ""
         note("Đã đăng xuất Viettel Post trên máy này", "")
     }
 
@@ -294,13 +461,28 @@ final class VtpDraftClient: ObservableObject {
         try? await ensureFresh()
     }
 
-    /// Bỏ hẳn tài khoản khỏi máy: xoá phiên, tên, kho. Khoá ký dùng chung nên giữ lại.
+    /// Bỏ hẳn tài khoản khỏi máy: xoá phiên, tên, kho. Khoá ký gốc giữ lại; tài khoản thêm sau xoá luôn định danh riêng.
     func forget() {
+        forgotten = true
         save(token: nil, refresh: nil)
-        for n in ["userName", "login", "khoId"] { defaults.removeObject(forKey: dkey(n)) }
+        for n in ["userName", "login", "vtpUserId", "khoId", "khoPicked", "kho"] {
+            defaults.removeObject(forKey: dkey(n))
+        }
+        if !accountId.isEmpty {
+            for n in ["deviceId", "deviceToken"] { defaults.removeObject(forKey: dkey(n)) }
+            secrets.set(nil, skey("key"))
+        }
         userName = ""
         login = ""
+        vtpUserId = ""
         kho = []
+        khoId = nil
+        khoPicked = false
+        khoLoadedThisSession = false
+        otpStep = nil
+        lastError = nil
+        pendingUser = ""
+        pendingPhone = ""
     }
 
     func refreshNow() async {
@@ -318,7 +500,11 @@ final class VtpDraftClient: ObservableObject {
     }
 
     private func doRefresh() async throws {
-        guard let tk = token, let rt = refreshToken, !rt.isEmpty else { throw VtpDraftError.notLoggedIn }
+        guard let tk = token else { throw VtpDraftError.notLoggedIn }
+        guard let rt = refreshToken, !rt.isEmpty else {
+            sessionExpired = true
+            throw VtpDraftError.sessionExpired
+        }
         let r = try await api("/api/sessions/refresh/v1", body: [String: Any](), token: tk, extra: ["refresh-token": rt])
         let j = VtpJ.dict(r.json) ?? [:]
         let d = VtpJ.dict(j["data"])
@@ -326,7 +512,7 @@ final class VtpDraftClient: ObservableObject {
         note("Làm mới phiên", r.text, ok: nt != nil)
         guard !VtpJ.bool(j["error"]), let nt, !nt.isEmpty else {
             // Viettel Post trả lời rõ là không làm mới được: phiên đã chết, giữ token để hiện "cần đăng nhập lại".
-            if r.json != nil { sessionExpired = true }
+            if r.json != nil || r.status == 401 || r.status == 403 { sessionExpired = true }
             throw VtpDraftError.sessionExpired
         }
         save(token: nt, refresh: VtpJ.str(d?["refreshToken"]) ?? rt)
@@ -344,16 +530,33 @@ final class VtpDraftClient: ObservableObject {
     // MARK: - Dữ liệu
 
     func loadKho() async {
-        guard loggedIn, !loadingKho else { return }
+        guard loggedIn, !sessionExpired, !loadingKho else { return }
         loadingKho = true
         defer { loadingKho = false }
         do {
             let r = try await authed("/api/setting/listInventoryV2") { ["token": self.token ?? "", "deviceId": self.deviceId] }
-            let arr = (r.json as? [[String: Any]]) ?? (VtpJ.dict(r.json)?["data"] as? [[String: Any]]) ?? []
-            kho = arr.compactMap(Self.parseKho)
-            if khoId == nil || !kho.contains(where: { $0.id == khoId }) { khoId = kho.first?.id }
-            note("Kho hàng Viettel Post: \(kho.count)", kho.map { "\($0.name) · \($0.address)" }.joined(separator: "\n"),
-                 ok: !kho.isEmpty)
+            let dict = VtpJ.dict(r.json)
+            if let arr = (r.json as? [[String: Any]]) ?? (dict?["data"] as? [[String: Any]]),
+               !VtpJ.bool(dict?["error"]) {
+                let parsed = arr.compactMap(Self.parseKho)
+                kho = parsed
+                if khoId == nil || !parsed.contains(where: { $0.id == khoId }) {
+                    khoId = parsed.first?.id
+                }
+                if let encoded = try? JSONEncoder().encode(parsed) {
+                    defaults.set(encoded, forKey: dkey("kho"))
+                }
+                khoLoadedThisSession = true
+                lastError = nil
+                note("Kho hàng Viettel Post: \(parsed.count)",
+                     parsed.map { "\($0.name) · \($0.address)" }.joined(separator: "\n"),
+                     ok: !parsed.isEmpty)
+            } else if r.status == 401 || VtpJ.str(dict?["messageKey"]) == "EXPIRED_TOKEN" {
+                sessionExpired = true
+                throw VtpDraftError.sessionExpired
+            } else {
+                throw VtpDraftError.server(VtpJ.str(dict?["message"]) ?? "Không đọc được danh sách kho (HTTP \(r.status))")
+            }
         } catch {
             fail("Đọc kho hàng", error)
         }
@@ -460,6 +663,10 @@ final class VtpDraftClient: ObservableObject {
             note("Phiên hết hạn, làm mới rồi gửi lại", "", ok: false)
             try await refresh()
             r = try await api(path, body: body(), token: token)
+            if VtpJ.str(VtpJ.dict(r.json)?["messageKey"]) == "EXPIRED_TOKEN" || r.status == 401 {
+                sessionExpired = true
+                throw VtpDraftError.sessionExpired
+            }
         }
         return r
     }

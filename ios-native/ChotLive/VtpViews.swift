@@ -52,7 +52,22 @@ struct VtpConnectView: View {
             if client.vtpConnected && senders.isEmpty { loadSenders() }
         }
         .onChange(of: client.vtp?.connected) { on in
-            if on == true && senders.isEmpty { loadSenders() }
+            if on == true {
+                if senders.isEmpty { loadSenders() }
+            } else {
+                senders = []
+                senderError = nil
+            }
+        }
+        .onChange(of: client.vtp?.phone) { _ in
+            senders = []
+            senderError = nil
+            if client.vtpConnected { loadSenders() }
+        }
+        .onChange(of: client.currentAccountKey) { _ in
+            senders = []
+            senderError = nil
+            if client.vtpConnected { loadSenders() }
         }
     }
 
@@ -171,7 +186,14 @@ struct VtpConnectView: View {
                         ui.confirm = ConfirmItem(title: "Ngắt kết nối Viettel Post?",
                                                  message: "Máy chủ xoá token. Đơn đã tạo vẫn giữ mã vận đơn; muốn gửi tiếp phải dán token lại.",
                                                  action: "Ngắt kết nối") {
-                            Task { @MainActor in ui.notify(await client.vtpDisconnect()) }
+                            Task { @MainActor in
+                                let err = await client.vtpDisconnect()
+                                if err == nil {
+                                    senders = []
+                                    senderError = nil
+                                }
+                                ui.notify(err)
+                            }
                         }
                     }
                 }
@@ -282,10 +304,12 @@ struct VtpConnectView: View {
 
     private func loadSenders() {
         guard !loadingSenders else { return }
+        let key = client.currentAccountKey
         loadingSenders = true
         Task { @MainActor in
             let r = await client.vtpSenders()
             loadingSenders = false
+            guard client.currentAccountKey == key else { return }
             senderError = r.error
             if r.error == nil { senders = r.senders }
         }

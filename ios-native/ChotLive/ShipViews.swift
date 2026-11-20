@@ -542,7 +542,6 @@ struct VtpExportSheet: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var client: LiveClient
     @EnvironmentObject var ui: AppUI
-    @EnvironmentObject var vtpDraft: VtpDraftClient
     @EnvironmentObject var vtpDrafts: VtpDraftHub
     /// Nằm luôn trong tab Chờ gửi (thay cho bảng "Nháp vận đơn" bật lên trước đây).
     let embedded: Bool
@@ -649,6 +648,18 @@ struct VtpExportSheet: View {
         .frame(maxHeight: embedded ? .infinity : nil)
         .onAppear { takeDetailRequest() }
         .onChange(of: ui.draftDetail) { _ in takeDetailRequest() }
+        .onChange(of: client.vtp?.sender?.id) { _ in
+            quotes = [:]
+            quoting = []
+        }
+        .onChange(of: client.currentAccountKey) { _ in
+            quotes = [:]
+            quoting = []
+            detailId = nil
+            result = nil
+            selected = []
+            touched = false
+        }
         // Khoá theo mọi nháp đủ địa chỉ (không theo cái đang hỏi), để lượt hỏi đang chạy không bị huỷ giữa chừng.
         .task(id: quoteKey) { await loadQuotes() }
     }
@@ -661,9 +672,9 @@ struct VtpExportSheet: View {
     }
 
     private var quoteKey: String {
-        guard api, client.vtp?.sender != nil else { return "" }
-        return rawGroups.filter { !$0.isBad }
-            .map { VtpQuote.signature($0, service: service) }.sorted().joined(separator: ",")
+        guard api, let senderId = client.vtp?.sender?.id else { return "" }
+        return ([client.currentAccountKey, senderId] + rawGroups.filter { !$0.isBad }
+            .map { VtpQuote.signature($0, service: service) }.sorted()).joined(separator: ",")
     }
 
     /// Nháp đủ địa chỉ chưa có cước cho gói đang chọn.
@@ -681,6 +692,7 @@ struct VtpExportSheet: View {
         let sigs = Dictionary(need.map { ($0.1.id, $0.0) }, uniquingKeysWith: { a, _ in a })
         quoting.formUnion(sigs.values)
         let r = await client.vtpQuote(service: service, groups: need.map { VtpTrack.payload($0.1) })
+        guard !Task.isCancelled else { return }
         for (key, sig) in sigs {
             quotes[sig] = r.quotes[key] ?? VtpQuote(error: r.error ?? "Không tính được cước")
         }
@@ -1018,10 +1030,15 @@ struct VtpExportSheet: View {
         return tags
     }
 
-    /// Nhãn nháp Viettel Post của khách: đã đẩy (giờ đẩy), nháp cũ, lỗi đẩy, chưa đẩy (khi đã đăng nhập).
+    /// Nhãn nháp Viettel Post của khách: đã đẩy (giờ đẩy), nháp ở tài khoản khác, nháp cũ, lỗi đẩy, chưa đẩy.
     private func draftTag(_ g: Vtp.Group) -> (String, Color, Color)? {
         switch VtpDraftBody.status(g, service: service) {
         case .pushed(_, let at):
+            if vtpDrafts.loggedInClients.count > 1,
+               let acc = g.orders.compactMap(\.ship).compactMap(\.draftAccount).first(where: { !$0.isEmpty }),
+               !vtpDrafts.current.owns(acc) {
+                return ("Nháp · khác TK", Theme.gomInk, Theme.gomTag)
+            }
             var when = ""
             if let at {
                 let d = Date(timeIntervalSince1970: at / 1000)
@@ -1188,6 +1205,12 @@ struct VtpExportSheet: View {
         let st = VtpDraftBody.status(g, service: service)
         let codes = VtpDraftBody.codes(g)
         let ship = g.orders.compactMap(\.ship).first { ($0.draftCode ?? "").isEmpty == false }
+        let otherAccount: String? = {
+            guard case .pushed = st, vtpDrafts.loggedInClients.count > 1,
+                  let acc = ship?.draftAccount, !acc.isEmpty,
+                  !vtpDrafts.current.owns(acc) else { return nil }
+            return acc
+        }()
         return detailBox("NHÁP VIETTEL POST") {
             switch st {
             case .notPushed:
@@ -1204,6 +1227,9 @@ struct VtpExportSheet: View {
                 if let acc = ship?.draftAccount, !acc.isEmpty { kv("Tài khoản", acc) }
                 if case .stale = st {
                     T("Nháp trên Viettel Post là bản cũ: đơn đã sửa hoặc thêm đơn sau khi đẩy. Đẩy lại để thay.",
+                      12.5, .bold, Theme.gomInk).fixedSize(horizontal: false, vertical: true)
+                } else if let otherAccount {
+                    T("Nháp đang nằm ở \(otherAccount), khác tài khoản đang chọn (\(vtpDrafts.current.accountLabel)).",
                       12.5, .bold, Theme.gomInk).fixedSize(horizontal: false, vertical: true)
                 } else {
                     T("✓ Khớp với đơn hiện tại", 12.5, .bold, Theme.green)
@@ -1222,6 +1248,10 @@ struct VtpExportSheet: View {
                 }
             }
             .disabled(g.isBad || deletingDrafts)
+            if otherAccount != nil {
+                OutlineButton(title: "Chuyển sang TK đang dùng", color: VtpDraftColors.brand) { pushDrafts([g]) }
+                    .disabled(g.isBad || deletingDrafts)
+            }
             if !codes.isEmpty {
                 Button { clearDraftLabel(g) } label: {
                     T("Bỏ nhãn nháp (đã tự xoá trên web)", 12.5, .bold, Theme.muted)
@@ -1282,8 +1312,8 @@ struct VtpExportSheet: View {
     /// Đẩy các khách đã chọn vào mục Đơn nháp trên Viettel Post, từ máy này. Chưa đăng nhập phần 2 thì mở màn đăng nhập.
     private func pushDrafts(_ chosen: [Vtp.Group]) {
         guard !chosen.isEmpty else { return }
-        // Tài khoản đang dùng chưa đăng nhập mà có tài khoản khác đăng nhập: dùng tài khoản đó.
-        if !vtpDraft.loggedIn || vtpDraft.sessionExpired,
+        // Tài khoản đang dùng chưa đăng nhập hoặc hết phiên mà có tài khoản khác còn phiên: dùng tài khoản đó.
+        if !vtpDrafts.current.loggedIn || vtpDrafts.current.sessionExpired,
            let other = vtpDrafts.loggedInClients.first(where: { !$0.sessionExpired }) {
             vtpDrafts.select(other.accountId)
         }

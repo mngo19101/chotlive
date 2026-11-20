@@ -15,10 +15,12 @@ enum VtpDraftColors {
 struct VtpDraftPushSheet: View {
     let groups: [Vtp.Group]
     let service: String
-    @EnvironmentObject var vtpDraft: VtpDraftClient
+    @EnvironmentObject var client: LiveClient
     @EnvironmentObject var vtpDrafts: VtpDraftHub
     @EnvironmentObject var store: Store
     @EnvironmentObject var ui: AppUI
+
+    private var active: VtpDraftClient { vtpDrafts.current }
 
     struct Outcome: Identifiable {
         var id: String          // mã khách
@@ -66,6 +68,21 @@ struct VtpDraftPushSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     accountRow
+                    if !running && !finished, let warn = partnerMismatch {
+                        VStack(alignment: .leading, spacing: 4) {
+                            T(warn, 12, .semibold, Theme.gomInk).fixedSize(horizontal: false, vertical: true)
+                            if let match = vtpDrafts.matchingPartner(client.vtp?.phone) {
+                                Button { vtpDrafts.select(match.accountId) } label: {
+                                    T("Chuyển sang \(match.accountLabel)", 12.5, .bold, Theme.accent)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.gomTag.opacity(0.6)))
+                    }
                     if running || finished { progress }
                     if let haltReason {
                         T(haltReason, 13, .bold, Theme.red).fixedSize(horizontal: false, vertical: true)
@@ -83,35 +100,72 @@ struct VtpDraftPushSheet: View {
                 .background(Theme.card.overlay(alignment: .top) { HairLine() })
         }
         .frame(height: Metrics.sheetHeight(top: UIScreen.main.bounds.height * 0.25))
+        .task(id: active.accountId) {
+            if active.loggedIn && !active.sessionExpired && (active.kho.isEmpty || !active.khoLoadedThisSession) {
+                await active.loadKho()
+            }
+        }
+    }
+
+    private var partnerMismatch: String? {
+        guard client.vtpConnected, let partner = client.vtp?.phone, !partner.isEmpty else { return nil }
+        let activeRaw = active.login.isEmpty ? active.userName : active.login
+        guard VtpDraftClient.phonesMatch(partner, activeRaw) == false else { return nil }
+        let shown = active.phone.isEmpty ? active.accountLabel : active.phone
+        return "Khác phần 1 (\(VtpMask.text(partner))): nháp sẽ vào tài khoản \(shown)."
     }
 
     private var accountRow: some View {
-        HStack(spacing: 11) {
+        let khoText = (active.loadingKho && active.selectedKho == nil)
+            ? "đang tải kho…"
+            : (active.selectedKho?.name ?? "chưa có kho")
+        return HStack(spacing: 11) {
             T("VTP", 12, .heavy, .white)
                 .frame(width: 38, height: 38)
                 .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(VtpDraftColors.brand))
             VStack(alignment: .leading, spacing: 2) {
-                T(vtpDraft.displayName.isEmpty ? (vtpDraft.phone.isEmpty ? "Tài khoản Viettel Post" : vtpDraft.phone)
-                                               : vtpDraft.displayName, 14, .bold).lineLimit(1)
-                T([vtpDraft.displayName.isEmpty ? "" : vtpDraft.phone, vtpDraft.selectedKho?.name ?? "chưa có kho"]
+                T(active.displayName.isEmpty ? (active.phone.isEmpty ? "Tài khoản Viettel Post" : active.phone)
+                                             : active.displayName, 14, .bold).lineLimit(1)
+                T([active.displayName.isEmpty ? "" : active.phone, khoText]
                     .filter { !$0.isEmpty }.joined(separator: " · "), 12, .medium, Theme.muted)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
             if !running && !finished {
                 let others = vtpDrafts.loggedInClients
-                if others.count > 1 {
-                    // Nhiều tài khoản: đổi ngay trong bảng, không phải rời bảng.
+                if others.count > 1 || active.kho.count > 1 {
+                    // Nhiều tài khoản hoặc nhiều kho: đổi ngay trong bảng, không phải rời bảng.
                     Menu {
-                        ForEach(others, id: \.accountId) { c in
-                            Button {
-                                vtpDrafts.select(c.accountId)
-                            } label: {
-                                let name = c.displayName.isEmpty ? c.accountLabel : "\(c.displayName) · \(c.phone)"
-                                if c.accountId == vtpDrafts.currentId {
-                                    Label(name, systemImage: "checkmark")
-                                } else {
-                                    Text(name)
+                        if others.count > 1 {
+                            Section("Tài khoản đẩy nháp") {
+                                ForEach(others, id: \.accountId) { c in
+                                    Button {
+                                        vtpDrafts.select(c.accountId)
+                                    } label: {
+                                        let base = c.displayName.isEmpty ? c.accountLabel : "\(c.displayName) · \(c.phone)"
+                                        let name = c.sessionExpired ? "\(base) (hết phiên)" : base
+                                        if c.accountId == vtpDrafts.currentId {
+                                            Label(name, systemImage: "checkmark")
+                                        } else {
+                                            Text(name)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if active.kho.count > 1 {
+                            Section("Kho lấy hàng") {
+                                ForEach(active.kho) { k in
+                                    Button {
+                                        active.pickKho(k.id)
+                                    } label: {
+                                        let name = k.name.isEmpty ? "Kho \(k.id)" : k.name
+                                        if k.id == active.selectedKho?.id {
+                                            Label(name, systemImage: "checkmark")
+                                        } else {
+                                            Text(name)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -204,17 +258,35 @@ struct VtpDraftPushSheet: View {
                 }
             }
         } else {
+            let canPush = !groups.isEmpty && active.loggedIn && !active.sessionExpired && active.selectedKho != nil
             VStack(spacing: 8) {
                 HStack(spacing: 10) {
                     OutlineButton(title: "Huỷ", height: 52) { ui.dismissSheet() }
                         .frame(width: (Metrics.screenWidth - 50) / 3)
-                    PrimaryButton(title: "Đẩy \(groups.count) khách", fontSize: 15,
-                                  enabled: !groups.isEmpty && vtpDraft.selectedKho != nil) {
+                    PrimaryButton(title: "Đẩy \(groups.count) khách", fontSize: 15, enabled: canPush) {
                         start()
                     }
                 }
-                if vtpDraft.selectedKho == nil {
-                    T("Chưa có kho lấy hàng cho nháp. Bấm Đổi để chọn kho.", 12.5, .semibold, Theme.red)
+                if active.sessionExpired {
+                    HStack(spacing: 6) {
+                        T("Phiên tài khoản này đã hết hạn.", 12.5, .semibold, Theme.red)
+                        Button {
+                            ui.dismissSheet()
+                            ui.push(.vtpDraft)
+                        } label: { T("Đăng nhập lại", 12.5, .bold, Theme.accent) }
+                        .buttonStyle(.plain)
+                    }
+                } else if active.loadingKho && active.selectedKho == nil {
+                    T("Đang tải kho lấy hàng…", 12.5, .medium, Theme.muted)
+                } else if active.selectedKho == nil {
+                    HStack(spacing: 6) {
+                        T("Chưa có kho lấy hàng cho nháp.", 12.5, .semibold, Theme.red)
+                        Button {
+                            let c = active
+                            Task { @MainActor in await c.loadKho() }
+                        } label: { T("Tải lại kho", 12.5, .bold, Theme.accent) }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }
@@ -223,7 +295,7 @@ struct VtpDraftPushSheet: View {
     // MARK: Chạy
 
     private func start() {
-        guard !running, let kho = vtpDraft.selectedKho else { return }
+        guard !running, active.loggedIn, !active.sessionExpired, let kho = active.selectedKho else { return }
         running = true
         stopRequested = false
         done = 0
@@ -231,7 +303,7 @@ struct VtpDraftPushSheet: View {
         haltReason = nil
         let svc = service
         // Giữ đúng tài khoản lúc bấm Đẩy cho cả lượt (đổi tài khoản giữa chừng không ảnh hưởng).
-        let client = vtpDraft
+        let client = active
         let account = client.accountLabel
         let list = groups
         Task { @MainActor in
@@ -280,15 +352,19 @@ struct VtpDraftPushSheet: View {
             break
         }
         do {
+            // Kiểm tra phiên và địa chỉ trước khi xoá nháp cũ: tránh mất nháp cũ khi địa chỉ lỗi hoặc phiên hết hạn.
+            try await client.ensureFresh()
+            let place = try await client.locate(VtpDraftBody.addressLine(g))
             // Nháp cũ: xoá trước (bằng đúng tài khoản đã đẩy) để không còn hai nháp cho cùng khách.
             // Xoá lỗi thì vẫn đẩy mới và báo để xoá tay.
             if stale {
                 let leftover = await vtpDrafts.deleteDrafts(of: g)
-                if !leftover.isEmpty {
+                if leftover.isEmpty {
+                    store.clearDraft(g.orders)
+                } else {
                     out.note = "Chưa xoá được nháp cũ \(leftover.map(\.code).joined(separator: ", ")) trên Viettel Post, hãy xoá tay trên web."
                 }
             }
-            let place = try await client.locate(VtpDraftBody.addressLine(g))
             let body = VtpDraftBody.make(g, kho: kho, place: place, service: service)
             let code = try await client.insertDraft(body)
             store.markDraft(g.orders, code: code, hash: VtpDraftBody.hash(g, service: service), account: account)
