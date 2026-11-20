@@ -47,8 +47,9 @@ final class VtpDraftHub: ObservableObject {
             list = kept
         }
         clients = list
-        currentByApp = (defaults.dictionary(forKey: Keys.currentByApp) as? [String: String]) ?? [:]
-        let forApp = appAccount.flatMap { currentByApp[$0] }
+        let byApp = (defaults.dictionary(forKey: Keys.currentByApp) as? [String: String]) ?? [:]
+        currentByApp = byApp
+        let forApp = appAccount.flatMap { byApp[$0] }
         let want = (forApp.flatMap { id in list.contains(where: { $0.accountId == id && $0.loggedIn }) ? id : nil })
             ?? defaults.string(forKey: Keys.current)
         currentId = list.first { $0.accountId == want }?.accountId

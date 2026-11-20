@@ -321,7 +321,7 @@ final class VtpDraftTests: XCTestCase {
     @MainActor
     func testReloginWithDifferentAccountClearsOldKho() async {
         let mock = MockVtp()
-        let tk1 = jwt(expiresIn: 3600), tk2 = jwt(expiresIn: 3600)
+        let tk1 = jwt(expiresIn: 3600), tk2 = jwt(expiresIn: 7200)
         mock.handler = { req in
             let reqBody = VtpJ.dict(VtpJ.obj(req.httpBody ?? Data())) ?? [:]
             switch req.url!.path {
