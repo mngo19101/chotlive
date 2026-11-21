@@ -660,7 +660,9 @@ private fun Hint(range: Pair<LocalDate, LocalDate>?, hasEnd: Boolean, fromMinute
         }
     }
     Row(
-        Modifier.padding(top = 8.dp).fillMaxWidth().heightIn(min = 42.dp).clip(rounded(12f))
+        // Cao cố định đủ hai dòng: gợi ý đổi từ hai dòng xuống một khi chạm ngày đầu sẽ làm cả bảng dịch xuống
+        // giữa lúc đang kéo, và ngón tay rơi sang hàng ngày khác.
+        Modifier.padding(top = 8.dp).fillMaxWidth().height(70.dp).clip(rounded(12f))
             .background(if (done) C.peachSoft else C.field).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
