@@ -15,7 +15,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Token đăng nhập được mã hoá bằng khoá nằm trong Android Keystore (tương tự Keychain bên iPhone). */
-private object TokenVault {
+internal object TokenVault {
     private const val ALIAS = "chotlive.auth"
 
     private fun key(): SecretKey {

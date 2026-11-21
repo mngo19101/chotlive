@@ -142,6 +142,18 @@ data class ShipInfo(
     /** Đơn "chưa rõ vận đơn": mã Viettel Post vừa báo qua webhook mà chưa đơn nào nhận (máy chủ gợi ý, shop xác nhận). */
     val vtpHint: String? = null,
     val vtpHintCod: Int? = null,
+    // Nháp Viettel Post do app đẩy từ máy (VtpDraftClient). App ghi, máy chủ chỉ lưu và đồng bộ.
+    // Phải có ở đây: thiếu thì sửa đơn trên Android sẽ gửi ship không có các trường này và máy chủ xoá nhãn nháp
+    // do iPhone đẩy.
+    /** Mã nháp Viettel Post cấp (ORDER_NUMBER). Mọi đơn của khách trong cùng nháp mang cùng mã. */
+    val draftCode: String? = null,
+    val draftAt: Long? = null,
+    /** Băm nội dung đã đẩy (VtpDraftBody.hash): khác bản hiện tại là nháp trên Viettel Post đã cũ. */
+    val draftHash: String? = null,
+    /** Tài khoản Viettel Post đã đẩy, đã che (0987 *** 321). */
+    val draftAccount: String? = null,
+    val draftError: String? = null,
+    val draftErrorAt: Long? = null,
 )
 
 enum class OrderStatus(val label: String) {

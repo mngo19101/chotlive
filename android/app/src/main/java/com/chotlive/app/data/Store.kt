@@ -511,6 +511,9 @@ class Store(private val directory: File, account: String?) {
                 state = state.raw,
                 deposit = if (i > 0) 0 else base.deposit,
                 vtpOldCode = old?.vtpOldCode, vtpKind = old?.vtpKind, vtpError = old?.vtpError, vtpErrorAt = old?.vtpErrorAt,
+                // Giữ mã nháp Viettel Post: sửa đơn xong vẫn phải biết nháp cũ để xoá hoặc báo "nháp cũ".
+                draftCode = old?.draftCode, draftAt = old?.draftAt, draftHash = old?.draftHash,
+                draftAccount = old?.draftAccount, draftError = old?.draftError, draftErrorAt = old?.draftErrorAt,
                 exportedAt = null, batchId = null,
             )
         }
@@ -550,10 +553,14 @@ class Store(private val directory: File, account: String?) {
 
     // Ghi kết quả Viettel Post lên máy ngay, không chờ máy chủ đồng bộ về.
 
-    fun applyVtpCreated(orders: List<Order>, code: String, fee: Int, service: String, now: Long = Clock.now, cod: Int? = null, goods: Int? = null) {
-        val batch = "vtp_" + now.toString(36)
+    fun applyVtpCreated(
+        orders: List<Order>, code: String, fee: Int, service: String, now: Long = Clock.now, cod: Int? = null, goods: Int? = null,
+        /** Vận đơn có từ duyệt nháp (giữ nguyên mã nháp). */
+        fromDraft: Boolean = false, batchId: String? = null,
+    ) {
+        val batch = batchId ?: ((if (fromDraft) "vtpd_" else "vtp_") + now.toString(36))
         setShip(orders.associate { o ->
-            o.id to (o.ship ?: ShipInfo()).copy(
+            o.id to (order(o.id)?.ship ?: o.ship ?: ShipInfo()).copy(
                 state = ShipState.EXPORTED.raw, exportedAt = now, batchId = batch,
                 vtpCode = code, vtpFee = fee, vtpService = service, vtpStatus = 0, vtpStatusName = "Chờ lấy hàng",
                 vtpStatusAt = now, vtpKind = "created", vtpNote = null, vtpError = null, vtpErrorAt = null,
@@ -564,7 +571,25 @@ class Store(private val directory: File, account: String?) {
     }
 
     fun applyVtpError(orders: List<Order>, error: String, now: Long = Clock.now) {
-        setShip(orders.associate { o -> o.id to (o.ship ?: ShipInfo()).copy(vtpError = error, vtpErrorAt = now) })
+        setShip(orders.associate { o -> o.id to (order(o.id)?.ship ?: o.ship ?: ShipInfo()).copy(vtpError = error, vtpErrorAt = now) })
+    }
+
+    // MARK: - Nháp Viettel Post (đẩy từ máy)
+
+    /** Đẩy nháp thành công: mọi đơn của khách trong lần đẩy mang cùng mã nháp và băm nội dung đã gửi. */
+    fun markDraft(orders: List<Order>, code: String, hash: String, account: String, now: Long = Clock.now) =
+        editDraft(orders) { it.copy(draftCode = code, draftHash = hash, draftAccount = account, draftAt = now, draftError = null, draftErrorAt = null) }
+
+    /** Đẩy nháp lỗi: ghi lý do, KHÔNG đụng mã nháp cũ (nếu có) để còn xoá được. */
+    fun markDraftError(orders: List<Order>, error: String, now: Long = Clock.now) =
+        editDraft(orders) { it.copy(draftError = error.take(200), draftErrorAt = now) }
+
+    /** Bỏ nhãn nháp (đã xoá trên Viettel Post, hoặc người dùng tự xoá trên web): đơn về "Chưa đẩy". */
+    fun clearDraft(orders: List<Order>) =
+        editDraft(orders) { it.copy(draftCode = null, draftHash = null, draftAccount = null, draftAt = null, draftError = null, draftErrorAt = null) }
+
+    private fun editDraft(orders: List<Order>, edit: (ShipInfo) -> ShipInfo) {
+        setShip(orders.associate { o -> o.id to edit(order(o.id)?.ship ?: o.ship ?: ShipInfo()) })
     }
 
     /** Huỷ vận đơn xong: đơn về Chờ gửi, giữ mã cũ để tra (giống máy chủ). */

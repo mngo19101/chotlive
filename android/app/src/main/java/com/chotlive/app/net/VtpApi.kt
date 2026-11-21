@@ -57,6 +57,8 @@ data class VtpCreateResult(
     val key: String, val ok: Boolean, val code: String = "", val fee: Int = 0, val already: Boolean = false, val error: String = "",
     /** Tiền thu hộ / giá trị hàng máy chủ đã gửi Viettel Post (null: máy chủ bản cũ chưa trả). */
     val cod: Int? = null, val goods: Int? = null,
+    /** Vận đơn có từ duyệt nháp Viettel Post (giữ nguyên mã nháp). */
+    val fromDraft: Boolean = false,
 ) {
     companion object {
         fun from(d: JsonObject): VtpCreateResult {
@@ -64,7 +66,7 @@ data class VtpCreateResult(
             return VtpCreateResult(
                 key = d.text("key") ?: "", ok = ok, code = d.text("code") ?: "", fee = d.num("fee")?.toInt() ?: 0,
                 already = d.bool("already") ?: false, error = d.text("error") ?: if (ok) "" else "Lỗi không rõ",
-                cod = d.num("cod")?.toInt(), goods = d.num("goods")?.toInt(),
+                cod = d.num("cod")?.toInt(), goods = d.num("goods")?.toInt(), fromDraft = d.bool("fromDraft") ?: false,
             )
         }
     }
@@ -184,3 +186,18 @@ suspend fun LiveClient.vtpResolve(code: String, type: Int, note: String): String
     val r = apiCall("/api/vtp/resolve", "POST", buildJsonObject { put("code", code); put("type", type); put("note", note) }, 30)
     return if (r == null || r.first != 200) errorText(r, "Viettel Post không nhận yêu cầu") else null
 }
+
+private suspend fun LiveClient.vtpDraftServerCall(path: String, service: String, groups: List<JsonObject>, timeoutSec: Long,
+                                                  fallback: String): Triple<Int, String?, List<VtpCreateResult>> {
+    val r = apiCall(path, "POST", groupsBody(service, groups), timeoutSec) ?: return Triple(0, errorText(null, fallback), emptyList())
+    if (r.first != 200) return Triple(r.first, errorText(r, fallback), emptyList())
+    return Triple(200, null, r.second.arr("results")?.mapNotNull { it.asObj()?.let(VtpCreateResult::from) } ?: emptyList())
+}
+
+/** Ghi nhận nháp đã được duyệt ngay trên máy lên máy chủ (để đồng bộ, in tem và nhận webhook). */
+suspend fun LiveClient.vtpAdoptDraft(service: String, groups: List<JsonObject>) =
+    vtpDraftServerCall("/api/vtp/adopt-draft", service, groups, 20L + groups.size * 5, "Không ghi được vận đơn đã duyệt")
+
+/** Nhờ máy chủ duyệt nháp qua API đối tác (UpdateOrder TYPE 1) khi máy này không có phiên phần 2 phù hợp. */
+suspend fun LiveClient.vtpApproveDraft(service: String, groups: List<JsonObject>) =
+    vtpDraftServerCall("/api/vtp/approve-draft", service, groups, 30L + groups.size * 10, "Không duyệt được nháp")
