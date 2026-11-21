@@ -175,7 +175,7 @@ router.post('/api/admin/users/:id/plan', requireAdmin, (req, res) => {
   if (!validPlanMonths(months)) {
     return res.status(400).json({ error: 'Số tháng của gói không hợp lệ.' });
   }
-  target.planEndsAt = extendedPlanEnd(target.planEndsAt, months);
+  target.planEndsAt = extendedPlanEnd(target.planEndsAt, months, Date.now(), target.trialEndsAt);
   finishPlanChange(res, target);
 });
 

@@ -112,7 +112,7 @@ Vào **Tôi › Máy in › Tìm máy in**, chọn máy rồi bấm **In thử**
 ## 7. Dùng thử và gói
 
 - Tài khoản mới được **3 ngày dùng thử**. Hết hạn thì không theo dõi được live (live đang chạy cũng dừng); đơn hàng, khách hàng, in tem và lịch sử bình luận vẫn dùng bình thường.
-- **Cấp gói:** đăng nhập admin, vào **Tôi → Quản lý Tài khoản**, bấm **Cấp gói** ở tài khoản cần cấp. Gói còn hạn thì được cộng nối tiếp. Một tháng tính là 30 ngày.
+- **Cấp gói:** đăng nhập admin, vào **Tôi → Quản lý Tài khoản**, bấm **Cấp gói** ở tài khoản cần cấp. Gói còn hạn, hoặc tài khoản còn dùng thử, thì gói mới được cộng nối tiếp sau ngày hết hạn đó. Một tháng tính là 30 ngày.
 - **Mỗi IP chỉ tự đăng ký được 2 tài khoản**, xoá tài khoản không trả lại lượt. Khách dùng chung IP (4G, cùng công ty) mà hết lượt thì admin tạo tài khoản giúp ở nút **Tạo tài khoản mới**.
 - Đặt đúng `TRUST_PROXY` (xem `.env.example`), nếu không mọi khách sẽ bị tính chung một IP.
 

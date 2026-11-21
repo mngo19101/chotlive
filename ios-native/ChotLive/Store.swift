@@ -16,6 +16,14 @@ final class Store: ObservableObject {
     @Published var keywords: [String] = Store.defaultKeywords {
         didSet { rebuildKeywordCache() }
     }
+    static let autoClosingKey = "autoClosing"
+    /// Tôi › Từ khoá chốt đơn › "Tự nhận bình luận chốt". Tắt thì chỉ bình luận đã in mới tính là chốt. Lưu trên máy này.
+    @Published var autoClosing: Bool = UserDefaults.standard.object(forKey: Store.autoClosingKey) as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(autoClosing, forKey: Store.autoClosingKey)
+            closingCache.removeAll(keepingCapacity: true)
+        }
+    }
     /// Báo cho người dùng khi không đọc hoặc không ghi được dữ liệu.
     @Published var storageWarning: String?
 
@@ -152,6 +160,7 @@ final class Store: ObservableObject {
     /// Bình luận chốt đơn: đã chốt tay, có từ khoá chốt, hoặc chỉ ghi mã. "Mã 130 giá sao" chỉ là hỏi giá.
     func isClosingComment(_ c: LiveComment) -> Bool {
         if c.printed { return true }
+        if !autoClosing { return false }
         if let hit = closingCache[c.text] { return hit }
         let text = PriceParser.stripAccents(c.text.lowercased())
         let matched = normalizedKeywords.contains(where: { text.contains($0) }) || PriceParser.isOnlyCodes(c.text)

@@ -623,7 +623,11 @@
             <div class="settings-pane" data-pane-id="keywords">
               <div class="settings-pane-card">
                 <h2 class="pane-title">Từ khoá chốt đơn</h2>
-                <div class="form-field-group">
+                <label class="switch-row">
+                  <span><b>Tự nhận bình luận chốt</b><small>Bình luận có từ khoá hoặc chỉ ghi mã được đưa vào mục “Chốt đơn” và có chuông. Tắt thì chỉ bình luận đã bấm In mới tính là chốt.</small></span>
+                  <input type="checkbox" class="chk-custom" id="cfg-kw-auto" checked />
+                </label>
+                <div class="form-field-group" id="cfg-kw-auto-fields">
                   <label for="cfg-kw-triggers">Từ khoá nhận diện chốt đơn</label>
                   <input type="text" class="form-field-input" id="cfg-kw-triggers" placeholder="chốt, lấy" />
                   <p class="form-hint">Cách nhau bằng dấu phẩy. Dùng cho bộ lọc “Chốt đơn” ở tab Bình luận.</p>
@@ -678,8 +682,7 @@
                   <span><b>Đọc đơn bằng giọng nói tiếng Việt</b><small>Tự đọc to, ví dụ “Linh Nguyễn chốt mã 150”</small></span>
                   <input type="checkbox" class="chk-custom" id="cfg-notify-voice" />
                 </label>
-                <div class="btn-row"><button type="button" class="btn-outline-pill" id="btn-test-voice">Thử giọng đọc</button></div>
-              </div>
+                <div class="btn-row"><button type="button" class="btn-outline-pill" id="btn-test-voice">Thử giọng đọc</button></div>              </div>
             </div>
 
             <!-- Đồng bộ -->
@@ -1153,7 +1156,7 @@
           <option value="6">6 tháng (180 ngày)</option>
           <option value="12">12 tháng (360 ngày)</option>
         </select>
-        <p class="form-hint">Gói còn hạn thì được cộng nối tiếp vào ngày hết hạn hiện tại.</p>
+        <p class="form-hint">Gói hoặc dùng thử còn hạn thì gói mới được cộng nối tiếp sau ngày hết hạn đó.</p>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn-outline-pill btn-detail-del" id="btn-revoke-admin-plan" style="display:none;margin-right:auto">Thu hồi gói</button>

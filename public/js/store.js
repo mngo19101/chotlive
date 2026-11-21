@@ -3,7 +3,7 @@
  * Hỗ trợ: Lưu CarID TikTok, Gom đơn theo khách hàng, Lưu danh sách từng sản phẩm đã mua,
  * và đồng bộ 2 chiều thời gian thực qua Server.
  */
-import { TRACKED, countPending, emptyPending, overlayPending, recordChanges, snapshotOf } from './pending.js';
+import { TRACKED, countPending, emptyPending, overlayPending, pendingSettingKeys, recordChanges, snapshotOf } from './pending.js';
 import { vtpAttemptOpen } from './vtp-export.js';
 
 const KEY = 'susu_chotdon.v5';
@@ -471,6 +471,15 @@ export function pendingChangesPayload() {
   return out;
 }
 
+/** Chỉ các mục cài đặt máy này vừa đổi, để không ghi đè mục máy khác vừa đổi trên server. */
+export function pendingSettingsPayload() {
+  const out = {};
+  for (const k of pendingSettingKeys(pending)) {
+    if (state.settings && k in state.settings) out[k] = state.settings[k];
+  }
+  return out;
+}
+
 /**
  * Trong lúc máy này còn thay đổi chưa gửi xong, bản ghi đó trên server lại vừa đổi (thiết bị khác sửa):
  * máy này đang giữ bản của mình nên chưa thấy phần họ sửa. Gửi xong phải tải lại để hai bên khớp nhau.
@@ -549,7 +558,9 @@ export function applyRemoteState(remote, action = 'remote') {
     if (remote.settings && typeof remote.settings === 'object') {
       // Địa chỉ server là của riêng thiết bị này.
       const keepServerUrl = state.settings?.serverUrl || '';
-      state.settings = { ...state.settings, ...remote.settings, serverUrl: keepServerUrl };
+      // Mục máy này vừa đổi mà server chưa nhận thì giữ bản của máy này.
+      const mine = Object.fromEntries(pendingSettingKeys(pending).filter((k) => k in (state.settings || {})).map((k) => [k, state.settings[k]]));
+      state.settings = { ...state.settings, ...remote.settings, ...mine, serverUrl: keepServerUrl };
     }
     if (Array.isArray(remote.accounts) && state.settings) {
       state.settings.accounts = state.accounts;

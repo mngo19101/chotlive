@@ -16,12 +16,13 @@ export const MAX_COMMENT_CHARS = 500;
 export const stripAccents = (s) =>
   String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
 
-function escapeRegExp(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
+/**
+ * Sau "tr", "triệu", "củ" được cách một dấu cách trước phần lẻ: "1 triệu 2" = 1.200.000.
+ * Không tính khi số đó là số lượng hoặc một giá khác: "1tr 2 cái", "1tr 200k".
+ * Giống regex của PriceParser trên app iPhone và Android.
+ */
 const RE =
-  /(?<![a-z\d])(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(\d{1,3})?(?![a-z\d])/g;
+  /(?<![a-z\d])(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(?:(?<=tr|ieu|cu)\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3})?(?![a-z\d])/g;
 
 /**
  * Số điện thoại Việt Nam (0… hoặc +84…), kể cả viết tách bằng dấu cách, chấm, gạch:
@@ -69,10 +70,11 @@ export function isInquiry(comment = '') {
  */
 export function parsePriceWithMatch(text, opts = {}) {
   const { multiplier = 1000, minPrice = 1, maxPrice = 50000000 } = opts;
-  if (!text) return { price: null, matchText: '' };
+  if (!text) return { price: null, matchText: '', index: -1 };
   const s = maskPhones(stripAccents(String(text).toLowerCase()));
   let best = null;
   let bestMatch = '';
+  let bestIndex = -1;
 
   for (const m of s.matchAll(RE)) {
     const [rawMatch, rawNum, unit = '', trail = ''] = m;
@@ -102,9 +104,10 @@ export function parsePriceWithMatch(text, opts = {}) {
     if (best === null || v > best) {
       best = v;
       bestMatch = rawMatch;
+      bestIndex = m.index;
     }
   }
-  return { price: best, matchText: bestMatch };
+  return { price: best, matchText: bestMatch, index: bestIndex };
 }
 
 /**
@@ -173,8 +176,31 @@ export function formatPhone(p) {
 /**
  * Trích xuất thông tin: Tên sản phẩm, Số lượng, SĐT, Loại bình luận (địa chỉ do shop tự nhập)
  */
+const QTY_UNIT = '(?:cái|chiếc|đôi|bộ|hộp|set|kg)';
+const QTY_RE = new RegExp(`(?:chốt|lấy|mua|cho em|cho e|cho chị|cho c)\\s+(\\d{1,2})(\\s*${QTY_UNIT})?(?![\\p{L}\\d])`, 'iu');
+/** "350k x2", "x 3", "×2": số lượng ghi sau chữ x. */
+const TIMES_QTY_RE = /(?:^|[\s\dk])[x×]\s?(\d{1,2})(?!\d)/i;
+
+/**
+ * Số lượng trong bình luận. Số ngay sau "chốt/lấy/mua" chỉ là số lượng khi có chữ "cái/đôi..." đi kèm,
+ * hoặc khi bỏ số đó đi vẫn còn nguyên giá: "chốt 2 áo 150k" là 2 cái, còn "chốt 99" là giá 99k, 1 cái.
+ */
+function quantityOf(str) {
+  const m = QTY_RE.exec(str);
+  if (m) {
+    const n = Math.max(1, parseInt(m[1], 10));
+    if (m[2]) return n;
+    const at = m.index + m[0].length - m[1].length;
+    const rest = str.slice(0, at) + str.slice(at + m[1].length);
+    const full = parsePrice(str);
+    if (full && parsePrice(rest) === full) return n;
+  }
+  const t = TIMES_QTY_RE.exec(str);
+  return t ? Math.max(1, parseInt(t[1], 10)) : 1;
+}
+
 export function extractProductInfo(comment = '', price = 0) {
-  const text = String(comment).trim().slice(0, MAX_COMMENT_CHARS);
+  const text = String(comment).normalize('NFC').trim().slice(0, MAX_COMMENT_CHARS);
   let str = text;
   const isQuestion = isInquiry(str);
 
@@ -187,14 +213,16 @@ export function extractProductInfo(comment = '', price = 0) {
   }
 
   // 2. Nhận diện số lượng: "chốt 2 cái", "lấy 3 đôi", "cho e 2 áo"
-  const qtyMatch = str.match(/(?:chốt|lấy|mua|cho em|cho e|cho chị|cho c)\s+(\d{1,2})\s*(?:cái|chiếc|đôi|bộ|hộp|set|kg)?\b/i);
-  const quantity = qtyMatch ? Math.max(1, parseInt(qtyMatch[1], 10)) : 1;
+  const quantity = quantityOf(str);
 
-  // 3. Chỉ xoá cụm giá tiền đã nhận diện (giữ nguyên size 2, max 3)
-  const { matchText } = parsePriceWithMatch(str);
-  if (matchText) {
-    str = str.replace(new RegExp(escapeRegExp(matchText), 'i'), '');
+  // 3. Chỉ xoá cụm giá tiền đã nhận diện (giữ nguyên size 2, max 3).
+  // Số đứng sau "mã" là mã sản phẩm: "chốt mã 268" giữ tên "Mã 268".
+  // Vị trí lấy từ chuỗi đã bỏ dấu: chuỗi NFC bỏ dấu vẫn đủ số ký tự nên cắt thẳng trên chuỗi gốc được.
+  const { matchText, index } = parsePriceWithMatch(str);
+  if (matchText && index >= 0 && !CODE_BEFORE.test(stripAccents(str.slice(0, index)).toLowerCase())) {
+    str = str.slice(0, index) + str.slice(index + matchText.length);
   }
+  str = str.replace(TIMES_QTY_RE, (m) => m.replace(/[x×]\s?\d{1,2}$/i, ''));
 
   // 4. Làm sạch từ khóa chốt đơn thông dụng
   let cleaned = str

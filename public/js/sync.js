@@ -16,6 +16,7 @@ import {
   markPendingSynced,
   pendingChangeCount,
   pendingChangesPayload,
+  pendingSettingsPayload,
   takeShadowedRemote
 } from './store.js';
 
@@ -24,12 +25,16 @@ const CLIENT_ID_KEY = 'susu_sync_client_id';
 const AUTH_TOKEN_KEY = 'susu_auth_token';
 const AUTH_USER_KEY = 'susu_auth_user';
 
+/**
+ * Mỗi tab một mã: thay đổi mang mã của chính tab thì bỏ qua (tab đã có sẵn). Lưu chung localStorage thì
+ * hai tab cùng trình duyệt có cùng mã và bỏ qua thay đổi của nhau, nên giữ trong sessionStorage (riêng từng tab).
+ */
 function getOrCreateClientId() {
   try {
-    let cid = localStorage.getItem(CLIENT_ID_KEY);
+    let cid = sessionStorage.getItem(CLIENT_ID_KEY);
     if (!cid) {
       cid = 'web_' + Math.random().toString(36).slice(2, 10);
-      localStorage.setItem(CLIENT_ID_KEY, cid);
+      sessionStorage.setItem(CLIENT_ID_KEY, cid);
     }
     return cid;
   } catch {
@@ -305,7 +310,8 @@ function buildPayload(currentState) {
   // gửi cả danh sách như trước sẽ ghi đè và làm mất bình luận của thiết bị khác.
   // Đơn, khách và ID TikTok: chỉ gửi bản ghi máy này vừa đổi hoặc xoá (`changes`), không gửi cả danh sách.
   // Gửi cả danh sách thì đơn điện thoại vừa thêm mà web chưa kịp nhận sẽ bị ghi đè mất trên server.
-  const { serverUrl: _deviceOnly, accounts: _tracked, ...settings } = currentState.settings || {};
+  // Cài đặt cũng chỉ gửi mục vừa đổi: gửi cả bộ thì máy đang giữ bản cũ ghi đè mục máy khác vừa đổi.
+  const settings = pendingSettingsPayload();
   return {
     isCleanAccount: currentState.isCleanAccount,
     changes: pendingChangesPayload(),

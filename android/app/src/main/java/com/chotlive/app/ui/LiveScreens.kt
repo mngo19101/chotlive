@@ -634,9 +634,9 @@ fun SessionDetailScreen(sessionId: String) {
         if (cu == null || session == null || cu.items.isEmpty()) return false
         return Clock.day(cu.firstTs) == Clock.day(session.start)
     }
-    val closingCount = remember(all, store.keywords) { all.count { store.isClosingComment(it) } }
+    val closingCount = remember(all, store.keywords, store.autoClosing) { all.count { store.isClosingComment(it) } }
     val newCustomers = remember(all, map) { all.mapNotNull { c -> owner(c)?.takeIf { isNew(it) }?.id }.toSet().size }
-    val shown = remember(all, tab, search, map, store.keywords) {
+    val shown = remember(all, tab, search, map, store.keywords, store.autoClosing) {
         var list = all
         when (tab) {
             1 -> list = list.filter { store.isClosingComment(it) }

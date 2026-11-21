@@ -52,9 +52,12 @@ export function validPlanMonths(months) {
   return Number.isInteger(months) && months >= 1 && months <= MAX_PLAN_MONTHS;
 }
 
-/** Còn hạn thì cộng nối tiếp, đã hết hạn thì tính từ lúc cấp. Trả về mốc hết hạn mới. */
-export function extendedPlanEnd(currentEnd, months, now = Date.now()) {
-  const from = isTime(currentEnd) && currentEnd > now ? currentEnd : now;
+/**
+ * Gói còn hạn thì cộng nối tiếp; đang dùng thử thì gói bắt đầu khi dùng thử hết, shop không mất ngày dùng thử;
+ * đã hết hạn thì tính từ lúc cấp. Trả về mốc hết hạn mới.
+ */
+export function extendedPlanEnd(currentEnd, months, now = Date.now(), trialEnd = null) {
+  const from = Math.max(now, isTime(currentEnd) ? currentEnd : now, isTime(trialEnd) ? trialEnd : now);
   return Math.min(from + months * PLAN_MONTH_DAYS * DAY_MS, now + MAX_PLAN_TOTAL_MS);
 }
 

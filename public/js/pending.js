@@ -10,9 +10,15 @@ export const TRACKED = ['orders', 'customers', 'accounts'];
 /** Danh sách mới đưa lên đầu, riêng ID TikTok thêm vào cuối như khi tạo. */
 const APPEND_NEW = new Set(['accounts']);
 
+/** Cài đặt riêng của từng máy, không gửi lên server. */
+const DEVICE_SETTINGS = new Set(['serverUrl', 'accounts']);
+
 export function emptyPending(owner = '') {
-  return { owner, changes: {} };
+  return { owner, changes: {}, settings: [] };
 }
+
+/** Các mục cài đặt máy này vừa đổi mà server chưa nhận. */
+export const pendingSettingKeys = (pending) => (Array.isArray(pending?.settings) ? pending.settings : []);
 
 export function snapshotOf(state) {
   const snap = {};
@@ -23,6 +29,12 @@ export function snapshotOf(state) {
     }
     snap[coll] = byId;
   }
+  // Cài đặt cũng tính theo từng mục: gửi cả bộ thì máy đang giữ bản cũ sẽ ghi đè mục máy khác vừa đổi.
+  const settings = new Map();
+  for (const [k, v] of Object.entries(state?.settings || {})) {
+    if (!DEVICE_SETTINGS.has(k)) settings.set(k, JSON.stringify(v));
+  }
+  snap.settings = settings;
   return snap;
 }
 
@@ -47,13 +59,20 @@ export function recordChanges(pending, base, next) {
     if (upsert.size || remove.size) pending.changes[coll] = { upsert: [...upsert], remove: [...remove] };
     else delete pending.changes[coll];
   }
+  const keys = new Set(pendingSettingKeys(pending));
+  for (const [k, json] of next.settings || []) {
+    if (base.settings?.get(k) === json || keys.has(k)) continue;
+    keys.add(k);
+    changed = true;
+  }
+  pending.settings = [...keys];
   return changed;
 }
 
 export function countPending(pending) {
   let n = 0;
   for (const c of Object.values(pending?.changes || {})) n += c.upsert.length + c.remove.length;
-  return n;
+  return n + pendingSettingKeys(pending).length;
 }
 
 /**

@@ -453,39 +453,54 @@ struct KeywordsView: View {
         SubPage(title: "Từ khoá chốt đơn") {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Metrics.gap) {
-                    T("Bình luận chứa một trong các từ khoá này, hoặc chỉ ghi mã, được coi là bình luận chốt đơn.", 13, .medium, Theme.muted)
-                    HStack(spacing: 8) {
-                        TextField("Thêm từ khoá", text: $draft)
-                            .font(.bv(15, .semibold))
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .onSubmit { add() }
-                            .padding(.horizontal, 15)
-                            .frame(height: 44)
-                            .cardStyle(14)
-                        CircleButton(icon: .plus) { add() }
-                    }
-                    VStack(spacing: 0) {
-                        ForEach(Array(store.keywords.enumerated()), id: \.element) { index, k in
-                            if index > 0 { HairLine() }
-                            HStack {
-                                T(k, 15, .semibold).lineLimit(1)
-                                Spacer()
-                                Button { store.setKeywords(store.keywords.filter { $0 != k }) } label: {
-                                    Icon(name: .close, size: 16, color: Theme.muted).frame(width: 34, height: 34)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.horizontal, 17)
-                            .frame(height: 52)
-                        }
-                    }
-                    .cardStyle(20)
+                    // Một dòng gọn như dòng từ khoá bên dưới, không chiếm thêm màn hình.
+                    Toggle(isOn: $store.autoClosing) { T("Tự nhận bình luận chốt", 15, .semibold) }
+                        .tint(Theme.orange)
+                        .padding(.horizontal, 17)
+                        .frame(height: 52)
+                        .cardStyle(20)
+                    T(store.autoClosing
+                      ? "Bình luận chứa một trong các từ khoá này, hoặc chỉ ghi mã, được coi là bình luận chốt đơn."
+                      : "Đang tắt: chỉ bình luận đã bấm In mới tính là chốt. Từ khoá vẫn giữ để bật lại.", 13, .medium, Theme.muted)
+                    keywordList
+                        .opacity(store.autoClosing ? 1 : 0.45)
                 }
                 .padding(.horizontal, Metrics.gutter)
                 .padding(.bottom, 16)
             }
             .scrollDismissesKeyboard(.interactively)
+        }
+    }
+
+    private var keywordList: some View {
+        VStack(alignment: .leading, spacing: Metrics.gap) {
+            HStack(spacing: 8) {
+                TextField("Thêm từ khoá", text: $draft)
+                    .font(.bv(15, .semibold))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .onSubmit { add() }
+                    .padding(.horizontal, 15)
+                    .frame(height: 44)
+                    .cardStyle(14)
+                CircleButton(icon: .plus) { add() }
+            }
+            VStack(spacing: 0) {
+                ForEach(Array(store.keywords.enumerated()), id: \.element) { index, k in
+                    if index > 0 { HairLine() }
+                    HStack {
+                        T(k, 15, .semibold).lineLimit(1)
+                        Spacer()
+                        Button { store.setKeywords(store.keywords.filter { $0 != k }) } label: {
+                            Icon(name: .close, size: 16, color: Theme.muted).frame(width: 34, height: 34)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 17)
+                    .frame(height: 52)
+                }
+            }
+            .cardStyle(20)
         }
     }
 

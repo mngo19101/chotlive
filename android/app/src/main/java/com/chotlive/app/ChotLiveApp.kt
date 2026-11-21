@@ -48,6 +48,7 @@ class ChotLiveApp : Application() {
         auth = AuthStorage(this)
         notifier = SupportNotifier(this)
         store = Store(filesDir, auth.currentAccountKey())
+        store.autoClosing = settings.autoClosing
         client = LiveClient(auth) { notifier.notify(it) }
         printer = PrinterManager(this)
         tickets = TicketRenderer(this, { settings.paperWidth }, { settings.shopName })

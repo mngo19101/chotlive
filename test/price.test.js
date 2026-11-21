@@ -38,6 +38,11 @@ const PRICE_VECTORS = [
   ['lấy 2 cái 150', 150000],
   ['mã 090 150 180', 180000],
   ['cho em xin giá', null],
+  ['1 triệu 2', 1200000],
+  ['1 triệu 250', 1250000],
+  ['1tr 2 cái', 1000000],
+  ['1tr 200k', 1000000],
+  ['giá 1 triệu.', 1000000],
   ['', null],
 ];
 
@@ -122,4 +127,34 @@ test('BL-13: ô COD và tiền cọc trên web là ô chữ, để trình duyệ
   }
   const app = readFileSync(new URL('../public/js/app.js', import.meta.url), 'utf8');
   assert.match(app, /const moneyInput = \(el\) => parseMoneyInput\(el\.value\);/);
+});
+
+test('số lượng: giá 1-2 chữ số sau "chốt/lấy" không bị đọc thành số lượng ("chốt 99" là 1 cái 99k)', () => {
+  const qty = (text) => price.extractProductInfo(text, parsePrice(text)).quantity;
+  for (const text of ['chốt 99', 'chốt 50', 'lấy 85', 'cho em 99', 'chốt 5', 'mua 45k', 'chốt 99k']) assert.equal(qty(text), 1, text);
+  assert.equal(qty('chốt 2 cái 99'), 2);
+  assert.equal(qty('lấy 2 cái 120'), 2);
+  assert.equal(qty('chốt 2cái 99'), 2);
+  assert.equal(qty('chốt 2 áo 150k'), 2);
+  assert.equal(qty('chốt 2 99k'), 2);
+  assert.equal(qty('350k x2'), 2);
+  assert.equal(qty('350k x 3'), 3);
+  assert.equal(qty('mix2 150k'), 1);
+});
+
+test('tên món: số sau "mã" giữ lại làm tên, giá có dấu vẫn được bỏ khỏi tên', () => {
+  const name = (text) => price.extractProductInfo(text, parsePrice(text)).productName;
+  assert.equal(name('Chốt mã 268'), 'Mã 268');
+  assert.equal(name('chốt mã 15 giá 250k'), 'Mã 15');
+  assert.equal(name('đầm hoa 350 size L'), 'Đầm hoa size L');
+  assert.equal(name('chốt áo 150k'), 'Áo');
+  assert.equal(name('chốt áo 1 triệu 2'), 'Áo');
+  assert.equal(name('váy 150.000đ'), 'Váy');
+});
+
+test('in tem trên web đọc lại số lượng từ nội dung bình luận, không tin số lượng đã lưu', () => {
+  const src = readFileSync(new URL('../public/js/app.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('function printSingleComment'), src.indexOf('async function handlePrintOrder'));
+  assert.match(body, /qty: extractProductInfo\(/);
+  assert.doesNotMatch(body, /qty: c\.qty/);
 });

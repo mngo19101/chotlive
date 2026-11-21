@@ -37,6 +37,8 @@ class Store(private val directory: File, account: String?) {
     var accounts by mutableStateOf(listOf<TikTokAccount>()); private set
     var activeAccountId by mutableStateOf<String?>(null); private set
     var keywords by mutableStateOf(DEFAULT_KEYWORDS); private set
+    /** Tôi › Từ khoá chốt đơn › "Tự nhận bình luận chốt" (lưu trong Settings). Tắt thì chỉ bình luận đã in mới tính là chốt. */
+    var autoClosing by mutableStateOf(true)
     /** Báo cho người dùng khi không đọc hoặc không ghi được dữ liệu. */
     var storageWarning by mutableStateOf<String?>(null)
 
@@ -148,6 +150,7 @@ class Store(private val directory: File, account: String?) {
     /** Bình luận chốt đơn: đã chốt tay, có từ khoá chốt, hoặc chỉ ghi mã. "Mã 130 giá sao" chỉ là hỏi giá. */
     fun isClosingComment(c: LiveComment): Boolean {
         if (c.printed) return true
+        if (!autoClosing) return false
         val text = PriceParser.stripAccents(c.text.lowercase())
         if (keywords.any { it.isNotEmpty() && text.contains(PriceParser.stripAccents(it.lowercase())) }) return true
         return PriceParser.isOnlyCodes(c.text)

@@ -909,8 +909,13 @@ const closingKeywords = () =>
  * Bình luận chốt đơn: đã in, có từ khoá chốt, hoặc chỉ ghi mã.
  * Có số thôi chưa đủ: "35 tuổi" hay "Cho em xem mã 25 với" không phải chốt đơn.
  */
+/** Tôi › Từ khoá chốt đơn › "Tự nhận bình luận chốt". Mặc định bật. */
+const autoClosingOn = () => S().autoClosing !== false;
+
 function isClosingComment(c) {
   if (c.printed) return true;
+  // Tắt tự nhận: chỉ bình luận shop đã bấm In mới tính là chốt.
+  if (!autoClosingOn()) return false;
   const text = stripAccents(String(c.comment || '').toLowerCase());
   if (closingKeywords().some((k) => text.includes(k))) return true;
   return isOnlyCodes(c.comment, priceOpts());
@@ -1025,6 +1030,7 @@ function renderCommentStream() {
   const prevHeight = container.scrollHeight;
   const prevTop = container.scrollTop;
   const isFirstPaint = renderedCommentIds.size === 0;
+  const anchor = commentStreamHeld() ? commentAnchorOf(container) : null;
 
   container.innerHTML = shownRows
     .map((c) => {
@@ -1049,7 +1055,7 @@ function renderCommentStream() {
       renderedCommentIds.add(String(c.id));
 
       return `
-        <div class="comment-row-item ${isNewRow ? 'is-new' : ''}" data-comment-user="${esc(c.uniqueId)}">
+        <div class="comment-row-item ${isNewRow ? 'is-new' : ''}" data-comment-user="${esc(c.uniqueId)}" data-cmt-row="${esc(c.id)}">
           <div class="comment-left">
             <button type="button" class="user-circle-avatar ${warmClass}" data-cmt-profile="${esc(c.uniqueId)}" aria-label="Xem hồ sơ của ${esc(c.nickname || c.uniqueId)}">${avatarInitial(c.nickname || c.uniqueId)}</button>
             <div class="comment-content-wrap">
@@ -1070,8 +1076,98 @@ function renderCommentStream() {
     })
     .join('');
 
-  // Đang đọc ở dưới thì giữ nguyên chỗ đọc khi bình luận mới chen vào phía trên.
-  if (prevTop > 40) container.scrollTop = prevTop + (container.scrollHeight - prevHeight);
+  if (anchor) {
+    // Tay đang đặt trên danh sách: giữ dòng dưới tay đứng yên để bấm "In" không trúng bình luận khác.
+    keepCommentAnchor(container, anchor);
+  } else if (commentHold.shift && commentHold.scroller) {
+    // Hết giữ: trả về chỗ cũ để thấy bình luận mới nhất như trước khi đặt tay.
+    commentHold.scroller.scrollTop -= commentHold.shift;
+    commentHold.shift = 0;
+  } else if (prevTop > 40) {
+    // Đang đọc ở dưới thì giữ nguyên chỗ đọc khi bình luận mới chen vào phía trên.
+    container.scrollTop = prevTop + (container.scrollHeight - prevHeight);
+  }
+}
+
+/* ---------- Giữ danh sách bình luận đứng yên khi người dùng sắp bấm ---------- */
+/** Chạm tay: giữ thêm chừng này sau lần chạm cuối. Chuột: giữ suốt lúc chuột còn nằm trên danh sách. */
+const COMMENT_HOLD_MS = 1500;
+const commentHold = { until: 0, mouse: false, x: 0, y: 0, shift: 0, scroller: null };
+
+function commentStreamHeld() {
+  return commentHold.mouse || Date.now() < commentHold.until;
+}
+
+/** Thôi giữ ngay (chuột rời danh sách): lần vẽ sau danh sách chạy tiếp. */
+function releaseCommentHold() {
+  commentHold.mouse = false;
+  commentHold.until = 0;
+  delete $('#comment-stream-container')?.dataset.held;
+  scheduleLiveRender();
+}
+
+/** Phần tử đang cuộn danh sách: chính danh sách trên máy tính, cả trang trên điện thoại. */
+function scrollerOf(el) {
+  for (let node = el; node && node !== document.body; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) return node;
+  }
+  return document.scrollingElement || document.documentElement;
+}
+
+/** Dòng dưới con trỏ (hoặc dòng đầu tiên còn thấy) và vị trí của nó trên màn hình. */
+function commentAnchorOf(container) {
+  const hit = document.elementFromPoint(commentHold.x, commentHold.y)?.closest?.('[data-cmt-row]');
+  const box = container.getBoundingClientRect();
+  const row =
+    (hit && container.contains(hit) && hit) ||
+    [...container.querySelectorAll('[data-cmt-row]')].find((r) => r.getBoundingClientRect().bottom > Math.max(box.top, 0));
+  return row ? { id: row.dataset.cmtRow, top: row.getBoundingClientRect().top } : null;
+}
+
+function keepCommentAnchor(container, anchor) {
+  const row = [...container.querySelectorAll('[data-cmt-row]')].find((r) => r.dataset.cmtRow === anchor.id);
+  if (!row) return;
+  const delta = row.getBoundingClientRect().top - anchor.top;
+  if (!delta) return;
+  const scroller = scrollerOf(container);
+  const before = scroller.scrollTop;
+  scroller.scrollTop = before + delta;
+  if (commentHold.scroller !== scroller) commentHold.shift = 0;
+  commentHold.scroller = scroller;
+  commentHold.shift += scroller.scrollTop - before;
+}
+
+function holdCommentStream(e) {
+  if (e.pointerType === 'mouse') {
+    commentHold.mouse = true;
+    e.currentTarget.dataset.held = '';
+  } else {
+    commentHold.until = Date.now() + COMMENT_HOLD_MS;
+  }
+  if (e.clientX != null) {
+    commentHold.x = e.clientX;
+    commentHold.y = e.clientY;
+  } else if (e.touches?.[0]) {
+    commentHold.x = e.touches[0].clientX;
+    commentHold.y = e.touches[0].clientY;
+  }
+}
+
+{
+  const stream = $('#comment-stream-container');
+  if (stream) {
+    for (const type of ['pointerdown', 'pointermove', 'touchstart']) {
+      stream.addEventListener(type, holdCommentStream, { passive: true });
+    }
+    // Tự cuộn trong lúc giữ: người dùng muốn ở lại chỗ đó, không kéo về đầu nữa.
+    for (const type of ['wheel', 'touchmove']) {
+      stream.addEventListener(type, () => (commentHold.shift = 0), { passive: true });
+    }
+    stream.addEventListener('pointerleave', (e) => {
+      if (e.pointerType === 'mouse') releaseCommentHold();
+    });
+  }
 }
 
 /** Bình luận thuộc phạm vi đang xem, mới nhất trước. */
@@ -1528,7 +1624,8 @@ function receiveServerComment(msg) {
       session.lastActivityTs = Math.max(session.lastActivityTs || 0, comment.ts);
     }
     saveComment(comment);
-    if (comment.price) playCashChime();
+    // Chuông theo công tắc "Chuông khi có đơn chốt", chỉ cho bình luận chốt (trước đây kêu với mọi bình luận có giá).
+    if (S().sound !== false && isClosingComment(comment)) playCashChime();
     scheduleLiveRender();
   }
 }
@@ -1561,7 +1658,7 @@ function processIncomingComment({ uniqueId, nickname, comment, userId = '', id =
   }
 
   saveComment(newCmt);
-  if (price) playCashChime();
+  if (S().sound !== false && isClosingComment(newCmt)) playCashChime();
   scheduleLiveRender();
 }
 
@@ -4093,7 +4190,23 @@ $('#menu-row-keywords')?.addEventListener('click', () => {
   if ($('#cfg-kw-multiplier')) $('#cfg-kw-multiplier').value = S().multiplier || '1000';
   if ($('#cfg-kw-autoprint')) $('#cfg-kw-autoprint').checked = S().autoPrint !== false;
   if ($('#cfg-kw-triggers')) $('#cfg-kw-triggers').value = S().triggers || 'chốt, lấy';
+  if ($('#cfg-kw-auto')) $('#cfg-kw-auto').checked = autoClosingOn();
+  showAutoClosingFields();
   openSettingsPane('keywords');
+});
+
+/** Tắt tự nhận thì ô từ khoá mờ đi nhưng vẫn giữ, bật lại là dùng tiếp. */
+function showAutoClosingFields() {
+  $('#cfg-kw-auto-fields')?.classList.toggle('is-dimmed', !autoClosingOn());
+}
+
+// Gạt là lưu ngay và vẽ lại danh sách bình luận (tô màu, bộ đếm "Chốt đơn").
+$('#cfg-kw-auto')?.addEventListener('change', () => {
+  S().autoClosing = $('#cfg-kw-auto').checked;
+  save('settings_keywords');
+  showAutoClosingFields();
+  scheduleLiveRender();
+  toast(S().autoClosing ? 'Đã bật tự nhận bình luận chốt' : 'Đã tắt tự nhận bình luận chốt', '✓');
 });
 
 $('#btn-save-keyword-setup')?.addEventListener('click', () => {
@@ -5360,7 +5473,8 @@ function printSingleComment(commentId) {
     // Bình luận không có giá vẫn lưu lại được: lấy chính nội dung làm tên món, giá 0.
     productName: (hasPrice && c.productName) || String(c.comment || '').trim().slice(0, 60) || 'Sản phẩm',
     price: hasPrice ? c.price : 0,
-    qty: c.qty || 1,
+    // Đọc lại số lượng từ nội dung: bình luận lưu từ bản cũ có thể mang số lượng sai ("chốt 99" từng thành 99 cái).
+    qty: extractProductInfo(c.comment || '', c.price || 0).quantity || 1,
     comment: c.comment,
     commentId: c.id,
     sessionId: c.sessionId || ''

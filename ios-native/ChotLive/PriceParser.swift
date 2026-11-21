@@ -2,8 +2,10 @@ import Foundation
 
 /// Bắt giá từ bình luận (port từ public/js/price.js). "59" -> 59.000, "5k" -> 5.000, "1tr2" -> 1.200.000.
 enum PriceParser {
+    /// Sau "tr", "triệu", "củ" được cách một dấu cách trước phần lẻ: "1 triệu 2" = 1.200.000,
+    /// trừ khi số đó là số lượng hoặc một giá khác ("1tr 2 cái", "1tr 200k"). Giống RE của public/js/price.js.
     private static let regex = try! NSRegularExpression(
-        pattern: #"(?<![a-z\d])(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(\d{1,3})?(?![a-z\d])"#
+        pattern: #"(?<![a-z\d])(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(?:(?<=tr|ieu|cu)\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3})?(?![a-z\d])"#
     )
     private static let grouped = try! NSRegularExpression(pattern: #"^\d{1,3}(?:[.,]\d{3})+$"#)
     /// Số điện thoại Việt Nam (0… hoặc +84…), kể cả viết tách: "0912 345 678", "098.812.3456".

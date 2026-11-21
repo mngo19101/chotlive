@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
@@ -404,7 +405,8 @@ private fun DeviceRow(d: NearbyDevice, onClick: () -> Unit) {
 
 @Composable
 fun KeywordsScreen() {
-    val store = LocalApp.current.store
+    val app = LocalApp.current
+    val store = app.store
     var draft by remember { mutableStateOf("") }
     fun add() {
         val word = draft.trim().lowercase()
@@ -417,7 +419,17 @@ fun KeywordsScreen() {
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = Metrics.GUTTER.dp, end = Metrics.GUTTER.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(Metrics.GAP.dp),
         ) {
-            T("Bình luận chứa một trong các từ khoá này, hoặc chỉ ghi mã, được coi là bình luận chốt đơn.", 13f, BV.MEDIUM, C.muted)
+            // Một dòng gọn như dòng từ khoá bên dưới, không chiếm thêm màn hình.
+            Row(Modifier.fillMaxWidth().height(52.dp).cardStyle(20f).padding(horizontal = 17.dp), verticalAlignment = Alignment.CenterVertically) {
+                T("Tự nhận bình luận chốt", 15f, BV.SEMIBOLD, modifier = Modifier.weight(1f))
+                Toggle(store.autoClosing) {
+                    app.settings.updateAutoClosing(it)
+                    store.autoClosing = it
+                }
+            }
+            T(if (store.autoClosing) "Bình luận chứa một trong các từ khoá này, hoặc chỉ ghi mã, được coi là bình luận chốt đơn."
+              else "Đang tắt: chỉ bình luận đã bấm In mới tính là chốt. Từ khoá vẫn giữ để bật lại.", 13f, BV.MEDIUM, C.muted)
+            Column(Modifier.alpha(if (store.autoClosing) 1f else 0.45f), verticalArrangement = Arrangement.spacedBy(Metrics.GAP.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f).height(44.dp).cardStyle(14f).padding(horizontal = 15.dp), contentAlignment = Alignment.CenterStart) {
                     PlainField(draft, { draft = it }, "Thêm từ khoá", 15f, BV.SEMIBOLD, Modifier.fillMaxWidth(), capitalize = false, onDone = { add() })
@@ -433,6 +445,7 @@ fun KeywordsScreen() {
                             contentAlignment = Alignment.Center) { Icon(IconName.CLOSE, 16f, color = C.muted) }
                     }
                 }
+            }
             }
         }
     }

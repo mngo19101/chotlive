@@ -678,6 +678,12 @@ test('extendedPlanEnd: nối tiếp khi còn hạn, tính từ lúc cấp khi h�
   assert.equal(extendedPlanEnd(500, 1, now), now + month);
   assert.equal(extendedPlanEnd(now + 5, 2, now), now + 5 + 2 * month);
   assert.ok(extendedPlanEnd(now + 3650 * DAY_MS, 36, now) <= now + 3650 * DAY_MS);
+  // Đang dùng thử: gói bắt đầu khi dùng thử hết, không mất ngày dùng thử còn lại.
+  assert.equal(extendedPlanEnd(undefined, 1, now, now + 2 * DAY_MS), now + 2 * DAY_MS + month);
+  // Dùng thử đã hết: tính từ lúc cấp như cũ.
+  assert.equal(extendedPlanEnd(undefined, 1, now, now - DAY_MS), now + month);
+  // Gói còn hạn dài hơn dùng thử: nối sau gói.
+  assert.equal(extendedPlanEnd(now + 10 * DAY_MS, 1, now, now + 2 * DAY_MS), now + 10 * DAY_MS + month);
 });
 
 test('ipKey và parseTrustProxy', () => {

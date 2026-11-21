@@ -136,3 +136,21 @@ test('recordChanges và overlayPending: thêm rồi xoá lại trên máy thì k
   assert.deepEqual(pending.changes.orders, { upsert: [], remove: ['a'] });
   assert.deepEqual(overlayPending('orders', [{ id: 'b' }, { id: 'a' }], [], pending), [{ id: 'b' }]);
 });
+
+test('cài đặt: chỉ gửi mục vừa đổi, máy khác giữ bản cũ không ghi đè được mục đó', async () => {
+  store.applyRemoteState({ settings: { autoClosing: true, sound: true } }, 'hello');
+  store.state.settings.autoClosing = false;
+  store.save('settings_keywords');
+  await sleep(SETTLE);
+  assert.deepEqual(store.pendingSettingsPayload(), { autoClosing: false }, 'chỉ gửi mục vừa đổi');
+
+  // Máy khác (còn giữ bản cũ) vừa đẩy lên, server gửi về trước khi máy này được xác nhận.
+  store.applyRemoteState({ settings: { autoClosing: true, sound: false } }, 'remote_sync');
+  assert.equal(store.state.settings.autoClosing, false, 'mục máy này vừa đổi vẫn giữ');
+  assert.equal(store.state.settings.sound, false, 'mục máy này không đụng thì theo server');
+
+  store.markPendingSynced();
+  assert.deepEqual(store.pendingSettingsPayload(), {});
+  store.applyRemoteState({ settings: { autoClosing: true } }, 'remote_sync');
+  assert.equal(store.state.settings.autoClosing, true, 'đã gửi xong thì theo server như thường');
+});

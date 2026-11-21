@@ -46,6 +46,7 @@ class PriceParserTest {
         "1.5tr" to 1500000, "150,000" to 150000, "150.000đ" to 150000, "1.200.000" to 1200000, "1,5tr" to 1500000,
         "Chốt 120 với 180" to 180000, "lấy 2 cái 150" to 150000, "mã 090 150 180" to 180000,
         "cho em xin giá" to 0, "" to 0,
+        "1 triệu 2" to 1200000, "1 triệu 250" to 1250000, "1tr 2 cái" to 1000000, "1tr 200k" to 1000000, "giá 1 triệu." to 1000000,
     )
 
     @Test

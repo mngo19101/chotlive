@@ -11,6 +11,7 @@ final class PriceParserTests: XCTestCase {
         ("1.5tr", 1500000), ("150,000", 150000), ("150.000đ", 150000), ("1.200.000", 1200000), ("1,5tr", 1500000),
         ("Chốt 120 với 180", 180000), ("lấy 2 cái 150", 150000), ("mã 090 150 180", 180000),
         ("cho em xin giá", 0), ("", 0),
+        ("1 triệu 2", 1200000), ("1 triệu 250", 1250000), ("1tr 2 cái", 1000000), ("1tr 200k", 1000000), ("giá 1 triệu.", 1000000),
     ]
 
     func testPhoneNumbersAndGroupedThousands() {
