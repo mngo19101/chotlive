@@ -47,6 +47,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.style.TextAlign
@@ -624,6 +627,10 @@ fun SessionDetailScreen(sessionId: String) {
     var older by remember { mutableStateOf(listOf<LiveComment>()) }
     var loadingOlder by remember { mutableStateOf(false) }
     var olderExhausted by remember { mutableStateOf(false) }
+    /** Bình luận đang sổ ra các đơn đã in của khách (mỗi lúc một bình luận). */
+    var expandedId by remember { mutableStateOf<String?>(null) }
+    /** Món vừa bỏ, còn hoàn tác được trong vài giây. */
+    var undo by remember { mutableStateOf<com.chotlive.app.data.Store.RemovedItem?>(null) }
     val listState = rememberLazyListState()
 
     val session = store.sessions.firstOrNull { it.id == sessionId }
@@ -724,7 +731,26 @@ fun SessionDetailScreen(sessionId: String) {
                 }
                 items(shown, key = { it.id }) { c ->
                     val cu = owner(c)
-                    CommentRow(c, store.isClosingComment(c), cu, isNew(cu)) {
+                    val open = expandedId == c.id
+                    CommentRow(
+                        c, store.isClosingComment(c), cu, isNew(cu),
+                        expanded = open,
+                        printedItems = if (open) store.printedItems(c, sessionId) else emptyList(),
+                        onToggle = { expandedId = if (open) null else c.id },
+                        onRemove = remove@{ item ->
+                            val ownerId = store.customer(c)?.id ?: return@remove
+                            ui.present(SHEET_DIM) {
+                                RemovePrintedItemSheet(ownerId, item) { removed ->
+                                    undo = removed
+                                    // Thanh hoàn tác tự ẩn sau vài giây, trừ khi đã có lần bỏ khác thay chỗ.
+                                    scope.launch {
+                                        delay(5_000)
+                                        if (undo == removed) undo = null
+                                    }
+                                }
+                            }
+                        },
+                    ) {
                         scope.launch { ui.notify(app.printComment(c)) }
                     }
                 }
@@ -752,7 +778,25 @@ fun SessionDetailScreen(sessionId: String) {
                     }
                 }
             }
-            if (pending > 0) {
+            val removed = undo
+            if (removed != null) {
+                Row(
+                    Modifier.align(Alignment.BottomCenter).padding(horizontal = Metrics.GUTTER.dp).padding(bottom = 12.dp)
+                        .fillMaxWidth().shadow(10.dp, rounded(14f)).height(48.dp).clip(rounded(14f))
+                        .background(hex(0x14181F)).padding(start = 16.dp, end = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    T("Đã bỏ ${removed.item.productLabel} của ${removed.customer.displayName}", 13.5f, BV.SEMIBOLD, Color.White,
+                        Modifier.weight(1f), maxLines = 1)
+                    Box(Modifier.height(44.dp).plainTap {
+                        store.restore(removed)
+                        undo = null
+                    }.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                        T("Hoàn tác", 13.5f, BV.BOLD, hex(0x9CC0FF))
+                    }
+                }
+            } else if (pending > 0) {
                 Row(
                     Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp).shadow(10.dp, Capsule).height(40.dp)
                         .capsule(C.ink).tap {
@@ -826,9 +870,31 @@ private fun TabChip(title: String, count: Int, selected: Boolean, onClick: () ->
 }
 
 @Composable
-fun CommentRow(c: LiveComment, closing: Boolean, customer: Customer?, isNew: Boolean, onPrint: () -> Unit) {
+fun CommentRow(
+    c: LiveComment, closing: Boolean, customer: Customer?, isNew: Boolean,
+    /** Đang sổ ra danh sách món đã in của khách trong phiên. */
+    expanded: Boolean = false,
+    /** Món đã in của khách này trong phiên, mới nhất trước. */
+    printedItems: List<OrderItem> = emptyList(),
+    onToggle: (() -> Unit)? = null,
+    onRemove: ((OrderItem) -> Unit)? = null,
+    onPrint: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth()
+            .cardStyle(20f, if (closing) C.peachRow else C.card, if (expanded) C.orange else if (closing) C.peachLine else C.line)
+    ) {
+        CommentMain(c, closing, customer, isNew, onToggle, onPrint)
+        if (expanded) PrintedDrawer(c, printedItems, onToggle, onRemove)
+    }
+}
+
+@Composable
+private fun CommentMain(c: LiveComment, closing: Boolean, customer: Customer?, isNew: Boolean, onToggle: (() -> Unit)?, onPrint: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().cardStyle(20f, if (closing) C.peachRow else C.card, if (closing) C.peachLine else C.line)
+        Modifier.fillMaxWidth()
+            // Bấm vào phần tên và chữ để sổ ra / thu gọn; nút in vẫn riêng.
+            .plainTap(onToggle != null) { onToggle?.invoke() }
             .padding(horizontal = 13.dp, vertical = 9.5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.7.dp),
@@ -862,6 +928,95 @@ fun CommentRow(c: LiveComment, closing: Boolean, customer: Customer?, isNew: Boo
         }
         Box(Modifier.size(34.dp).clip(CircleShape).background(C.card).border(1.dp, C.line, CircleShape).tap(onClick = onPrint),
             contentAlignment = Alignment.Center) { Icon(IconName.PRINTER, 15f, 2.2f) }
+    }
+}
+
+/** Lề trái của phần sổ ra: thẳng với chữ bình luận (lề 13 + ảnh 34 + khoảng 9.7). */
+private const val DRAWER_LEAD = 56.7f
+
+@Composable
+private fun PrintedDrawer(c: LiveComment, items: List<OrderItem>, onToggle: (() -> Unit)?, onRemove: ((OrderItem) -> Unit)?) {
+    val line = C.peachLine
+    Column(
+        Modifier.fillMaxWidth()
+            .drawBehind {
+                // Gạch đứt ngăn phần bình luận với phần sổ ra.
+                drawLine(line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())))
+            }
+            .padding(start = DRAWER_LEAD.dp, top = 5.dp, bottom = 7.dp)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(end = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+            T(if (items.isEmpty()) "Chưa in đơn nào của khách này trong phiên" else "Đã in trong phiên · ${items.size} đơn",
+                11f, BV.SEMIBOLD, C.muted, Modifier.weight(1f), maxLines = 1)
+            Row(Modifier.height(24.dp).plainTap { onToggle?.invoke() }, verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                T("Thu gọn", 11f, BV.SEMIBOLD, C.accentDeep)
+                Icon(IconName.CHEVRON_UP, 11f, 3f, C.accentDeep)
+            }
+        }
+        items.forEachIndexed { i, it ->
+            if (i > 0) Box(Modifier.fillMaxWidth().padding(end = 13.dp).height(1.dp).background(C.peachLine.copy(alpha = 0.6f)))
+            PrintedItemRow(c, it, onRemove)
+        }
+    }
+}
+
+@Composable
+private fun PrintedItemRow(c: LiveComment, it: OrderItem, onRemove: ((OrderItem) -> Unit)?) {
+    val mine = (it.commentId ?: it.id) == c.id
+    var info = "· " + timeText(it.ts)
+    if (mine) info += " · cmt này" else if (!it.printed) info += " · chưa in tem"
+    Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        Box(Modifier.weight(1f, fill = false).height(20.dp).clip(rounded(6f)).background(C.peachCode).padding(horizontal = 6.dp),
+            contentAlignment = Alignment.Center) { T(it.productLabel, 12.5f, BV.BOLD, maxLines = 1) }
+        T(money(it.lineTotal) + if (it.qty > 1) " ×${it.qty}" else "", 12.5f, BV.SEMIBOLD, maxLines = 1)
+        T(info, 11f, if (mine) BV.SEMIBOLD else BV.MEDIUM, if (mine) C.accentDeep else C.faint, Modifier.weight(1f), maxLines = 1)
+        // Thẳng hàng dưới nút in: nút in rộng 34 cách mép 13, nút X rộng 28.
+        Box(Modifier.padding(end = 10.dp).width(40.dp).height(34.dp).plainTap { onRemove?.invoke(it) },
+            contentAlignment = Alignment.Center) {
+            Box(Modifier.size(28.dp).clip(CircleShape).background(C.redSoft), contentAlignment = Alignment.Center) {
+                Icon(IconName.CLOSE, 13f, 2.8f, C.red)
+            }
+        }
+    }
+}
+
+// MARK: - Bỏ món in nhầm
+
+@Composable
+fun RemovePrintedItemSheet(customerId: String, item: OrderItem, onRemoved: (com.chotlive.app.data.Store.RemovedItem) -> Unit) {
+    val store = LocalApp.current.store
+    val ui = LocalAppUI.current
+    val customer = store.customers.firstOrNull { it.id == customerId }
+    // Đơn chứa món đã gửi đi thì bỏ món ở đây không sửa được vận đơn đã tạo.
+    val alreadySent = customer?.let { cu ->
+        val o = store.orders(cu).firstOrNull { o -> o.items.any { it.id == item.id } } ?: return@let false
+        !com.chotlive.app.model.Vtp.state(o).isPending || !o.ship?.vtpCode.isNullOrEmpty()
+    } ?: false
+    Column(Modifier.fillMaxWidth().padding(horizontal = Metrics.GUTTER.dp).padding(top = 4.dp)) {
+        T("Bỏ ${item.productLabel} khỏi đơn của ${customer?.displayName ?: "khách"}?", 17f, BV.HEAVY, C.ink, track = -0.3f)
+        Gap(6f)
+        T(if (alreadySent) "Đơn này đã gửi đi: bỏ món ở đây không sửa vận đơn đã tạo. Phiếu đã in giấy thì bạn tự xé bỏ."
+          else "Món này bị gỡ khỏi đơn của khách. Phiếu đã in giấy thì bạn tự xé bỏ.",
+            13.5f, BV.MEDIUM, if (alreadySent) C.red else C.muted)
+        Gap(14f)
+        Row(Modifier.fillMaxWidth().height(46.dp).cardStyle(14f, C.field).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.weight(1f, fill = false).height(22.dp).clip(rounded(7f)).background(C.peachCode).padding(horizontal = 7.dp),
+                contentAlignment = Alignment.Center) { T(item.productLabel, 13.5f, BV.BOLD, maxLines = 1) }
+            T(money(item.lineTotal), 13.5f, BV.BOLD, maxLines = 1)
+            T("· in lúc " + timeText(item.ts), 13f, BV.MEDIUM, C.faint, Modifier.weight(1f), maxLines = 1)
+        }
+        Gap(16f)
+        Box(Modifier.fillMaxWidth().height(50.dp).capsule(C.red).tap {
+            ui.dismissSheet()
+            store.removePrintedItem(customerId, item.id)?.let(onRemoved)
+        }, contentAlignment = Alignment.Center) { T("Bỏ khỏi đơn", 15f, BV.BOLD, Color.White) }
+        Gap(8f)
+        Box(Modifier.fillMaxWidth().height(50.dp).capsule(C.field).tap { ui.dismissSheet() },
+            contentAlignment = Alignment.Center) { T("Giữ lại", 15f, BV.BOLD) }
     }
 }
 

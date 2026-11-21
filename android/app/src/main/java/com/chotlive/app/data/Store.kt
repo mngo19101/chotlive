@@ -330,6 +330,51 @@ class Store(private val directory: File, account: String?) {
         save()
     }
 
+    /** Khách của bình luận, cùng cách nhận khách như `saveToCustomer`. */
+    fun customer(of: LiveComment): Customer? {
+        val key = key(of.uniqueId, of.userId)
+        return customers.firstOrNull { it.id == key || (of.userId.isNotEmpty() && it.userId == of.userId) }
+    }
+
+    /** Các món đã bấm in cho khách của bình luận này trong phiên, mới nhất trước. */
+    fun printedItems(of: LiveComment, sessionId: String): List<OrderItem> {
+        val owner = customer(of) ?: return emptyList()
+        return owner.items.filter { it.sessionId == sessionId }.sortedByDescending { it.ts }
+    }
+
+    /** Bản lưu để hoàn tác khi bỏ một món in nhầm. */
+    data class RemovedItem(val customer: Customer, val item: OrderItem, val index: Int)
+
+    /** Bỏ một món in nhầm (khách nhường cho người khác). Trả về bản lưu để hoàn tác. */
+    fun removePrintedItem(customerId: String, itemId: String): RemovedItem? {
+        val idx = customers.indexOfFirst { it.id == customerId }
+        if (idx < 0) return null
+        val ii = customers[idx].items.indexOfFirst { it.id == itemId }
+        if (ii < 0) return null
+        val removed = RemovedItem(customers[idx], customers[idx].items[ii], ii)
+        deleteItem(customerId, itemId)
+        return removed
+    }
+
+    /** Trả lại món vừa bỏ, đúng chỗ cũ trong đơn của khách. */
+    fun restore(r: RemovedItem) {
+        // Còn nằm trong danh sách xoá chưa gửi thì server sẽ bỏ món này đi, nên rút ra trước.
+        syncState = syncState.copy(deletedItems = syncState.deletedItems - r.item.id)
+        val idx = customers.indexOfFirst { it.id == r.customer.id }
+        if (idx >= 0) {
+            if (customers[idx].items.any { it.id == r.item.id }) return
+            editCustomers { list ->
+                val items = list[idx].items.toMutableList()
+                items.add(minOf(r.index, items.size), r.item)
+                list[idx] = list[idx].copy(items = items)
+            }
+        } else {
+            editCustomers { it.add(r.customer.copy(items = listOf(r.item))) }
+        }
+        touchCustomer(r.customer.id)
+        save()
+    }
+
     fun deleteOrder(o: Order) {
         val idx = customers.indexOfFirst { it.id == o.customer.id }
         if (idx < 0) return

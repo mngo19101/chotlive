@@ -164,6 +164,47 @@ class StoreTest {
     }
 
     @Test
+    fun printedItemsListOnlyThisCustomersItemsInSession() {
+        val store = Store(newDir(), "srv|a")
+        store.saveToCustomer(comment("c1", "150"))
+        store.saveToCustomer(comment("c2", "90"))
+        store.saveToCustomer(comment("c3", "60", session = "s0"))
+        store.saveToCustomer(comment("k1", "70", uid = "khac"))
+        val ids = store.printedItems(comment("c9", "hi"), "s1").map { it.id }
+        assertEquals(setOf("c1", "c2"), ids.toSet())
+    }
+
+    @Test
+    fun removePrintedItemThenUndoSendsItemBack() {
+        val store = Store(newDir(), "srv|a")
+        store.saveToCustomer(comment("c1", "150"))
+        store.acknowledgeSync(store.makeSyncUpdate()!!.id)
+        val removed = store.removePrintedItem(store.customers[0].id, "c1")!!
+        assertTrue(store.customers.isEmpty())
+        assertEquals(setOf("c1"), store.syncState.deletedItems)
+
+        store.restore(removed)
+        assertEquals(listOf("c1"), store.customers.first().items.map { it.id })
+        // Hoàn tác trước khi gửi: không được báo server xoá món này nữa.
+        val update = store.makeSyncUpdate()!!
+        assertEquals(emptyList<String>(), update.deletedItemIds)
+        assertEquals(listOf("c1"), update.customers.first().items.map { it.id })
+    }
+
+    @Test
+    fun undoKeepsItemPlaceAmongOtherItems() {
+        val store = Store(newDir(), "srv|a")
+        store.saveToCustomer(comment("c1", "150"))
+        store.saveToCustomer(comment("c2", "90"))
+        store.saveToCustomer(comment("c3", "60"))
+        val removed = store.removePrintedItem(store.customers[0].id, "c2")!!
+        assertEquals(listOf("c1", "c3"), store.customers[0].items.map { it.id })
+        store.restore(removed)
+        store.restore(removed)
+        assertEquals(listOf("c1", "c2", "c3"), store.customers[0].items.map { it.id })
+    }
+
+    @Test
     fun newItemSkipsAnOrderWhoseWaybillIsUnresolved() {
         val store = Store(newDir(), "srv|a")
         store.saveToCustomer(comment("c1", "150"))
