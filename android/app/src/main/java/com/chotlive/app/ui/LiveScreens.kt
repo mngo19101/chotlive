@@ -2,6 +2,20 @@
 
 package com.chotlive.app.ui
 
+import kotlin.math.floor
+import com.chotlive.app.model.weekdayLabel
+import com.chotlive.app.model.fullDate
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.draw.alpha
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -237,126 +251,423 @@ fun Timeline(sessions: List<LiveSession>, showNow: Boolean) {
 
 // MARK: - Xem lại thời điểm
 
+private const val DATE_ROW = 46f
+private const val DATE_WEEKDAY = 30f
+
+/**
+ * Bảng chọn ngày, giống bản iPhone: mở ra chưa chọn ngày nào; chạm lần đầu là ngày bắt đầu, lần hai là ngày cuối,
+ * hoặc giữ và kéo qua nhiều ngày. Chấm đỏ là ngày có live; bấm tên tháng để mở lưới tháng / năm.
+ */
 @Composable
 fun DateFilterSheet(initial: DateFilter, onApply: (DateFilter) -> Unit) {
     val ui = LocalAppUI.current
-    var filter by remember { mutableStateOf(initial) }
-    var month by remember { mutableStateOf(YearMonth.from(initial.endDay)) }
-    var editingFrom by remember { mutableStateOf<Boolean?>(null) }
+    val store = LocalApp.current.store
+    val haptic = LocalHapticFeedback.current
     val today = Clock.today()
+    var month by remember { mutableStateOf(YearMonth.from(initial.endDay)) }
+    var pickerYear by remember { mutableIntStateOf(month.year) }
+    var pickingMonth by remember { mutableStateOf(false) }
+    var start by remember { mutableStateOf<LocalDate?>(null) }
+    var end by remember { mutableStateOf<LocalDate?>(null) }
+    var preset by remember { mutableStateOf<DateFilter.Preset?>(null) }
+    var fromMinute by remember { mutableIntStateOf(initial.fromMinute) }
+    var toMinute by remember { mutableIntStateOf(initial.toMinute) }
+    var showTime by remember { mutableStateOf(initial.fromMinute != 0 || initial.toMinute != 1439) }
+    var editingFrom by remember { mutableStateOf<Boolean?>(null) }
+
+    fun tick() = haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    fun show(d: LocalDate) {
+        month = YearMonth.from(d)
+        pickerYear = month.year
+    }
+    /** Khoảng đang chọn, ngày sớm đứng trước. */
+    val range: Pair<LocalDate, LocalDate>? = start?.let { s ->
+        val e = end ?: s
+        if (s <= e) s to e else e to s
+    }
+    val liveDays = remember(store.sessions) { store.sessions.map { Clock.day(it.start) }.toSet() }
+
+    fun tap(d: LocalDate) {
+        preset = null
+        val s = start
+        if (s != null && end == null) {
+            if (d < s) {
+                start = d
+                end = s
+            } else end = d
+        } else {
+            start = d
+            end = null
+        }
+        tick()
+    }
 
     Column(
         Modifier.fillMaxWidth().heightIn(max = sheetHeight(10.dp)).verticalScroll(rememberScrollState())
+            .animateContentSize(tween(180))
             .padding(horizontal = Metrics.GUTTER.dp)
     ) {
-        Box(Modifier.padding(top = 8.dp, bottom = 15.dp)) { SheetTitle("Xem lại thời điểm") }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val rows = listOf(
-                listOf("Hôm nay" to DateFilter.Preset.TODAY, "Hôm qua" to DateFilter.Preset.YESTERDAY, "7 ngày qua" to DateFilter.Preset.LAST7),
-                listOf("30 ngày qua" to DateFilter.Preset.LAST30, "Tháng này" to DateFilter.Preset.THIS_MONTH, "Tháng trước" to DateFilter.Preset.LAST_MONTH),
-            )
-            for (row in rows) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for ((title, preset) in row) {
-                        val selected = filter.preset == preset
-                        OnAccent(selected) {
+        Box(Modifier.padding(top = 8.dp)) { SheetTitle("Xem lại thời điểm") }
+
+        // Chọn nhanh
+        Row(
+            Modifier.padding(top = 12.dp).bleed().horizontalScroll(rememberScrollState()).padding(horizontal = Metrics.GUTTER.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf(
+                "Hôm nay" to DateFilter.Preset.TODAY, "Hôm qua" to DateFilter.Preset.YESTERDAY,
+                "7 ngày qua" to DateFilter.Preset.LAST7, "30 ngày qua" to DateFilter.Preset.LAST30,
+                "Tháng này" to DateFilter.Preset.THIS_MONTH, "Tháng trước" to DateFilter.Preset.LAST_MONTH,
+            ).forEach { (title, p) ->
+                Chip(title, preset == p) {
+                    val f = DateFilter.make(p)
+                    start = f.startDay
+                    end = f.endDay
+                    preset = p
+                    pickingMonth = false
+                    show(f.endDay)
+                }
+            }
+        }
+
+        // Từ ngày → Đến ngày
+        Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DayBox("Từ ngày", start?.let { dayText(it, today) }, "Chạm 1 ngày", start == null, Modifier.weight(1f))
+            Icon(IconName.ARROW_RIGHT, 16f, color = C.faint)
+            DayBox("Đến ngày", end?.let { dayText(it, today) }, if (start == null) "—" else "Chạm ngày cuối",
+                start != null && end == null, Modifier.weight(1f))
+        }
+
+        // Tiêu đề tháng
+        Row(Modifier.padding(top = 14.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.height(36.dp).capsule(if (pickingMonth) C.peachSoft else C.field)
+                    .tap {
+                        pickerYear = month.year
+                        pickingMonth = !pickingMonth
+                    }.padding(start = 13.dp, end = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                T("Tháng ${month.monthValue}, ${month.year}", 15f, BV.HEAVY)
+                Icon(if (pickingMonth) IconName.CHEVRON_UP else IconName.CHEVRON_DOWN, 14f, 2.6f)
+            }
+            Box(Modifier.weight(1f))
+            // Luôn giữ chỗ cho hai nút để hàng không thấp đi và cả bảng nhảy khi mở lưới tháng.
+            Row(Modifier.offset(x = 4.dp).alpha(if (pickingMonth) 0f else 1f)) {
+                NavCircle(IconName.CHEVRON_LEFT, !pickingMonth) { show(month.minusMonths(1).atDay(1)) }
+                NavCircle(IconName.CHEVRON_RIGHT, !pickingMonth && month.plusMonths(1).atDay(1) <= today) {
+                    show(month.plusMonths(1).atDay(1))
+                }
+            }
+        }
+
+        // Lịch và lưới tháng cao bằng nhau để bảng không nhảy khi đổi qua lại.
+        Box(Modifier.fillMaxWidth().height((DATE_WEEKDAY + DATE_ROW * 6).dp)) {
+            if (pickingMonth) {
+                MonthPicker(month, pickerYear, today, { pickerYear = it }) { m ->
+                    month = YearMonth.of(pickerYear, m)
+                    pickingMonth = false
+                }
+            } else {
+                Calendar(month, today, range, liveDays, onTap = { tap(it) }, onDragStart = { d ->
+                    preset = null
+                    start = d
+                    end = d
+                    tick()
+                }, onDragTo = { d ->
+                    if (d != end) {
+                        end = d
+                        tick()
+                    }
+                }, onDragEnd = {
+                    val s = start
+                    val e = end
+                    if (s != null && e != null && e < s) {
+                        start = e
+                        end = s
+                    }
+                })
+            }
+        }
+
+        // Gợi ý và số phiên live
+        Hint(range, end != null, fromMinute, toMinute)
+
+        // Khung giờ
+        Column(Modifier.padding(top = 10.dp)) {
+            Row(
+                Modifier.fillMaxWidth().height(46.dp).cardStyle(14f).plainTap {
+                    showTime = !showTime
+                    if (!showTime) editingFrom = null
+                }.padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                T("Khung giờ trong ngày", 14f, BV.BOLD, modifier = Modifier.weight(1f))
+                T("${minuteText(fromMinute)} – ${minuteText(toMinute)}", 13f, BV.SEMIBOLD, C.muted)
+                Icon(if (showTime) IconName.CHEVRON_UP else IconName.CHEVRON_DOWN, 14f, color = C.muted)
+            }
+            if (showTime) {
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for ((label, isFrom) in listOf("Từ" to true, "Đến" to false)) {
+                        val active = editingFrom == isFrom
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            T(label, 12f, BV.MEDIUM, C.muted)
                             Box(
-                                Modifier.weight(1f).height(40.dp).capsule(if (selected) C.orange else C.card, if (selected) null else C.line)
-                                    .tap {
-                                        filter = DateFilter.make(preset).copy(fromMinute = filter.fromMinute, toMinute = filter.toMinute)
-                                        month = YearMonth.from(filter.endDay)
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) { T(title, 13f, if (selected) BV.BOLD else BV.SEMIBOLD, shrink = true) }
+                                Modifier.fillMaxWidth().height(43.dp).cardStyle(14f, C.field, if (active) C.orange else C.line)
+                                    .plainTap { editingFrom = if (active) null else isFrom }.padding(start = 15.dp),
+                                contentAlignment = Alignment.CenterStart,
+                            ) { T(minuteText(if (isFrom) fromMinute else toMinute), 15f, BV.BOLD) }
+                        }
+                    }
+                }
+                editingFrom?.let { isFrom ->
+                    key(isFrom) {
+                        val initialMinute = if (isFrom) fromMinute else toMinute
+                        val state = rememberTimePickerState(initialMinute / 60, initialMinute % 60, is24Hour = true)
+                        LaunchedEffect(state.hour, state.minute) {
+                            val m = state.hour * 60 + state.minute
+                            if (isFrom) fromMinute = m else toMinute = m
+                        }
+                        Box(Modifier.fillMaxWidth().padding(top = 10.dp), contentAlignment = Alignment.Center) {
+                            TimeInput(state, colors = TimePickerDefaults.colors(
+                                timeSelectorSelectedContainerColor = C.peachSoft,
+                                timeSelectorUnselectedContainerColor = C.field,
+                                timeSelectorSelectedContentColor = C.ink,
+                                timeSelectorUnselectedContentColor = C.ink,
+                            ))
                         }
                     }
                 }
             }
         }
-        // Tháng
-        val canNext = month.plusMonths(1).atDay(1) <= today
-        Row(Modifier.padding(top = 22.dp, end = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(22.dp)) {
-            T("Tháng ${month.monthValue}, ${month.year}", 15f, BV.BOLD, modifier = Modifier.weight(1f))
-            Box(Modifier.size(26.dp).plainTap { month = month.minusMonths(1) }, contentAlignment = Alignment.Center) { Icon(IconName.CHEVRON_LEFT, 18f) }
-            Box(Modifier.size(26.dp).plainTap(enabled = canNext) { month = month.plusMonths(1) }, contentAlignment = Alignment.Center) {
-                Icon(IconName.CHEVRON_RIGHT, 18f, color = if (canNext) C.ink else C.faint)
-            }
+
+        val applyTitle = when {
+            range == null -> "Chọn ngày để xem"
+            range.first == range.second -> "Xem ngày ${shortDate(range.first)}"
+            else -> "Áp dụng · ${shortDate(range.first)} – ${shortDate(range.second)}"
         }
-        Column(Modifier.padding(top = 9.dp)) {
-            Row(Modifier.fillMaxWidth()) {
-                for (d in listOf("T2", "T3", "T4", "T5", "T6", "T7", "CN")) {
-                    Box(Modifier.weight(1f).height(20.dp), contentAlignment = Alignment.Center) { T(d, 12f, BV.SEMIBOLD, C.muted) }
+        Box(Modifier.padding(top = 12.dp)) {
+            PrimaryButton(applyTitle, enabled = range != null) {
+                val r = range ?: return@PrimaryButton
+                val p = preset
+                val next = when {
+                    p != null -> DateFilter.make(p)
+                    r.first == r.second -> DateFilter.single(r.first)
+                    else -> DateFilter(DateFilter.Preset.CUSTOM, r.first, r.second)
                 }
-            }
-            // Luôn 5–6 hàng, bắt đầu từ Thứ Hai.
-            val first = month.atDay(1)
-            val leading = first.dayOfWeek.value - 1
-            val total = ((leading + month.lengthOfMonth() + 6) / 7) * 7
-            val days = (0 until total).map { first.plusDays((it - leading).toLong()) }
-            for (week in days.chunked(7)) {
-                Row(Modifier.fillMaxWidth()) {
-                    for (d in week) {
-                        DayCell(d, month, filter, today, Modifier.weight(1f)) {
-                            filter = DateFilter.single(d).copy(fromMinute = filter.fromMinute, toMinute = filter.toMinute)
-                        }
-                    }
-                }
-            }
-        }
-        T("Khung giờ trong ngày", 14f, BV.BOLD, modifier = Modifier.padding(top = 12.dp))
-        Row(Modifier.padding(top = 7.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            for ((label, isFrom) in listOf("Từ" to true, "Đến" to false)) {
-                val active = editingFrom == isFrom
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    T(label, 12f, BV.MEDIUM, C.muted)
-                    Box(
-                        Modifier.fillMaxWidth().height(43.dp).cardStyle(14f, C.field, if (active) C.orange else C.line)
-                            .plainTap { editingFrom = if (active) null else isFrom }.padding(start = 15.dp),
-                        contentAlignment = Alignment.CenterStart,
-                    ) { T(minuteText(if (isFrom) filter.fromMinute else filter.toMinute), 15f, BV.BOLD) }
-                }
-            }
-        }
-        editingFrom?.let { isFrom ->
-            key(isFrom) {
-                val start = if (isFrom) filter.fromMinute else filter.toMinute
-                val state = rememberTimePickerState(start / 60, start % 60, is24Hour = true)
-                LaunchedEffect(state.hour, state.minute) {
-                    val m = state.hour * 60 + state.minute
-                    filter = if (isFrom) filter.copy(fromMinute = m) else filter.copy(toMinute = m)
-                }
-                Box(Modifier.fillMaxWidth().padding(top = 10.dp), contentAlignment = Alignment.Center) {
-                    TimeInput(state, colors = TimePickerDefaults.colors(
-                        timeSelectorSelectedContainerColor = C.peachSoft,
-                        timeSelectorUnselectedContainerColor = C.field,
-                        timeSelectorSelectedContentColor = C.ink,
-                        timeSelectorUnselectedContentColor = C.ink,
-                    ))
-                }
-            }
-        }
-        Box(Modifier.padding(top = 16.dp)) {
-            PrimaryButton("Áp dụng") {
-                onApply(filter)
+                onApply(next.copy(fromMinute = fromMinute, toMinute = toMinute))
                 ui.dismissSheet()
             }
         }
     }
 }
 
+private fun dayText(d: LocalDate, today: LocalDate): String =
+    "${weekdayLabel(d)}, " + if (d.year == today.year) shortDate(d) else fullDate(d)
+
 @Composable
-private fun DayCell(d: LocalDate, month: YearMonth, filter: DateFilter, today: LocalDate, modifier: Modifier, onClick: () -> Unit) {
+private fun DayBox(label: String, value: String?, placeholder: String, active: Boolean, modifier: Modifier) {
+    Column(
+        modifier.height(54.dp).cardStyle(14f, if (active) C.card else C.field, if (active) C.orange else C.line)
+            .then(if (active) Modifier.border(1.5.dp, C.orange, rounded(14f)) else Modifier)
+            .padding(horizontal = 13.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+    ) {
+        T(label, 11f, BV.SEMIBOLD, C.muted)
+        if (value != null) T(value, 15f, BV.HEAVY, shrink = true, minScale = 0.8f)
+        else T(placeholder, 14f, BV.SEMIBOLD, C.faint, shrink = true, minScale = 0.8f)
+    }
+}
+
+/** Nút tròn 36, vùng bấm 44. */
+@Composable
+private fun NavCircle(icon: IconName, enabled: Boolean, onClick: () -> Unit) {
+    Box(Modifier.size(44.dp).plainTap(enabled, onClick), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(36.dp).clip(CircleShape).background(C.card).border(1.dp, C.line, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(icon, 17f, color = if (enabled) C.ink else C.faint)
+        }
+    }
+}
+
+@Composable
+private fun Calendar(
+    month: YearMonth, today: LocalDate, range: Pair<LocalDate, LocalDate>?, liveDays: Set<LocalDate>,
+    onTap: (LocalDate) -> Unit, onDragStart: (LocalDate) -> Unit, onDragTo: (LocalDate) -> Unit, onDragEnd: () -> Unit,
+) {
+    // Luôn 6 hàng từ Thứ Hai, để chiều cao lịch không đổi giữa các tháng.
+    val first = month.atDay(1)
+    val leading = first.dayOfWeek.value - 1
+    val days = remember(month) { (0 until 42).map { first.plusDays((it - leading).toLong()) } }
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().height(DATE_WEEKDAY.dp)) {
+            for (d in listOf("T2", "T3", "T4", "T5", "T6", "T7", "CN")) {
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) { T(d, 12f, BV.SEMIBOLD, C.muted) }
+            }
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth().height((DATE_ROW * 6).dp)) {
+            val cellW = maxWidth / 7
+            val density = LocalDensity.current
+            val cellPx = with(density) { cellW.toPx() }
+            val rowPx = with(density) { DATE_ROW.dp.toPx() }
+            val slop = with(density) { 6.dp.toPx() }
+            val tapNow by rememberUpdatedState(onTap)
+            val startNow by rememberUpdatedState(onDragStart)
+            val toNow by rememberUpdatedState(onDragTo)
+            val endNow by rememberUpdatedState(onDragEnd)
+
+            /** Ô dưới ngón tay. `clamp`: kéo ra ngoài lưới thì lấy ô sát mép, kéo vào ngày chưa tới thì dừng ở hôm nay. */
+            fun dayAt(p: Offset, clamp: Boolean = false): LocalDate? {
+                var col = floor(p.x / cellPx).toInt()
+                var row = floor(p.y / rowPx).toInt()
+                if (clamp) {
+                    col = col.coerceIn(0, 6)
+                    row = row.coerceIn(0, 5)
+                }
+                if (col !in 0..6 || row !in 0..5) return null
+                val d = days[row * 7 + col]
+                if (d > today) return if (clamp) today else null
+                return d
+            }
+
+            Column(
+                Modifier.fillMaxSize().pointerInput(month, cellPx) {
+                    // Một cử chỉ cho cả lưới: chạm là chọn ngày, kéo quá vài điểm là quét khoảng từ ô đầu tới ô đang chạm.
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        down.consume()
+                        var dragging = false
+                        var lastPos = down.position
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) {
+                                lastPos = change.position
+                                break
+                            }
+                            change.consume()
+                            lastPos = change.position
+                            val moved = (change.position - down.position).getDistance() > slop
+                            if (!dragging && moved) {
+                                val from = dayAt(down.position) ?: continue
+                                dragging = true
+                                startNow(from)
+                            }
+                            if (dragging) dayAt(change.position, clamp = true)?.let { toNow(it) }
+                        }
+                        if (dragging) endNow() else dayAt(lastPos)?.let { tapNow(it) }
+                    }
+                }
+            ) {
+                for (week in days.chunked(7)) {
+                    Box(Modifier.fillMaxWidth().height(DATE_ROW.dp)) {
+                        // Dải màu nối ngày đầu và ngày cuối trong một hàng; hàng giữa khoảng thì chạy hết bề ngang.
+                        if (range != null && range.first != range.second) {
+                            val a = week.indexOfFirst { it >= range.first && it <= range.second }
+                            val b = week.indexOfLast { it >= range.first && it <= range.second }
+                            if (a >= 0 && b >= 0) {
+                                val left = if (week[a] == range.first) cellW * a + cellW / 2 - 20.dp else cellW * a + 2.dp
+                                val right = if (week[b] == range.second) cellW * b + cellW / 2 + 20.dp else cellW * (b + 1) - 2.dp
+                                Box(Modifier.align(Alignment.CenterStart).offset(x = left).width(right - left).height(40.dp)
+                                    .clip(Capsule).background(C.peachSoft))
+                            }
+                        }
+                        Row(Modifier.fillMaxSize()) {
+                            for (d in week) CalendarDay(d, month, today, range, liveDays.contains(d), Modifier.width(cellW))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarDay(d: LocalDate, month: YearMonth, today: LocalDate, range: Pair<LocalDate, LocalDate>?, live: Boolean, modifier: Modifier) {
     val inMonth = YearMonth.from(d) == month
     val future = d > today
-    val isEdge = d == filter.startDay || d == filter.endDay
-    val inRange = d >= filter.startDay && d <= filter.endDay
-    val enabled = inMonth && !future
-    Box(modifier.height(46.dp).plainTap(enabled, onClick), contentAlignment = Alignment.Center) {
-        if (inMonth && isEdge) Box(Modifier.size(40.dp).clip(CircleShape).background(C.orange))
-        else if (inMonth && inRange) Box(Modifier.size(40.dp).clip(CircleShape).background(C.peachSoft))
-        OnAccent(inMonth && isEdge) {
-            T("${d.dayOfMonth}", 15f, if (inMonth && isEdge) BV.HEAVY else BV.MEDIUM, if (enabled) C.ink else C.faint)
+    val isEdge = range != null && (d == range.first || d == range.second)
+    val isToday = d == today
+    val color = if (future || !inMonth) C.faint else C.ink
+    Box(modifier.fillMaxHeight().alpha(if (inMonth || isEdge) 1f else 0.6f), contentAlignment = Alignment.Center) {
+        if (isEdge) Box(Modifier.size(40.dp).clip(CircleShape).background(C.orange))
+        else if (isToday) Box(Modifier.size(40.dp).border(1.5.dp, C.ink, CircleShape))
+        OnAccent(isEdge) {
+            T("${d.dayOfMonth}", 15f, if (isEdge || isToday) BV.HEAVY else BV.MEDIUM, if (isEdge) C.ink else color)
         }
+        if (live) Box(Modifier.offset(y = 13.dp).size(5.dp).clip(CircleShape).background(if (isEdge) Color.White else C.live))
+    }
+}
+
+@Composable
+private fun MonthPicker(shown: YearMonth, year: Int, today: LocalDate, onYear: (Int) -> Unit, onPick: (Int) -> Unit) {
+    val store = LocalApp.current.store
+    val minYear = minOf(store.sessions.minOfOrNull { Clock.day(it.start).year } ?: today.year, today.year - 1)
+    val counts = remember(store.sessions, year) {
+        store.sessions.map { YearMonth.from(Clock.day(it.start)) }.filter { it.year == year }.groupingBy { it.monthValue }.eachCount()
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().clip(rounded(16f)).background(C.field), verticalAlignment = Alignment.CenterVertically) {
+            NavCircle(IconName.CHEVRON_LEFT, year > minYear) { onYear(year - 1) }
+            T("$year", 18f, BV.HEAVY, modifier = Modifier.weight(1f), align = TextAlign.Center)
+            NavCircle(IconName.CHEVRON_RIGHT, year < today.year) { onYear(year + 1) }
+        }
+        for (row in 0 until 4) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (col in 1..3) {
+                    val m = row * 3 + col
+                    val future = year > today.year || (year == today.year && m > today.monthValue)
+                    val current = shown.year == year && shown.monthValue == m
+                    val count = counts[m] ?: 0
+                    val note = if (future) "chưa tới" else if (count > 0) "$count phiên" else "không live"
+                    OnAccent(current) {
+                        Column(
+                            Modifier.weight(1f).height(56.dp)
+                                .cardStyle(16f, if (current) C.orange else if (future) C.field else C.card,
+                                    if (current || future) Color.Transparent else C.line)
+                                .plainTap(!future) { onPick(m) },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+                        ) {
+                            T("Thg $m", 15f, BV.BOLD, if (future) C.faint else C.ink)
+                            T(note, 11f, BV.SEMIBOLD, if (future) C.faint else C.muted)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Hint(range: Pair<LocalDate, LocalDate>?, hasEnd: Boolean, fromMinute: Int, toMinute: Int) {
+    val store = LocalApp.current.store
+    val count = range?.let {
+        store.sessions(DateFilter(DateFilter.Preset.CUSTOM, it.first, it.second, fromMinute, toMinute)).size
+    } ?: 0
+    val done = range != null && hasEnd
+    var text = "Chạm ngày bắt đầu, hoặc giữ và kéo qua nhiều ngày"
+    if (range != null) {
+        val (lo, hi) = range
+        val span = (hi.toEpochDay() - lo.toEpochDay()).toInt() + 1
+        val lives = if (count > 0) "$count phiên live" else "không có phiên live"
+        val has = if (count > 0) "có " else ""
+        text = when {
+            !hasEnd -> "Ngày ${shortDate(lo)} $has$lives. Chạm ngày cuối để xem nhiều ngày."
+            span == 1 -> "Ngày ${shortDate(lo)} $has$lives."
+            else -> "${if (count > 0) lives else "Không có phiên live"} trong $span ngày, ${shortDate(lo)} – ${shortDate(hi)}"
+        }
+    }
+    Row(
+        Modifier.padding(top = 8.dp).fillMaxWidth().heightIn(min = 42.dp).clip(rounded(12f))
+            .background(if (done) C.peachSoft else C.field).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        if (range == null) Icon(IconName.CALENDAR, 15f, color = C.muted)
+        else Box(Modifier.size(7.dp).clip(CircleShape).background(if (count > 0) C.live else C.faint))
+        T(text, 13f, BV.SEMIBOLD, if (done) C.ink else C.muted, Modifier.weight(1f), maxLines = 2)
     }
 }
 
