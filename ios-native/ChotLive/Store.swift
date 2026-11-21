@@ -18,7 +18,7 @@ final class Store: ObservableObject {
     }
     static let autoClosingKey = "autoClosing"
     /// Tôi › Từ khoá chốt đơn › "Tự nhận bình luận chốt". Tắt thì chỉ bình luận đã in mới tính là chốt. Lưu trên máy này.
-    @Published var autoClosing: Bool = UserDefaults.standard.object(forKey: Store.autoClosingKey) as? Bool ?? true {
+    @Published var autoClosing: Bool = UserDefaults.standard.object(forKey: Store.autoClosingKey) as? Bool ?? false {
         didSet {
             UserDefaults.standard.set(autoClosing, forKey: Store.autoClosingKey)
             closingCache.removeAll(keepingCapacity: true)

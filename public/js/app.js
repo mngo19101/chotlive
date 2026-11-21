@@ -910,7 +910,7 @@ const closingKeywords = () =>
  * Có số thôi chưa đủ: "35 tuổi" hay "Cho em xem mã 25 với" không phải chốt đơn.
  */
 /** Tôi › Từ khoá chốt đơn › "Tự nhận bình luận chốt". Mặc định bật. */
-const autoClosingOn = () => S().autoClosing !== false;
+const autoClosingOn = () => S().autoClosing === true;
 
 function isClosingComment(c) {
   if (c.printed) return true;

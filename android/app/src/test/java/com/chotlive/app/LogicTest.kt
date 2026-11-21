@@ -260,6 +260,9 @@ class StoreTest {
     @Test
     fun closingComments() {
         val store = Store(newDir(), "srv|a")
+        // Mặc định tắt: chỉ bình luận đã In mới tính là chốt.
+        assertFalse(store.isClosingComment(comment("1", "Chốt áo này")))
+        store.autoClosing = true
         assertTrue(store.isClosingComment(comment("1", "Chốt áo này")))
         assertTrue(store.isClosingComment(comment("2", "280")))
         assertFalse(store.isClosingComment(comment("3", "Mã 130 giá sao")))

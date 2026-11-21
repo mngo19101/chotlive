@@ -34,7 +34,7 @@ class Settings(context: Context) {
     var notifySound by mutableStateOf(prefs.getBoolean("notifySound", false)); private set
     var notifyHaptic by mutableStateOf(prefs.getBoolean("notifyHaptic", false)); private set
     /** Tự nhận bình luận chốt theo từ khoá / chỉ ghi mã. Mặc định bật. */
-    var autoClosing by mutableStateOf(prefs.getBoolean("autoClosing", true)); private set
+    var autoClosing by mutableStateOf(prefs.getBoolean("autoClosing", false)); private set
     /** Gói dịch vụ Viettel Post mặc định khi gửi (VSL9, STK, SCN). */
     var vtpService by mutableStateOf(prefs.getString("vtpServiceCode", null) ?: "VSL9"); private set
     /** Khổ tem in vận đơn: a6, a5, k100. */

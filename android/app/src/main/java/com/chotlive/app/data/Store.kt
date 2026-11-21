@@ -38,7 +38,7 @@ class Store(private val directory: File, account: String?) {
     var activeAccountId by mutableStateOf<String?>(null); private set
     var keywords by mutableStateOf(DEFAULT_KEYWORDS); private set
     /** Tôi › Từ khoá chốt đơn › "Tự nhận bình luận chốt" (lưu trong Settings). Tắt thì chỉ bình luận đã in mới tính là chốt. */
-    var autoClosing by mutableStateOf(true)
+    var autoClosing by mutableStateOf(false)
     /** Báo cho người dùng khi không đọc hoặc không ghi được dữ liệu. */
     var storageWarning by mutableStateOf<String?>(null)
 

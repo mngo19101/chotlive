@@ -348,6 +348,13 @@ final class VtpExportTests: XCTestCase {
         defer { store.save() }
         let comment = LiveComment(id: "k1", uniqueId: "u1", userId: "", nickname: "U1", text: "gửi mẫu giúp mình nha", ts: Date(), price: 0)
 
+        let wasOn = store.autoClosing
+        defer { store.autoClosing = wasOn }
+        store.autoClosing = false
+        store.setKeywords(["gửi mẫu"])
+        XCTAssertFalse(store.isClosingComment(comment), "tắt tự nhận thì không tính là chốt")
+        store.autoClosing = true
+
         store.setKeywords(["chốt"])
         XCTAssertFalse(store.isClosingComment(comment))
         XCTAssertFalse(store.isClosingComment(comment))
