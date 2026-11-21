@@ -59,8 +59,13 @@ struct ChotLiveApp: App {
                 .onChange(of: client.vtp?.connected) { on in
                     if on == true { vtpDrafts.syncWithPartner(phone: client.vtp?.phone) }
                 }
+                // Mở app là giữ màn hình sáng: màn hình tắt là iOS đẩy app xuống nền,
+                // ngắt kết nối, không nhận chốt và không in được.
+                // Chỉ có tác dụng khi app đang mở; bấm nút nguồn thì máy vẫn khóa như thường.
+                .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
                 .onChange(of: scenePhase) { phase in
                     if phase == .active {
+                        UIApplication.shared.isIdleTimerDisabled = true
                         KeyboardDismisser.shared.install()
                         client.checkSocket()
                         Task { @MainActor in await vtpDrafts.refreshAll() }

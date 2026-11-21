@@ -3,6 +3,7 @@ package com.chotlive.app
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.SystemBarStyle
@@ -17,6 +18,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         applyBars(false)
+        // Mở app là giữ màn hình sáng để không lỡ chốt và in phiếu khi chờ live.
+        // Chỉ có tác dụng khi app đang mở; bấm nút nguồn thì máy vẫn tắt như thường.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         // Ở màn gốc, nút Back đưa app xuống nền thay vì đóng hẳn: đang live thì mở lại là thấy ngay.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
