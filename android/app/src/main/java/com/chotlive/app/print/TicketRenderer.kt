@@ -54,7 +54,7 @@ class TicketRenderer(private val context: Context, private val paperWidth: () ->
 
         val blocks = mutableListOf<Block>(
             Block.Row(shop.uppercase(), Style(33f, extraBold), f.format(if (live) Date() else Date(c.ts)), small),
-            Block.Row(name, Style(55f, extraBold)),
+            Block.Row(name, Style(69f, extraBold)),
         )
         if (c.nickname.isNotEmpty()) blocks += Block.Row("@${c.uniqueId}", Style(40f, bold))
         blocks += Block.Dashed

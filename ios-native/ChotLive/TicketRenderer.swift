@@ -38,7 +38,7 @@ enum TicketRenderer {
 
         var blocks: [Block] = [
             .row(shop.uppercased(), .systemFont(ofSize: 33, weight: .heavy), f.string(from: live ? Date() : c.ts), small),
-            .row(name, .systemFont(ofSize: 55, weight: .heavy), "", small),
+            .row(name, .systemFont(ofSize: 69, weight: .heavy), "", small),
         ]
         if !c.nickname.isEmpty { blocks.append(.row("@" + c.uniqueId, .systemFont(ofSize: 40, weight: .bold), "", small)) }
         blocks += [
