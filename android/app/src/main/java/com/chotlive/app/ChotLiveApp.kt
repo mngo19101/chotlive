@@ -18,6 +18,10 @@ import com.chotlive.app.model.LiveComment
 import com.chotlive.app.model.Order
 import com.chotlive.app.net.LiveClient
 import com.chotlive.app.net.SupportNotifier
+import com.chotlive.app.net.VtpDraftHub
+import com.chotlive.app.net.VtpDraftKeystore
+import com.chotlive.app.net.VtpDraftSharedPrefs
+import com.chotlive.app.net.VtpDraftVault
 import com.chotlive.app.print.PrinterManager
 import com.chotlive.app.print.TicketRenderer
 import kotlinx.coroutines.MainScope
@@ -32,6 +36,8 @@ class ChotLiveApp : Application() {
     lateinit var printer: PrinterManager; private set
     lateinit var tickets: TicketRenderer; private set
     lateinit var notifier: SupportNotifier; private set
+    /** Các tài khoản Viettel Post đăng nhập trên máy để đẩy nháp (phần 2 ở Tôi › ViettelPost). */
+    lateinit var vtpDrafts: VtpDraftHub; private set
     /** Việc chạy nền của cả app (gọi máy chủ, in tem): không bị huỷ khi màn hình hay bảng dưới đóng lại. */
     val scope = MainScope()
     private var lastAlert = 0L
@@ -50,6 +56,7 @@ class ChotLiveApp : Application() {
         store = Store(filesDir, auth.currentAccountKey())
         store.autoClosing = settings.autoClosing
         client = LiveClient(auth) { notifier.notify(it) }
+        vtpDrafts = VtpDraftHub(auth.currentAccountKey(), VtpDraftVault(this), VtpDraftSharedPrefs(this, "vtp_draft"), VtpDraftKeystore)
         printer = PrinterManager(this)
         tickets = TicketRenderer(this, { settings.paperWidth }, { settings.shopName })
 
@@ -57,7 +64,10 @@ class ChotLiveApp : Application() {
             store.addComment(c, client.liveUsername)
             if (store.isClosingComment(c)) playCommentAlert()
         }
-        client.onAccountChange = { store.switchAccount(it) }
+        client.onAccountChange = {
+            store.switchAccount(it)
+            vtpDrafts.switchAppAccount(it)
+        }
         client.onSnapshot = { store.applyServer(it) }
         client.onSyncAck = { id -> if (store.acknowledgeSync(id)) client.flushSync(store) }
         // Server từ chối gói: không chờ xác nhận nữa (không thì app ngừng đồng bộ tới khi nối lại),

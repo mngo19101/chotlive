@@ -1,5 +1,19 @@
 package com.chotlive.app.ui
 
+import kotlinx.coroutines.delay
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonObject
+import com.chotlive.app.net.vtpApproveDraft
+import com.chotlive.app.net.vtpAdoptDraft
+import com.chotlive.app.net.VtpDraftHub
+import com.chotlive.app.net.VtpDraftClient
+import com.chotlive.app.net.VtpDraftApproveOutcome
+import com.chotlive.app.model.VtpDraftBody
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.runtime.mutableIntStateOf
 import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
@@ -536,6 +550,12 @@ fun VtpExportSheet(openDetail: String? = null) {
     var quoting by remember { mutableStateOf(setOf<String>()) }
     // Nháp đang mở để soát chi tiết (mã khách); null là đang ở danh sách nháp.
     var detailId by remember { mutableStateOf(openDetail) }
+    val hub = app.vtpDrafts
+    // Lọc nhanh theo nháp: 0 tất cả, 1 chưa đẩy, 2 nháp VTP, 3 cần sửa.
+    var draftFilter by remember { mutableIntStateOf(0) }
+    var deletingDrafts by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val uri = LocalUriHandler.current
 
     val service = settings.vtpService
     val api = client.vtpConnected
@@ -561,7 +581,8 @@ fun VtpExportSheet(openDetail: String? = null) {
             }
         }.sortedBy { it.isBad } // Đơn sẵn sàng lên đầu, đơn cần sửa xuống cuối; giữ nguyên thứ tự trong từng nhóm.
     }
-    val okIds = groups.filter { !it.isBad }.map { it.id }.toSet()
+    val visible = groups.filter { draftFilterMatches(it, draftFilter, service) }
+    val okIds = visible.filter { !it.isBad }.map { it.id }.toSet()
     val chosen = if (touched) selected.intersect(okIds) else okIds
 
     fun quote(g: Vtp.Group): VtpQuote? = quotes[VtpQuote.signature(g, service)]
@@ -585,28 +606,204 @@ fun VtpExportSheet(openDetail: String? = null) {
         }
     }
 
-    /** Tạo vận đơn thẳng trên Viettel Post (qua máy chủ ChốtLive), mỗi khách một vận đơn. */
+    /**
+     * Duyệt một nháp thành vận đơn giữ nguyên mã: ưu tiên dùng đúng phiên phần 2 đã đẩy trên máy; máy này không
+     * đăng nhập tài khoản đó mà phần 1 kết nối đúng cùng tài khoản thì nhờ máy chủ duyệt qua API đối tác.
+     */
+    suspend fun approveOneDraft(g: Vtp.Group, code: String, estimatedFee: Int, batchId: String): Pair<VtpCreateResult, Boolean> {
+        when (val outcome = hub.approveDraft(g, code)) {
+            is VtpDraftApproveOutcome.Approved -> {
+                val approved = outcome.result
+                val fee = if (approved.fee > 0) approved.fee else estimatedFee
+                store.applyVtpCreated(g.orders, approved.code, fee, service, cod = g.summary.cod, goods = g.summary.goods,
+                    fromDraft = true, batchId = batchId)
+                val p = JsonObject(VtpTrack.payload(g) + mapOf("code" to JsonPrimitive(approved.code), "fee" to JsonPrimitive(fee),
+                    "batchId" to JsonPrimitive(batchId)))
+                // Báo máy chủ để đồng bộ, in tem và nhận cập nhật trạng thái; mất mạng thì thử lại một lần.
+                if (client.vtpAdoptDraft(service, listOf(p)).first == 0) {
+                    delay(1000)
+                    client.vtpAdoptDraft(service, listOf(p))
+                }
+                return VtpCreateResult(g.id, true, approved.code, fee, cod = g.summary.cod, goods = g.summary.goods, fromDraft = true) to false
+            }
+            is VtpDraftApproveOutcome.Unavailable -> {
+                val partner = client.vtp?.phone
+                if (client.vtpConnected && !partner.isNullOrEmpty() &&
+                    (outcome.account.isEmpty() || VtpDraftClient.phonesMatch(partner, outcome.account) == true)) {
+                    val p = JsonObject(VtpTrack.payload(g) + mapOf("code" to JsonPrimitive(code), "fee" to JsonPrimitive(estimatedFee),
+                        "batchId" to JsonPrimitive(batchId)))
+                    val (status, error, results) = client.vtpApproveDraft(service, listOf(p))
+                    val first = results.firstOrNull { it.key == g.id } ?: results.firstOrNull()
+                    if (status == 200 && first != null) {
+                        return if (first.ok && first.code.isNotEmpty()) {
+                            store.applyVtpCreated(g.orders, first.code, first.fee, service, cod = first.cod, goods = first.goods,
+                                fromDraft = true, batchId = batchId)
+                            first.copy(fromDraft = true) to false
+                        } else {
+                            store.applyVtpError(g.orders, first.error)
+                            first to false
+                        }
+                    }
+                    if (status != 404 && error != null) {
+                        store.applyVtpError(g.orders, error)
+                        return VtpCreateResult(g.id, false, error = error) to false
+                    }
+                }
+                store.applyVtpError(g.orders, outcome.reason)
+                return VtpCreateResult(g.id, false, error = outcome.reason) to false
+            }
+            is VtpDraftApproveOutcome.Failed -> {
+                store.applyVtpError(g.orders, outcome.message)
+                return VtpCreateResult(g.id, false, error = outcome.message) to outcome.blocked
+            }
+        }
+    }
+
+    /**
+     * Lên vận đơn: khách đã đẩy nháp khớp đơn hiện tại thì duyệt thẳng nháp (giữ nguyên mã nháp đã in); khách
+     * chưa có nháp thì tạo vận đơn mới qua API đối tác (máy chủ ChốtLive). Nháp cũ thì báo đẩy lại trước.
+     */
     fun create(list: List<Vtp.Group>) {
         if (list.isEmpty() || sending) return
-        if (!hasSender) {
+        val draftItems = mutableListOf<Triple<Int, Vtp.Group, String>>()
+        val staleItems = mutableListOf<Triple<Int, Vtp.Group, String>>()
+        val apiItems = mutableListOf<Pair<Int, Vtp.Group>>()
+        list.forEachIndexed { i, g ->
+            when (val st = VtpDraftBody.status(g, service)) {
+                is VtpDraftBody.Status.Pushed -> draftItems += Triple(i, g, st.code)
+                is VtpDraftBody.Status.Stale -> staleItems += Triple(i, g, st.code)
+                else -> apiItems += i to g
+            }
+        }
+        if (apiItems.isNotEmpty() && (!api || !hasSender)) {
             ui.dismissSheet()
             ui.push(Route.Vtp)
-            ui.notify("Chọn điểm lấy hàng trước khi gửi.")
+            ui.notify(if (!api) "Kết nối Viettel Post (phần 1) để tạo vận đơn cho khách chưa đẩy nháp." else "Chọn điểm lấy hàng trước khi gửi.")
             return
         }
         sending = true
+        val quoteFees = list.associate { g -> g.id to (quote(g)?.takeIf { it.ok }?.fee ?: 0) }
         app.scope.launch {
             client.vtpFlush(store)
-            val (error, results) = client.vtpCreate(service, list.map { VtpTrack.payload(it) })
-            sending = false
-            if (error != null) return@launch ui.notify(error)
-            // Máy chủ đã ghi mã vận đơn vào đơn; ghi luôn trên máy để không phải chờ đồng bộ.
-            for (res in results) {
-                val g = list.firstOrNull { it.id == res.key } ?: continue
-                if (res.ok && res.code.isNotEmpty()) store.applyVtpCreated(g.orders, res.code, res.fee, service, cod = res.cod, goods = res.goods)
-                else if (!res.ok) store.applyVtpError(g.orders, res.error)
+            val byIndex = HashMap<Int, VtpCreateResult>()
+            for ((i, g, code) in staleItems) {
+                val msg = "Nháp $code là bản cũ (đơn đã sửa, thêm món hoặc khác gói dịch vụ). Bấm “Đẩy nháp VTP” để cập nhật nháp, hoặc “Xoá nháp” rồi mới tạo vận đơn."
+                store.applyVtpError(g.orders, msg)
+                byIndex[i] = VtpCreateResult(g.id, false, error = msg)
             }
-            result = list to results
+            var blocked = false
+            val batchPrefix = "vtpd_" + Clock.now.toString(36)
+            draftItems.forEachIndexed { offset, (i, g, code) ->
+                if (blocked) {
+                    byIndex[i] = VtpCreateResult(g.id, false, error = "Viettel Post đang giới hạn gửi liên tục từ máy này, thử lại sau.")
+                    return@forEachIndexed
+                }
+                if (offset > 0) delay(300)
+                val (res, wasBlocked) = approveOneDraft(g, code, quoteFees[g.id] ?: 0, "${batchPrefix}_$offset")
+                byIndex[i] = res
+                if (wasBlocked) blocked = true
+            }
+            if (apiItems.isNotEmpty()) {
+                val (error, results) = client.vtpCreate(service, apiItems.map { VtpTrack.payload(it.second) })
+                if (error != null) {
+                    if (draftItems.isEmpty() && staleItems.isEmpty()) {
+                        sending = false
+                        return@launch ui.notify(error)
+                    }
+                    for ((i, g) in apiItems) byIndex[i] = VtpCreateResult(g.id, false, error = error)
+                } else {
+                    // Máy chủ đã ghi mã vận đơn vào đơn; ghi luôn trên máy để không phải chờ đồng bộ.
+                    for ((i, g) in apiItems) {
+                        val res = results.firstOrNull { it.key == g.id }
+                        if (res == null) {
+                            byIndex[i] = VtpCreateResult(g.id, false, error = "Không nhận được phản hồi từ máy chủ")
+                            continue
+                        }
+                        if (res.ok && res.code.isNotEmpty()) store.applyVtpCreated(g.orders, res.code, res.fee, service, cod = res.cod, goods = res.goods)
+                        else if (!res.ok) store.applyVtpError(g.orders, res.error)
+                        byIndex[i] = res
+                    }
+                }
+            }
+            sending = false
+            result = list to list.indices.map { i -> byIndex[i] ?: VtpCreateResult(list[i].id, false, error = "Lỗi không rõ") }
+        }
+    }
+
+    /** Nhãn nháp Viettel Post của khách: đã đẩy (giờ đẩy), nháp ở tài khoản khác, nháp cũ, lỗi đẩy, chưa đẩy. */
+    @Composable
+    fun draftTag(g: Vtp.Group): Triple<String, Color, Color>? = when (val st = VtpDraftBody.status(g, service)) {
+        is VtpDraftBody.Status.Pushed -> {
+            val acc = g.orders.mapNotNull { it.ship?.draftAccount }.firstOrNull { it.isNotEmpty() }
+            if (hub.loggedInClients.size > 1 && acc != null && !hub.current.owns(acc)) Triple("Nháp · khác TK", C.gomInk, C.gomTag)
+            else Triple("Nháp VTP" + (st.at?.let { " · ${timeText(it)}" } ?: ""), C.vtpInk, C.vtpSoft)
+        }
+        is VtpDraftBody.Status.Stale -> Triple("Nháp cũ", C.gomInk, C.gomTag)
+        is VtpDraftBody.Status.Failed -> Triple("Lỗi đẩy nháp", C.red, C.redSoft)
+        VtpDraftBody.Status.NotPushed -> if (hub.anyLoggedIn && !g.isBad) Triple("Chưa đẩy", C.muted, C.grayBadge) else null
+    }
+
+    fun matchesDraftFilter(g: Vtp.Group, f: Int) = draftFilterMatches(g, f, service)
+
+    /** Đẩy các khách đã chọn vào mục Đơn nháp trên Viettel Post, từ máy này. Chưa đăng nhập phần 2 thì mở màn đăng nhập. */
+    fun pushDrafts(list: List<Vtp.Group>) {
+        if (list.isEmpty()) return
+        // Tài khoản đang dùng chưa đăng nhập hoặc hết phiên mà có tài khoản khác còn phiên: dùng tài khoản đó.
+        if (!hub.current.loggedIn || hub.current.sessionExpired) {
+            hub.loggedInClients.firstOrNull { !it.sessionExpired }?.let { hub.select(it.accountId) }
+        }
+        if (!hub.current.loggedIn || hub.current.sessionExpired) {
+            val expired = hub.current.sessionExpired
+            ui.dismissSheet()
+            ui.push(Route.VtpDraft)
+            ui.notify(if (expired) "Phiên Viettel Post trên máy này đã hết. Đăng nhập lại rồi đẩy nháp."
+                      else "Đăng nhập Viettel Post trên máy này (phần 2 · Đẩy nháp) rồi đẩy nháp.")
+            return
+        }
+        val svc = service
+        ui.present(0.42f) { VtpDraftPushSheet(list, svc) }
+    }
+
+    /** Xoá nháp trên Viettel Post. Chỉ bỏ nhãn trong app khi Viettel Post báo xoá được. */
+    fun deleteDrafts(list: List<Vtp.Group>) {
+        if (list.isEmpty() || deletingDrafts) return
+        if (!hub.anyLoggedIn) {
+            ui.dismissSheet()
+            ui.push(Route.VtpDraft)
+            ui.notify("Đăng nhập Viettel Post trên máy này (phần 2 · Đẩy nháp) rồi xoá nháp.")
+            return
+        }
+        val count = list.sumOf { VtpDraftBody.codes(it).size }
+        ui.confirm = ConfirmItem("Xoá $count nháp trên Viettel Post?",
+            "Nháp bị xoá khỏi mục Đơn nháp trên viettelpost.vn. Đơn trong app vẫn ở Chờ gửi.", "Xoá nháp") {
+            deletingDrafts = true
+            app.scope.launch {
+                val failed = mutableListOf<String>()
+                for (g in list) {
+                    // Mỗi mã nháp xoá bằng đúng tài khoản đã đẩy mã đó.
+                    val left = hub.deleteDrafts(g)
+                    val name = g.summary.receiver.ifEmpty { g.customer.nickname }
+                    failed += left.map { "$name (${it.first}): ${it.second}" }
+                    if (left.isEmpty()) store.clearDraft(g.orders)
+                }
+                deletingDrafts = false
+                ui.notify(if (failed.isEmpty()) "Đã xoá nháp trên Viettel Post."
+                          else "Chưa xoá được ${failed.size} nháp:\n" + failed.take(5).joinToString("\n"))
+            }
+        }
+    }
+
+    /** Sao chép mã nháp rồi mở viettelpost.vn để tìm trong mục Đơn nháp. */
+    fun viewDraft(codes: List<String>) {
+        clipboard.setText(AnnotatedString(codes.joinToString(" ")))
+        ui.notify("Đã sao chép mã nháp. Trên viettelpost.vn mở Quản lý vận đơn › Đơn nháp rồi dán mã để tìm.")
+        uri.openUri("https://viettelpost.vn/")
+    }
+
+    /** Bỏ nhãn nháp trong app, không gọi Viettel Post (dùng khi đã tự xoá nháp trên web). */
+    fun clearDraftLabel(g: Vtp.Group) {
+        ui.confirm = ConfirmItem("Bỏ nhãn nháp?", "Chỉ bỏ nhãn trong app. Nếu nháp còn trên viettelpost.vn thì phải tự xoá ở đó.", "Bỏ nhãn") {
+            store.clearDraft(g.orders)
         }
     }
 
@@ -634,8 +831,14 @@ fun VtpExportSheet(openDetail: String? = null) {
         if (res != null) {
             VtpResultView(res.first, res.second)
         } else if (detail != null) {
+            val pushed = VtpDraftBody.status(detail, service) is VtpDraftBody.Status.Pushed
             DraftDetail(detail, quote(detail), isQuoting(detail), service, sending,
-                onBack = { detailId = null }, onCreate = { create(listOf(detail)) })
+                canCreate = api || (pushed && hub.anyLoggedIn), approve = pushed && hub.anyLoggedIn,
+                onBack = { detailId = null }, onCreate = { create(listOf(detail)) }, onPush = { pushDrafts(listOf(detail)) },
+                draftBox = {
+                    DraftBox(detail, service, hub, deletingDrafts, onView = { viewDraft(it) }, onDelete = { deleteDrafts(listOf(detail)) },
+                        onPush = { pushDrafts(listOf(detail)) }, onClear = { clearDraftLabel(detail) })
+                })
         } else {
             val bad = groups.count { it.isBad }
             Column(Modifier.fillMaxSize()) {
@@ -648,9 +851,31 @@ fun VtpExportSheet(openDetail: String? = null) {
                     }
                     SheetClose()
                 }
+                // Hàng lọc nhanh theo nháp: chỉ hiện khi đã đăng nhập đẩy nháp hoặc có khách mang nhãn nháp.
+                val showDrafts = hub.anyLoggedIn || groups.any { VtpDraftBody.status(it, service) !is VtpDraftBody.Status.NotPushed }
+                if (showDrafts) {
+                    Row(Modifier.padding(top = 12.dp).fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Metrics.GUTTER.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for ((id, title) in listOf(0 to "Tất cả", 1 to "Chưa đẩy", 2 to "Nháp VTP", 3 to "Cần sửa")) {
+                            val n = if (id == 0) groups.size else groups.count { matchesDraftFilter(it, id) }
+                            val on = draftFilter == id
+                            Box(Modifier.height(30.dp).capsule(if (on) C.ink else C.card, if (on) null else C.line).plainTap {
+                                draftFilter = id
+                                touched = false
+                            }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                                T("$title $n", 12.5f, BV.BOLD, if (on) C.card else C.muted, maxLines = 1)
+                            }
+                        }
+                    }
+                }
                 Row(Modifier.fillMaxWidth().padding(start = (Metrics.GUTTER + 4).dp, end = (Metrics.GUTTER + 4).dp, top = 12.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     T("ĐÃ CHỌN ${chosen.size}", 12f, BV.BOLD, C.muted, Modifier.weight(1f), track = 0.4f)
+                    val withDraft = groups.filter { chosen.contains(it.id) && VtpDraftBody.codes(it).isNotEmpty() }
+                    if (withDraft.isNotEmpty()) {
+                        T(if (deletingDrafts) "Đang xoá…" else "Xoá nháp (${withDraft.size})", 13f, BV.BOLD, C.red,
+                            Modifier.plainTap(!deletingDrafts) { deleteDrafts(withDraft) })
+                    }
                     T(if (chosen.size == okIds.size && chosen.isNotEmpty()) "Bỏ chọn tất cả" else "Chọn tất cả", 13f, BV.BOLD,
                         if (okIds.isEmpty()) C.faint else C.accent, Modifier.plainTap(okIds.isNotEmpty()) {
                             selected = if (chosen.size == okIds.size) emptySet() else okIds
@@ -667,10 +892,11 @@ fun VtpExportSheet(openDetail: String? = null) {
                         T("Viettel Post chưa nhận đơn nào. Soát xong rồi mới bấm Tạo.", 12.5f, BV.MEDIUM, C.muted,
                             Modifier.padding(horizontal = 4.dp))
                     }
-                    for (g in groups) {
+                    if (groups.isNotEmpty() && visible.isEmpty()) EmptyNote("Không có khách nào ở mục này.", 12f)
+                    for (g in visible) {
                         androidx.compose.runtime.key(g.id) {
                             val on = chosen.contains(g.id)
-                            DraftRow(g, on, api, quote(g), isQuoting(g), onToggle = {
+                            DraftRow(g, on, api, quote(g), isQuoting(g), draftTag(g), detailLink = api || hub.anyLoggedIn, onToggle = {
                                 if (!g.isBad) {
                                     selected = if (on) chosen - g.id else chosen + g.id
                                     touched = true
@@ -721,19 +947,30 @@ fun VtpExportSheet(openDetail: String? = null) {
                                 if (api && feeTotal > 0) T("Cước dự tính ${money(feeTotal)}", 12f, BV.SEMIBOLD, C.muted, maxLines = 1)
                             }
                         }
+                        // Mọi khách đã chọn đều có nháp khớp: duyệt nháp được cả khi chưa kết nối phần 1.
+                        val allPushed = picked.isNotEmpty() && picked.all { VtpDraftBody.status(it, service) is VtpDraftBody.Status.Pushed }
+                        val approveOnly = !api && hub.anyLoggedIn && allPushed
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlineButton("Huỷ", Modifier.weight(1f), height = 52f) { ui.dismissSheet() }
-                            if (api) {
+                            // Đẩy nháp: đơn vào mục Đơn nháp trên viettelpost.vn, Viettel Post chưa nhận đơn.
+                            Row(Modifier.weight(1f).height(52.dp).alpha(if (chosen.isNotEmpty() && !sending) 1f else 0.5f)
+                                .capsule(C.card, C.vtpBrand, 1.5f).tap(chosen.isNotEmpty() && !sending) { pushDrafts(picked) }
+                                .padding(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(IconName.ARROW_RIGHT, 14f, 2.4f, C.vtpBrand)
+                                T("Đẩy nháp VTP", 14.5f, BV.BOLD, C.vtpBrand, shrink = true, minScale = 0.8f)
+                            }
+                            if (api || approveOnly) {
                                 PrimaryButton(
-                                    if (sending) "Đang tạo ${chosen.size} vận đơn…" else if (busy) "Đang tính cước…" else "Tạo ${chosen.size} vận đơn",
-                                    Modifier.weight(2f), IconName.TRUCK, 15f, enabled = chosen.isNotEmpty() && !sending && !busy,
+                                    if (sending) (if (allPushed) "Đang duyệt…" else "Đang tạo…") else if (busy) "Đang tính cước…"
+                                    else if (allPushed) "Duyệt ${chosen.size} nháp" else "Tạo ${chosen.size} vận đơn",
+                                    Modifier.weight(1.3f), IconName.TRUCK, 15f, enabled = chosen.isNotEmpty() && !sending && !busy,
                                 ) { create(picked) }
                             } else {
-                                PrimaryButton("Xuất Excel · ${chosen.size} vận đơn", Modifier.weight(2f), IconName.DOWNLOAD, 15f,
+                                PrimaryButton("Xuất Excel · ${chosen.size}", Modifier.weight(1.3f), IconName.DOWNLOAD, 15f,
                                     enabled = chosen.isNotEmpty()) { export(picked) }
                             }
                         }
-                        if (api) {
+                        if (api || approveOnly) {
                             val can = chosen.isNotEmpty() && !sending
                             Box(Modifier.fillMaxWidth().padding(top = 0.dp), contentAlignment = Alignment.Center) {
                                 T("Hoặc xuất file Excel như cũ", 13f, BV.BOLD, if (can) C.accent else C.faint,
@@ -749,7 +986,14 @@ fun VtpExportSheet(openDetail: String? = null) {
 
 /** Một nháp trong danh sách: tên, tiền thu hộ, địa chỉ, cước dự tính. */
 @Composable
-private fun DraftRow(g: Vtp.Group, on: Boolean, api: Boolean, q: VtpQuote?, quoting: Boolean, onToggle: () -> Unit, onDetail: () -> Unit) {
+private fun DraftRow(
+    g: Vtp.Group, on: Boolean, api: Boolean, q: VtpQuote?, quoting: Boolean,
+    /** Nhãn nháp Viettel Post (Nháp VTP, Nháp cũ, Lỗi đẩy nháp, Chưa đẩy). */
+    draftTag: Triple<String, Color, Color>?,
+    /** Hiện "Soát chi tiết ›" (khi có phần 1 hoặc đã đăng nhập đẩy nháp). */
+    detailLink: Boolean,
+    onToggle: () -> Unit, onDetail: () -> Unit,
+) {
     val ui = LocalAppUI.current
     val s = g.summary
     val start = Clock.startOfDay(Clock.today())
@@ -767,6 +1011,7 @@ private fun DraftRow(g: Vtp.Group, on: Boolean, api: Boolean, q: VtpQuote?, quot
             }
             val tags = buildList {
                 if (g.isBad) add(Triple("cần sửa", C.red, C.redSoft))
+                if (draftTag != null) add(draftTag)
                 if (g.orders.size > 1) add(Triple("gộp ${g.orders.size} đơn", C.gomInk, C.gomTag))
                 if (olderDay != null) add(Triple("duyệt $olderDay", C.muted, C.grayBadge))
                 if (s.allPaid) add(Triple("bank đủ", C.green, C.greenSoft))
@@ -807,9 +1052,9 @@ private fun DraftRow(g: Vtp.Group, on: Boolean, api: Boolean, q: VtpQuote?, quot
                 } else ""
                 T(listOf(who + small, weightText(s.weightG), s.address.shortArea).filter { it.isNotEmpty() }.joinToString(" · "),
                     12f, BV.MEDIUM, C.muted, lineHeight = 16f)
-                if (api) {
+                if (api || detailLink) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val fee = if (quoting) "Đang tính cước…" else if (q?.ok == true) "Cước dự tính ${money(q.fee)}" else "Cước chưa tính"
+                        val fee = if (!api) "" else if (quoting) "Đang tính cước…" else if (q?.ok == true) "Cước dự tính ${money(q.fee)}" else "Cước chưa tính"
                         T(fee, 12.5f, BV.BOLD, C.ink, Modifier.weight(1f), shrink = true, minScale = 0.8f)
                         T("Soát chi tiết ›", 12.5f, BV.BOLD, C.accent, Modifier.plainTap(onClick = onDetail), maxLines = 1)
                     }
@@ -830,7 +1075,13 @@ private fun DraftRow(g: Vtp.Group, on: Boolean, api: Boolean, q: VtpQuote?, quot
 /** Soát một nháp trước khi tạo vận đơn. */
 @Composable
 private fun DraftDetail(
-    g: Vtp.Group, q: VtpQuote?, busy: Boolean, service: String, sending: Boolean, onBack: () -> Unit, onCreate: () -> Unit,
+    g: Vtp.Group, q: VtpQuote?, busy: Boolean, service: String, sending: Boolean,
+    /** Có nút tạo / duyệt (phần 1 đã kết nối, hoặc nháp khớp và máy đã đăng nhập đẩy nháp). */
+    canCreate: Boolean,
+    /** Nút chính là duyệt nháp (giữ nguyên mã nháp) thay vì tạo vận đơn mới. */
+    approve: Boolean,
+    onBack: () -> Unit, onCreate: () -> Unit, onPush: () -> Unit,
+    draftBox: @Composable () -> Unit,
 ) {
     val ui = LocalAppUI.current
     val s = g.summary
@@ -893,7 +1144,8 @@ private fun DraftDetail(
                 if (s.shipFee > 0) KV(if (s.feeIsReal) "Tiền ship cộng vào thu hộ" else "Tiền ship cộng vào thu hộ (tạm tính)", money(s.shipFee))
                 KV("Thu hộ (COD)", money(s.cod), strong = true)
             }
-            DetailBox("CƯỚC DỰ TÍNH · $service") {
+            draftBox()
+            if (q != null || busy || (canCreate && !approve)) DetailBox("CƯỚC DỰ TÍNH · $service") {
                 if (busy) {
                     T("Đang tính cước…", 13f, BV.MEDIUM, C.muted)
                 } else if (q?.ok == true) {
@@ -911,10 +1163,65 @@ private fun DraftDetail(
             HairLine()
             Row(Modifier.padding(start = Metrics.GUTTER.dp, end = Metrics.GUTTER.dp, top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlineButton("Để nháp", Modifier.weight(1f), height = 52f, onClick = onBack)
-                PrimaryButton(if (sending) "Đang tạo vận đơn…" else if (busy) "Đang tính cước…" else "Tạo vận đơn này",
-                    Modifier.weight(2f), IconName.TRUCK, 15f, enabled = !g.isBad && !sending && !busy, onClick = onCreate)
+                if (canCreate) {
+                    PrimaryButton(
+                        if (sending) (if (approve) "Đang duyệt nháp…" else "Đang tạo vận đơn…") else if (busy && !approve) "Đang tính cước…"
+                        else if (approve) "Duyệt nháp lên đơn" else "Tạo vận đơn này",
+                        Modifier.weight(2f), IconName.TRUCK, 15f, enabled = !g.isBad && !sending && (approve || !busy), onClick = onCreate)
+                } else {
+                    PrimaryButton("Đẩy nháp VTP", Modifier.weight(2f), IconName.ARROW_RIGHT, 15f, enabled = !g.isBad && !sending, onClick = onPush)
+                }
             }
         }
+    }
+}
+
+/** Ô "Nháp Viettel Post" trong chi tiết khách: mã nháp, giờ đẩy, tài khoản, và các nút đẩy / xoá / xem. */
+@Composable
+private fun DraftBox(
+    g: Vtp.Group, service: String, hub: VtpDraftHub, deleting: Boolean,
+    onView: (List<String>) -> Unit, onDelete: () -> Unit, onPush: () -> Unit, onClear: () -> Unit,
+) {
+    val st = VtpDraftBody.status(g, service)
+    val codes = VtpDraftBody.codes(g)
+    val ship = g.orders.mapNotNull { it.ship }.firstOrNull { !it.draftCode.isNullOrEmpty() }
+    val otherAccount = ship?.draftAccount?.takeIf {
+        st is VtpDraftBody.Status.Pushed && hub.loggedInClients.size > 1 && it.isNotEmpty() && !hub.current.owns(it)
+    }
+    val enabled = !g.isBad && !deleting
+    DetailBox("NHÁP VIETTEL POST") {
+        when (st) {
+            VtpDraftBody.Status.NotPushed ->
+                T("Chưa đẩy nháp. Bấm Đẩy nháp để đơn vào mục Đơn nháp trên viettelpost.vn (chưa gọi bưu tá).", 12.5f, BV.MEDIUM, C.muted)
+            is VtpDraftBody.Status.Failed -> T("Lần đẩy trước lỗi: ${st.error}", 12.5f, BV.SEMIBOLD, C.red)
+            else -> {
+                KV("Mã nháp", codes.joinToString(", "), strong = true)
+                ship?.draftAt?.let { KV("Đẩy lúc", "${timeText(it)} ${dayMonth(it)}") }
+                ship?.draftAccount?.takeIf { it.isNotEmpty() }?.let { KV("Tài khoản", it) }
+                when {
+                    st is VtpDraftBody.Status.Stale ->
+                        T("Nháp trên Viettel Post là bản cũ: đơn đã sửa hoặc thêm đơn sau khi đẩy. Đẩy lại để thay.", 12.5f, BV.BOLD, C.gomInk)
+                    otherAccount != null ->
+                        T("Nháp đang nằm ở $otherAccount, khác tài khoản đang chọn (${hub.current.accountLabel}).", 12.5f, BV.BOLD, C.gomInk)
+                    else -> T("✓ Khớp với đơn hiện tại", 12.5f, BV.BOLD, C.green)
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            when (st) {
+                is VtpDraftBody.Status.Pushed -> {
+                    OutlineButton("Xem trên VTP", Modifier.weight(1f), enabled = enabled) { onView(codes) }
+                    OutlineButton(if (deleting) "Đang xoá…" else "Xoá nháp", Modifier.weight(1f), color = C.red, enabled = enabled, onClick = onDelete)
+                }
+                is VtpDraftBody.Status.Stale -> {
+                    OutlineButton("Đẩy lại nháp", Modifier.weight(1f), color = C.vtpBrand, enabled = enabled, onClick = onPush)
+                    OutlineButton(if (deleting) "Đang xoá…" else "Xoá nháp", Modifier.weight(1f), color = C.red, enabled = enabled, onClick = onDelete)
+                }
+                else -> OutlineButton("Đẩy nháp VTP", Modifier.weight(1f), color = C.vtpBrand, enabled = enabled, onClick = onPush)
+            }
+        }
+        if (otherAccount != null) OutlineButton("Chuyển sang TK đang dùng", color = C.vtpBrand, enabled = enabled, onClick = onPush)
+        if (codes.isNotEmpty()) T("Bỏ nhãn nháp (đã tự xoá trên web)", 12.5f, BV.BOLD, C.muted, Modifier.plainTap(onClick = onClear))
     }
 }
 
@@ -959,5 +1266,16 @@ object ShareFile {
         } catch (e: Exception) {
             Toast.makeText(context, "Không mở được bảng chia sẻ. File vẫn nằm trong thư mục Tải xuống.", Toast.LENGTH_LONG).show()
         }
+    }
+}
+
+/** Lọc nhanh theo nháp: 1 chưa đẩy, 2 nháp VTP (kể cả nháp cũ), 3 cần sửa; còn lại là tất cả. */
+private fun draftFilterMatches(g: Vtp.Group, f: Int, service: String): Boolean {
+    val st = VtpDraftBody.status(g, service)
+    return when (f) {
+        1 -> st is VtpDraftBody.Status.NotPushed && !g.isBad
+        2 -> st is VtpDraftBody.Status.Pushed || st is VtpDraftBody.Status.Stale
+        3 -> st is VtpDraftBody.Status.Failed || g.isBad
+        else -> true
     }
 }

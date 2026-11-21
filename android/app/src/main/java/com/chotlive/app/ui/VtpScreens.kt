@@ -1,5 +1,8 @@
 package com.chotlive.app.ui
 
+import kotlinx.coroutines.delay
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.onGloballyPositioned
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -109,10 +112,22 @@ private fun CardBox(fill: Color = C.card, border: Color = C.line, spacing: Float
 
 /** Dán token một lần. Chưa kết nối thì app vẫn y như cũ (xuất Excel); kết nối rồi thì gửi vận đơn thẳng lên Viettel Post. */
 @Composable
-fun VtpConnectScreen() {
+fun VtpConnectScreen(
+    /** Mở thẳng phần 2 "Đẩy nháp" (từ nút Đẩy nháp VTP khi chưa đăng nhập). */
+    focusDraft: Boolean = false,
+) {
     val app = LocalApp.current
     val client = app.client
     val settings = app.settings
+    val scroll = rememberScrollState()
+    var draftTop by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(draftTop) {
+        val y = draftTop ?: return@LaunchedEffect
+        if (focusDraft) {
+            delay(350)
+            scroll.animateScrollTo(y)
+        }
+    }
     val ui = LocalAppUI.current
     var token by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -158,10 +173,11 @@ fun VtpConnectScreen() {
 
     SubPage("Kết nối ViettelPost") {
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            Modifier.fillMaxSize().verticalScroll(scroll)
                 .padding(start = Metrics.GUTTER.dp, end = Metrics.GUTTER.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(Metrics.GAP.dp),
         ) {
+            VtpSectionHeader(1, "Tạo vận đơn", "nút “Lên vận đơn”")
             if (client.vtpConnected && conn != null) {
                 // Đã kết nối
                 CardBox(spacing = 12f) {
@@ -289,6 +305,10 @@ fun VtpConnectScreen() {
                     }
                 }
             }
+            Box(Modifier.onGloballyPositioned { draftTop = it.positionInParent().y.toInt() }) {
+                VtpSectionHeader(2, "Đẩy nháp", "nút “Đẩy nháp VTP”", C.vtpBrand)
+            }
+            VtpDraftSection()
         }
     }
 }
@@ -324,11 +344,12 @@ fun VtpResultView(groups: List<Vtp.Group>, results: List<VtpCreateResult>) {
     val app = LocalApp.current
     val ui = LocalAppUI.current
     val okList = results.filter { it.ok }
+    val allFromDraft = okList.isNotEmpty() && okList.all { it.fromDraft }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = Metrics.GUTTER.dp, end = Metrics.GUTTER.dp, bottom = 12.dp), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                T("Đã tạo ${okList.size}/${results.size} vận đơn", 20f, BV.HEAVY, C.ink, track = -0.3f)
-                T(if (okList.isEmpty()) "Chưa tạo được vận đơn nào" else "${okList.size} khách đã chuyển sang Đang giao", 13f, BV.MEDIUM, C.muted)
+                T(if (allFromDraft) "Đã duyệt ${okList.size}/${results.size} đơn nháp" else "Đã tạo ${okList.size}/${results.size} vận đơn", 20f, BV.HEAVY, C.ink, track = -0.3f)
+                T(if (okList.isEmpty()) "Chưa tạo được vận đơn nào" else if (allFromDraft) "${okList.size} khách giữ nguyên mã nháp · đã chuyển Đang giao" else "${okList.size} khách đã chuyển sang Đang giao", 13f, BV.MEDIUM, C.muted)
             }
             SheetClose()
         }
@@ -349,10 +370,10 @@ fun VtpResultView(groups: List<Vtp.Group>, results: List<VtpCreateResult>) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             T(g?.let { it.summary.receiver.ifEmpty { it.customer.nickname } } ?: r.key, 15f, BV.BOLD, maxLines = 1)
                             if (r.ok) {
-                                val extra = (if (r.fee > 0) " · cước ${money(r.fee)}" else "") + (if (r.already) " · đã có từ trước" else "")
+                                val extra = (if (r.fee > 0) " · cước ${money(r.fee)}" else "") + (if (r.fromDraft) " · từ nháp" else if (r.already) " · đã có từ trước" else "")
                                 T("Mã ${VtpTrack.pretty(r.code)}$extra", 13f, BV.SEMIBOLD, C.ink)
                             } else {
-                                T("ViettelPost báo: ${r.error}", 12.5f, BV.SEMIBOLD, C.red, lineHeight = 17f)
+                                T(if (r.error.startsWith("Nháp ") || r.error.startsWith("Phiên ")) r.error else "ViettelPost báo: ${r.error}", 12.5f, BV.SEMIBOLD, C.red, lineHeight = 17f)
                                 if (g != null) {
                                     T("Sửa rồi thử lại", 12.5f, BV.BOLD, C.accent, Modifier.plainTap {
                                         ui.dismissSheet()

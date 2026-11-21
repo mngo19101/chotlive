@@ -123,8 +123,10 @@ fun SettingsScreen() {
 
         SectionLabel("Cài đặt")
         Column(Modifier.fillMaxWidth().padding(bottom = 15.dp).cardStyle(22f)) {
-            SettingRow(IconName.TRUCK, "ViettelPost", if (client.vtpConnected) "Đã kết nối" else "Chưa kết nối",
-                if (client.vtpConnected) C.green else C.muted) { ui.push(Route.Vtp) }
+            val (draftText, draftOk) = draftStatus(app.vtpDrafts)
+            SettingRow(IconName.TRUCK, "ViettelPost", "Vận đơn: " + if (client.vtpConnected) "đã kết nối" else "chưa kết nối",
+                if (client.vtpConnected) C.green else C.muted, trailing2 = draftText,
+                trailing2Color = when (draftOk) { true -> C.green; false -> C.red; null -> C.muted }) { ui.push(Route.Vtp) }
             HairLine()
             SettingRow(IconName.PRINTER, "Máy in", if (printer.isConnected) "Đã kết nối" else "Chưa kết nối",
                 if (printer.isConnected) C.green else C.muted) { ui.push(Route.Printer) }
@@ -158,10 +160,11 @@ fun SettingsScreen() {
 
 @Composable
 private fun SettingRow(
-    icon: IconName, title: String, trailing: String? = null, trailingColor: Color = C.muted, isNew: Boolean = false, onClick: () -> Unit,
+    icon: IconName, title: String, trailing: String? = null, trailingColor: Color = C.muted, isNew: Boolean = false,
+    trailing2: String? = null, trailing2Color: Color = C.muted, onClick: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().height(56.dp).tap(onClick = onClick).padding(horizontal = 17.dp),
+        Modifier.fillMaxWidth().height(if (trailing2 != null) 62.dp else 56.dp).tap(onClick = onClick).padding(horizontal = 17.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -176,7 +179,12 @@ private fun SettingRow(
                 }
             }
         }
-        if (trailing != null) T(trailing, 12f, BV.SEMIBOLD, trailingColor, maxLines = 1)
+        if (trailing2 != null) {
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                if (trailing != null) T(trailing, 12f, BV.SEMIBOLD, trailingColor, maxLines = 1)
+                T(trailing2, 12f, BV.SEMIBOLD, trailing2Color, maxLines = 1)
+            }
+        } else if (trailing != null) T(trailing, 12f, BV.SEMIBOLD, trailingColor, maxLines = 1)
         Icon(IconName.CHEVRON_RIGHT, 16f, 2.4f, C.muted)
     }
 }

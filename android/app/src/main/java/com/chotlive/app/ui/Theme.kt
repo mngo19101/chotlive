@@ -96,6 +96,10 @@ data class Palette(val dark: Boolean, val accentChoice: AccentChoice) {
     /** Nhãn "Có N đơn gom…", "gộp 2 đơn". */
     val gomTag = d(0xFFF1D6, 0x3A2F15)
     val gomInk = d(0x8A5300, 0xF5C96A)
+    /** Màu Viettel Post cho nút "Đẩy nháp VTP" và nhãn "Nháp VTP". */
+    val vtpBrand = hex(0xEE0033)
+    val vtpInk = d(0xD1002D, 0xFF6B86)
+    val vtpSoft = d(0xFFEEF2, 0x3A1620)
     /** Dòng khách thiếu thông tin trong bảng xuất. */
     val badRow = d(0xFDF6F6, 0x2A191A)
     /** Nút chọn 2 lựa chọn. */

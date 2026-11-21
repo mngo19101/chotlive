@@ -90,6 +90,8 @@ sealed interface Route {
     data object Help : Route
     data object Appearance : Route
     data object Vtp : Route
+    /** Tôi › ViettelPost, cuộn thẳng tới phần 2 "Đẩy nháp". */
+    data object VtpDraft : Route
 }
 
 class PathEntry(val key: Long, val route: Route)
@@ -199,6 +201,9 @@ fun MainShell(app: ChotLiveApp) {
                 ui.push(Route.Help)
             }
         }
+        // Phần 1 kết nối hay đổi số: tự chọn tài khoản đẩy nháp cùng số (khi shop chưa tự chọn).
+        val partnerPhone = client.vtp?.takeIf { it.connected }?.phone
+        LaunchedEffect(partnerPhone) { app.vtpDrafts.syncWithPartner(partnerPhone) }
         // Server bản cũ không tự ghi phiên: máy tự ghi theo trạng thái live.
         var first by remember { mutableStateOf(true) }
         LaunchedEffect(client.liveState) {
@@ -264,6 +269,7 @@ private fun Destination(route: Route) {
         Route.Help -> SupportChatScreen()
         Route.Appearance -> AppearanceScreen()
         Route.Vtp -> VtpConnectScreen()
+        Route.VtpDraft -> VtpConnectScreen(focusDraft = true)
     }
 }
 

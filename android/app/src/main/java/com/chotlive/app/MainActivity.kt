@@ -10,6 +10,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.chotlive.app.ui.RootView
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val app: ChotLiveApp get() = application as ChotLiveApp
@@ -56,6 +57,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         app.client.checkSocket()
+        // Làm mới phiên đẩy nháp Viettel Post của mọi tài khoản trên máy.
+        app.scope.launch { app.vtpDrafts.refreshAll() }
         app.printer.refreshStatus()
     }
 
