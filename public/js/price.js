@@ -22,7 +22,7 @@ export const stripAccents = (s) =>
  * Giống regex của PriceParser trên app iPhone và Android.
  */
 const RE =
-  /(?<![a-z\d])(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(?:(?<=tr|ieu|cu)\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3})?(?![a-z\d])/g;
+  /(?:(?<![a-z\d])|(?<=^l|[^a-z\d]l))(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(?:(?<=tr|ieu|cu)\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3})?(?![a-z\d])/g;
 
 /**
  * Số điện thoại Việt Nam (0… hoặc +84…), kể cả viết tách bằng dấu cách, chấm, gạch:
@@ -117,7 +117,7 @@ export function parsePrice(text, opts = {}) {
   return parsePriceWithMatch(text, opts).price;
 }
 
-const CODE_FILLERS = /(?<![a-z\d])(?:ma|va|voi)(?![a-z\d])|[\s,;+&/.-]/g;
+const CODE_FILLERS = /(?<![a-z\d])(?:ma|va|voi|l)(?![a-z\d])|[\s,;+&/.-]/g;
 
 /**
  * Bình luận chỉ ghi mã/giá, ví dụ "280", "mã 150, 180". "Mã 130 giá sao" là hỏi giá nên không tính.

@@ -7,6 +7,12 @@ import { summarizeGroup } from '../public/js/vtp-export.js';
 const { isOnlyCodes, parsePrice } = price;
 const parseMoneyInput = (text) => price.parseMoneyInput(text);
 
+test('"L40" (lấy 40) là giá 40.000, "sl40"/"xl40" thì không', () => {
+  for (const [text, v] of [['L40', 40000], ['l40', 40000], ['chốt L40', 40000], ['L 40', 40000], ['L150k', 150000], ['sl40', null], ['xl40', null]])
+    assert.equal(parsePrice(text), v, text);
+  for (const text of ['L40', 'L 40', 'L40, L50']) assert.equal(isOnlyCodes(text), true, text);
+});
+
 test('chỉ ghi mã mới tính là chốt đơn, có số thôi thì không', () => {
   for (const text of ['280', 'mã 150, 180', '150k', 'Mã 120 và 180']) assert.equal(isOnlyCodes(text), true, text);
   for (const text of ['Mã 130 giá sao', '35 tuổi', 'Cho em xem mã 25 với', '0905123456', 'sz 38 mã 250', '', 'hello'])

@@ -8,7 +8,7 @@ object PriceParser {
     /** Sau "tr", "triệu", "củ" được cách một dấu cách trước phần lẻ: "1 triệu 2" = 1.200.000,
      *  trừ khi số đó là số lượng hoặc một giá khác ("1tr 2 cái", "1tr 200k"). Giống RE của public/js/price.js. */
     private val regex = Regex(
-        """(?<![a-z\d])(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(?:(?<=tr|ieu|cu)\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3})?(?![a-z\d])"""
+        """(?:(?<![a-z\d])|(?<=^l|[^a-z\d]l))(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(?:(?<=tr|ieu|cu)\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3})?(?![a-z\d])"""
     )
     private val grouped = Regex("""^\d{1,3}(?:[.,]\d{3})+$""")
     private val marks = Regex("""\p{Mn}+""")
@@ -95,9 +95,9 @@ object PriceParser {
     }
 
     /** Các số đi liền nhau chỉ cách bởi "với", "và", dấu phẩy... ("120 với 180"). */
-    private val connector = Regex("""^\s*(?:[,;+&/-]|va|voi)?\s*(?:ma\s+)?$""")
-    private val codePrefix = Regex("""(?<![a-z\d])ma\s+$""")
-    private val fillers = Regex("""(?<![a-z\d])(?:ma|va|voi)(?![a-z\d])|[\s,;+&/.-]""")
+    private val connector = Regex("""^\s*(?:[,;+&/-]|va|voi)?\s*(?:ma\s+|l)?$""")
+    private val codePrefix = Regex("""(?<![a-z\d])(?:ma\s+|l\s*)$""")
+    private val fillers = Regex("""(?<![a-z\d])(?:ma|va|voi|l)(?![a-z\d])|[\s,;+&/.-]""")
 
     /** Các mã khách chốt trong 1 bình luận: số có giá lớn nhất và các số nối liền với nó.
      *  Số nhỏ hơn 10k không tính vì thường là số lượng hoặc size ("lấy 2 cái 150"). */

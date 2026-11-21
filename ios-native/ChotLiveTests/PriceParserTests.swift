@@ -30,6 +30,14 @@ final class PriceParserTests: XCTestCase {
         for (text, price) in sizeQty { XCTAssertEqual(PriceParser.parse(text), price, text) }
     }
 
+    func testLetterLBeforeNumberIsAPrice() {
+        let cases: [(String, Int)] = [("L40", 40000), ("l40", 40000), ("chốt L40", 40000), ("L 40", 40000), ("L150k", 150000), ("sl40", 0), ("xl40", 0)]
+        for (text, price) in cases { XCTAssertEqual(PriceParser.parse(text), price, text) }
+        for text in ["L40", "L 40", "L40, L50"] { XCTAssertTrue(PriceParser.isOnlyCodes(text), text) }
+        XCTAssertEqual(PriceParser.orderTokens("L40 L50").map(\.price), [40000, 50000])
+        XCTAssertEqual(PriceParser.segments("L40").filter(\.isCode).map(\.text), ["L40"])
+    }
+
     func testPhoneIsNotOnlyCodes() {
         for text in ["0912 345 678", "0912.345.678", "150 0912 345 678"] { XCTAssertFalse(PriceParser.isOnlyCodes(text), text) }
         XCTAssertTrue(PriceParser.isOnlyCodes("mã 150"))

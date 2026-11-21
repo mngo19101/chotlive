@@ -5,7 +5,7 @@ enum PriceParser {
     /// Sau "tr", "triệu", "củ" được cách một dấu cách trước phần lẻ: "1 triệu 2" = 1.200.000,
     /// trừ khi số đó là số lượng hoặc một giá khác ("1tr 2 cái", "1tr 200k"). Giống RE của public/js/price.js.
     private static let regex = try! NSRegularExpression(
-        pattern: #"(?<![a-z\d])(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(?:(?<=tr|ieu|cu)\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3})?(?![a-z\d])"#
+        pattern: #"(?:(?<![a-z\d])|(?<=^l|[^a-z\d]l))(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(?:(?<=tr|ieu|cu)\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3})?(?![a-z\d])"#
     )
     private static let grouped = try! NSRegularExpression(pattern: #"^\d{1,3}(?:[.,]\d{3})+$"#)
     /// Số điện thoại Việt Nam (0… hoặc +84…), kể cả viết tách: "0912 345 678", "098.812.3456".
@@ -118,9 +118,9 @@ enum PriceParser {
     }
 
     /// Các số đi liền nhau chỉ cách bởi "với", "và", dấu phẩy... ("120 với 180").
-    private static let connector = try! NSRegularExpression(pattern: #"^\s*(?:[,;+&/-]|va|voi)?\s*(?:ma\s+)?$"#)
-    private static let codePrefix = try! NSRegularExpression(pattern: #"(?<![a-z\d])ma\s+$"#)
-    private static let fillers = try! NSRegularExpression(pattern: #"(?<![a-z\d])(?:ma|va|voi)(?![a-z\d])|[\s,;+&/.-]"#)
+    private static let connector = try! NSRegularExpression(pattern: #"^\s*(?:[,;+&/-]|va|voi)?\s*(?:ma\s+|l)?$"#)
+    private static let codePrefix = try! NSRegularExpression(pattern: #"(?<![a-z\d])(?:ma\s+|l\s*)$"#)
+    private static let fillers = try! NSRegularExpression(pattern: #"(?<![a-z\d])(?:ma|va|voi|l)(?![a-z\d])|[\s,;+&/.-]"#)
 
     /// Các mã khách chốt trong 1 bình luận: số có giá lớn nhất và các số nối liền với nó.
     /// Số nhỏ hơn 10k không tính vì thường là số lượng hoặc size ("lấy 2 cái 150").

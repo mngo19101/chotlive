@@ -33,6 +33,15 @@ class PriceParserTest {
     )
 
     @Test
+    fun letterLBeforeNumberIsAPrice() {
+        for ((text, price) in listOf("L40" to 40000, "l40" to 40000, "chốt L40" to 40000, "L 40" to 40000, "L150k" to 150000, "sl40" to 0, "xl40" to 0))
+            assertEquals(text, price, PriceParser.parse(text))
+        for (text in listOf("L40", "L 40", "L40, L50")) assertTrue(text, PriceParser.isOnlyCodes(text))
+        assertEquals(listOf(40000, 50000), PriceParser.orderTokens("L40 L50").map { it.price })
+        assertEquals(listOf("L40"), PriceParser.segments("L40").filter { it.isCode }.map { it.text })
+    }
+
+    @Test
     fun matchesWebParser() {
         for ((text, price) in web) assertEquals(text, price, PriceParser.parse(text))
     }

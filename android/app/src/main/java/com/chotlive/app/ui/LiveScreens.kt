@@ -1025,7 +1025,8 @@ fun SessionDetailScreen(sessionId: String) {
                 Modifier.fillMaxSize(),
                 state = listState,
                 contentPadding = PaddingValues(start = Metrics.GUTTER.dp, end = Metrics.GUTTER.dp, bottom = 56.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp),
+                // Khoảng cách giữa các thẻ rộng hơn để bấm in khỏi trượt sang bình luận bên cạnh.
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item(key = "header") {
                     Column(verticalArrangement = Arrangement.spacedBy(13.5.dp), modifier = Modifier.padding(bottom = 4.5.dp)) {
@@ -1220,7 +1221,7 @@ private fun CommentMain(c: LiveComment, closing: Boolean, customer: Customer?, i
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     val hasBadge = customer?.isBigSpender == true || isNew
                     Box(if (hasBadge) Modifier.weight(1f, fill = false) else Modifier) {
-                        T(c.nickname, 13.4f, BV.BOLD, maxLines = 1)
+                        T(c.nickname, 15f, BV.BOLD, maxLines = 1)
                     }
                     when {
                         customer?.isBigSpender == true -> Badge("Mua nhiều", C.accentDeep, C.peachCode, 11f, 20f, 6f)
@@ -1237,12 +1238,17 @@ private fun CommentMain(c: LiveComment, closing: Boolean, customer: Customer?, i
                     }
                 }
             }
-            CommentText(c.text, 14f, closing)
+            // Chữ bình luận to (19) để lướt nhanh trong live vẫn đọc được.
+            CommentText(c.text, 19f, closing)
         }
-        Box(Modifier.size(34.dp).clip(CircleShape).background(C.card).border(1.dp, C.line, CircleShape).tap(onClick = onPrint),
-            contentAlignment = Alignment.Center) { Icon(IconName.PRINTER, 15f, 2.2f) }
+        // Nút in to (46) để khỏi bấm trượt sang bình luận khác.
+        Box(Modifier.size(PRINT_SIZE.dp).clip(CircleShape).background(C.card).border(1.2.dp, C.line, CircleShape).tap(onClick = onPrint),
+            contentAlignment = Alignment.Center) { Icon(IconName.PRINTER, 21f, 2.3f) }
     }
 }
+
+/** Đường kính nút in. */
+private const val PRINT_SIZE = 46f
 
 /** Lề trái của phần sổ ra: thẳng với chữ bình luận (lề 13 + ảnh 34 + khoảng 9.7). */
 private const val DRAWER_LEAD = 56.7f
@@ -1286,8 +1292,8 @@ private fun PrintedItemRow(c: LiveComment, it: OrderItem, onRemove: ((OrderItem)
             contentAlignment = Alignment.Center) { T(it.productLabel, 12.5f, BV.BOLD, maxLines = 1) }
         T(money(it.lineTotal) + if (it.qty > 1) " ×${it.qty}" else "", 12.5f, BV.SEMIBOLD, maxLines = 1)
         T(info, 11f, if (mine) BV.SEMIBOLD else BV.MEDIUM, if (mine) C.accentDeep else C.faint, Modifier.weight(1f), maxLines = 1)
-        // Thẳng hàng dưới nút in: nút in rộng 34 cách mép 13, nút X rộng 28.
-        Box(Modifier.padding(end = 10.dp).width(40.dp).height(34.dp).plainTap { onRemove?.invoke(it) },
+        // Thẳng hàng dưới nút in: tâm nút in cách mép 13 + 46/2 = 36, khung nút X rộng 40.
+        Box(Modifier.padding(end = (13f + PRINT_SIZE / 2 - 20f).dp).width(40.dp).height(34.dp).plainTap { onRemove?.invoke(it) },
             contentAlignment = Alignment.Center) {
             Box(Modifier.size(28.dp).clip(CircleShape).background(C.redSoft), contentAlignment = Alignment.Center) {
                 Icon(IconName.CLOSE, 13f, 2.8f, C.red)
