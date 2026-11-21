@@ -4188,7 +4188,6 @@ $('#btn-sync-pull-now')?.addEventListener('click', async () => {
 
 $('#menu-row-keywords')?.addEventListener('click', () => {
   if ($('#cfg-kw-multiplier')) $('#cfg-kw-multiplier').value = S().multiplier || '1000';
-  if ($('#cfg-kw-autoprint')) $('#cfg-kw-autoprint').checked = S().autoPrint !== false;
   if ($('#cfg-kw-triggers')) $('#cfg-kw-triggers').value = S().triggers || 'chốt, lấy';
   if ($('#cfg-kw-auto')) $('#cfg-kw-auto').checked = autoClosingOn();
   showAutoClosingFields();
@@ -4211,7 +4210,6 @@ $('#cfg-kw-auto')?.addEventListener('change', () => {
 
 $('#btn-save-keyword-setup')?.addEventListener('click', () => {
   S().multiplier = $('#cfg-kw-multiplier')?.value || '1000';
-  S().autoPrint = $('#cfg-kw-autoprint')?.checked;
   S().triggers = $('#cfg-kw-triggers')?.value.trim() || 'chốt, lấy';
   save('settings_keywords');
   $('#modal-keyword-setup')?.close();
