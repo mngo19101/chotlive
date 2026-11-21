@@ -421,7 +421,7 @@ struct SessionDetailView: View {
                                 .padding(.top, 24)
                         }
                         // Khoảng cách giữa các thẻ rộng hơn để bấm in khỏi trượt sang bình luận bên cạnh.
-                        LazyVStack(spacing: 12) {
+                        LazyVStack(spacing: 11) {
                             ForEach(shown) { c in
                                 let owner = customer(of: c, in: map)
                                 let open = expandedId == c.id
@@ -726,7 +726,7 @@ struct CommentRow: View {
             Avatar(text: initialsOf(c.nickname), size: 34, fontSize: 12.5, seed: c.uniqueId)
             VStack(alignment: .leading, spacing: closing ? 3.4 : 2) {
                 HStack(spacing: 5) {
-                    T(c.nickname, 15, .bold).lineLimit(1).layoutPriority(1)
+                    T(c.nickname, 14.5, .bold).lineLimit(1).layoutPriority(1)
                     if customer?.isBigSpender == true {
                         Badge(text: "Mua nhiều", color: Theme.accentDeep, fill: Theme.peachCode, fontSize: 11, height: 20, hPad: 6)
                     } else if isNew {
@@ -745,17 +745,18 @@ struct CommentRow: View {
                 }
                 // Giữ chiều cao dòng tên để badge và dấu tích không đẩy hàng cao lên.
                 .frame(height: 20)
-                // Chữ bình luận to (19) để lướt nhanh trong live vẫn đọc được.
-                CommentText(text: c.text, size: 19, highlight: closing)
+                // Chữ bình luận to (17) để lướt nhanh trong live vẫn đọc được.
+                CommentText(text: c.text, size: 17, highlight: closing)
             }
             // Bấm vào phần tên và chữ để sổ ra / thu gọn; nút in vẫn riêng.
             .frame(maxWidth: .infinity, alignment: .leading)
-            // Nút in to (46) để khỏi bấm trượt sang bình luận khác.
+            // Nút in hình chữ nhật nằm ngang, to để khỏi bấm trượt sang bình luận khác.
             Button(action: onPrint) {
+                let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
                 Icon(name: .printer, size: 21, weight: 2.3)
-                    .frame(width: Self.printSize, height: Self.printSize)
-                    .background(Circle().fill(Theme.card).overlay(Circle().strokeBorder(Theme.line, lineWidth: 1.2)))
-                    .contentShape(Circle())
+                    .frame(width: Self.printWidth, height: Self.printHeight)
+                    .background(shape.fill(Theme.card).overlay(shape.strokeBorder(Theme.line, lineWidth: 1.2)))
+                    .contentShape(shape)
             }
             .buttonStyle(.plain)
         }
@@ -765,8 +766,9 @@ struct CommentRow: View {
         .onTapGesture { onToggle?() }
     }
 
-    /// Đường kính nút in.
-    private static let printSize: CGFloat = 46
+    /// Kích thước nút in (chữ nhật nằm ngang).
+    private static let printWidth: CGFloat = 60
+    private static let printHeight: CGFloat = 42
 
     /// Lề trái của phần sổ ra: thẳng với chữ bình luận (lề 13 + ảnh 34 + khoảng 9.7).
     private static let drawerLead: CGFloat = 56.7
@@ -816,7 +818,7 @@ struct CommentRow: View {
             T(money(it.lineTotal) + (it.qty > 1 ? " ×\(it.qty)" : ""), 12.5, .semibold).lineLimit(1).fixedSize()
             T(info, 11, mine ? .semibold : .medium, mine ? Theme.accentDeep : Theme.faint).lineLimit(1)
             Spacer(minLength: 0)
-            // Thẳng hàng dưới nút in: tâm nút in cách mép 13 + 46/2 = 36, khung nút X rộng 40.
+            // Thẳng hàng dưới nút in: tâm nút in cách mép 13 + 60/2 = 43, khung nút X rộng 40.
             Button { onRemove?(it) } label: {
                 Icon(name: .close, size: 13, weight: 2.8, color: Theme.red)
                     .frame(width: 28, height: 28)
@@ -825,7 +827,7 @@ struct CommentRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.trailing, 13 + Self.printSize / 2 - 20)
+            .padding(.trailing, 13 + Self.printWidth / 2 - 20)
         }
         .frame(height: 36)
     }
