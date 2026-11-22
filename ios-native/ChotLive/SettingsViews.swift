@@ -448,6 +448,8 @@ struct PrinterView: View {
 struct KeywordsView: View {
     @EnvironmentObject var store: Store
     @State private var draft = ""
+    @AppStorage(LiveHold.enabledKey) private var holdOn = true
+    @AppStorage(LiveHold.secondsKey) private var holdSeconds = 0
 
     var body: some View {
         SubPage(title: "Từ khoá chốt đơn") {
@@ -462,6 +464,10 @@ struct KeywordsView: View {
                     T(store.autoClosing
                       ? "Bình luận chứa một trong các từ khoá này, hoặc chỉ ghi mã, được coi là bình luận chốt đơn."
                       : "Đang tắt: chỉ bình luận đã bấm In mới tính là chốt. Từ khoá vẫn giữ để bật lại.", 13, .medium, Theme.muted)
+                    holdCard
+                    T(holdOn
+                      ? "Có bình luận chốt thì danh sách đứng yên chốc lát để bấm in khỏi nhầm. Đang chạm tay cũng đứng yên. Không bao giờ chậm quá 4 giây."
+                      : "Đang tắt: bình luận mới hiện lên ngay, danh sách chạy liên tục như trước.", 13, .medium, Theme.muted)
                     keywordList
                         .opacity(store.autoClosing ? 1 : 0.45)
                 }
@@ -470,6 +476,30 @@ struct KeywordsView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
+    }
+
+    /// Giữ danh sách bình luận khi chốt, kèm thời gian giữ (tự động hoặc cố định).
+    private var holdCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Toggle(isOn: $holdOn) { T("Giữ danh sách khi chốt", 15, .semibold) }
+                .tint(Theme.orange)
+                .padding(.horizontal, 17)
+                .frame(height: 52)
+            if holdOn {
+                HairLine()
+                VStack(alignment: .leading, spacing: 8) {
+                    T("Thời gian giữ", 13, .semibold, Theme.muted)
+                    SegmentPicker(options: LiveHold.options, selected: String(holdSeconds)) { value in
+                        holdSeconds = Int(value) ?? 0
+                    }
+                    T(holdSeconds == 0 ? "Tự động: live thưa giữ lâu, live đông giữ ngắn để không bị trễ."
+                                       : "Giữ \(holdSeconds) giây sau mỗi bình luận chốt.", 12, .medium, Theme.muted)
+                }
+                .padding(.horizontal, 17)
+                .padding(.vertical, 12)
+            }
+        }
+        .cardStyle(20)
     }
 
     private var keywordList: some View {
