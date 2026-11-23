@@ -376,6 +376,19 @@ struct SessionDetailView: View {
         return Calendar.current.isDate(customer.firstTs, inSameDayAs: session.start)
     }
 
+    /// Ấn tên khách để mở hồ sơ; khách chưa mua lần nào thì không có hồ sơ để mở.
+    private func openCustomer(_ owner: Customer?) -> (() -> Void)? {
+        guard let cu = owner, !cu.items.isEmpty else { return nil }
+        return {
+            // Danh sách vừa chạy: tên dưới ngón tay có thể là của khách khác.
+            if holdOn, pacer.movedBeforeTap(touchDown: TouchWatcher.shared.lastDown) {
+                pacer.showRetapNotice()
+                return
+            }
+            ui.push(.customer(cu.id))
+        }
+    }
+
     private var customerMap: [String: Customer] {
         Dictionary(store.customers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
@@ -439,7 +452,8 @@ struct SessionDetailView: View {
                                            onToggle: {
                                                withAnimation(.easeOut(duration: 0.2)) { expandedId = open ? nil : c.id }
                                            },
-                                           onRemove: { it in confirmRemove(it, of: c) }) {
+                                           onRemove: { it in confirmRemove(it, of: c) },
+                                           onOpenCustomer: openCustomer(owner)) {
                                     // Danh sách vừa chạy ngay trước khi chạm: ngón tay đang nhắm vào dòng ở chỗ cũ.
                                     if holdOn, pacer.movedBeforeTap(touchDown: TouchWatcher.shared.lastDown) {
                                         pacer.showRetapNotice()
@@ -755,6 +769,8 @@ struct CommentRow: View {
     var printedItems: [OrderItem] = []
     var onToggle: (() -> Void)? = nil
     var onRemove: ((OrderItem) -> Void)? = nil
+    /// Ấn vào tên khách: mở hồ sơ khách. nil = khách chưa mua lần nào, ấn tên thì sổ ra như ấn chỗ khác.
+    var onOpenCustomer: (() -> Void)? = nil
     let onPrint: () -> Void
 
     var body: some View {
@@ -770,13 +786,24 @@ struct CommentRow: View {
             Avatar(text: initialsOf(c.nickname), size: 34, fontSize: 12.5, seed: c.uniqueId)
             VStack(alignment: .leading, spacing: closing ? 3.4 : 2) {
                 HStack(spacing: 5) {
-                    T(c.nickname, 14.5, .bold).lineLimit(1).layoutPriority(1)
-                    if customer?.isBigSpender == true {
-                        Badge(text: "Mua nhiều", color: Theme.accentDeep, fill: Theme.peachCode, fontSize: 11, height: 20, hPad: 6)
-                    } else if isNew {
-                        Badge(text: "Mới", color: Theme.green, fill: Theme.greenSoft, fontSize: 11, height: 20, hPad: 6)
-                    } else {
-                        T("@" + c.uniqueId, 11, .medium, Theme.muted).lineLimit(1)
+                    // Tên và nhãn: ấn vào để mở hồ sơ khách.
+                    HStack(spacing: 5) {
+                        T(c.nickname, 14.5, .bold).lineLimit(1).layoutPriority(1)
+                        if customer?.isBigSpender == true {
+                            Badge(text: "Mua nhiều", color: Theme.accentDeep, fill: Theme.peachCode, fontSize: 11, height: 20, hPad: 6)
+                        } else if isNew {
+                            Badge(text: "Mới", color: Theme.green, fill: Theme.greenSoft, fontSize: 11, height: 20, hPad: 6)
+                        } else if customer?.items.isEmpty == false {
+                            // Đã mua từ trước ngày live này.
+                            Badge(text: "Khách cũ", color: Theme.oldInk, fill: Theme.oldSoft, fontSize: 11, height: 20, hPad: 6)
+                        } else {
+                            T("@" + c.uniqueId, 11, .medium, Theme.muted).lineLimit(1)
+                        }
+                    }
+                    .layoutPriority(1)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if let open = onOpenCustomer { open() } else { onToggle?() }
                     }
                     Spacer(minLength: 0)
                     T(timeText(c.ts), 11, .medium, Theme.muted).fixedSize()

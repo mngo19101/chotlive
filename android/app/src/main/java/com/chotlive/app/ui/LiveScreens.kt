@@ -1064,6 +1064,7 @@ fun SessionDetailScreen(sessionId: String) {
                                 }
                             }
                         },
+                        onOpenCustomer = cu?.takeIf { it.items.isNotEmpty() }?.let { who -> { ui.push(Route.Customer(who.id)) } },
                     ) {
                         scope.launch { ui.notify(app.printComment(c)) }
                     }
@@ -1192,19 +1193,24 @@ fun CommentRow(
     printedItems: List<OrderItem> = emptyList(),
     onToggle: (() -> Unit)? = null,
     onRemove: ((OrderItem) -> Unit)? = null,
+    /** Ấn vào tên khách: mở hồ sơ khách. null = khách chưa mua lần nào, ấn tên thì sổ ra như ấn chỗ khác. */
+    onOpenCustomer: (() -> Unit)? = null,
     onPrint: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxWidth()
             .cardStyle(20f, if (closing) C.peachRow else C.card, if (expanded) C.orange else if (closing) C.peachLine else C.line)
     ) {
-        CommentMain(c, closing, customer, isNew, onToggle, onPrint)
+        CommentMain(c, closing, customer, isNew, onToggle, onOpenCustomer, onPrint)
         if (expanded) PrintedDrawer(c, printedItems, onToggle, onRemove)
     }
 }
 
 @Composable
-private fun CommentMain(c: LiveComment, closing: Boolean, customer: Customer?, isNew: Boolean, onToggle: (() -> Unit)?, onPrint: () -> Unit) {
+private fun CommentMain(
+    c: LiveComment, closing: Boolean, customer: Customer?, isNew: Boolean,
+    onToggle: (() -> Unit)?, onOpenCustomer: (() -> Unit)?, onPrint: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth()
             // Bấm vào phần tên và chữ để sổ ra / thu gọn; nút in vẫn riêng.
@@ -1219,14 +1225,24 @@ private fun CommentMain(c: LiveComment, closing: Boolean, customer: Customer?, i
                 // Tên được ưu tiên chỗ (như layoutPriority bên iPhone); @tiktok chỉ lấy phần còn thừa.
                 // Không đặt nhiều ô weight ngang hàng: Row chia đều nên tên chỉ còn một phần ba hàng.
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    val hasBadge = customer?.isBigSpender == true || isNew
-                    Box(if (hasBadge) Modifier.weight(1f, fill = false) else Modifier) {
-                        T(c.nickname, 14.5f, BV.BOLD, maxLines = 1)
-                    }
-                    when {
-                        customer?.isBigSpender == true -> Badge("Mua nhiều", C.accentDeep, C.peachCode, 11f, 20f, 6f)
-                        isNew -> Badge("Mới", C.green, C.greenSoft, 11f, 20f, 6f)
-                        else -> Box(Modifier.weight(1f, fill = false)) { T("@" + c.uniqueId, 11f, BV.MEDIUM, C.muted, maxLines = 1) }
+                    // Đã mua từ trước ngày live này.
+                    val isOld = !isNew && customer?.items?.isNotEmpty() == true
+                    val hasBadge = customer?.isBigSpender == true || isNew || isOld
+                    // Tên và nhãn: ấn vào để mở hồ sơ khách.
+                    Row(
+                        Modifier.weight(1f, fill = false)
+                            .plainTap(onOpenCustomer != null || onToggle != null) { (onOpenCustomer ?: onToggle)?.invoke() },
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        Box(if (hasBadge) Modifier.weight(1f, fill = false) else Modifier) {
+                            T(c.nickname, 14.5f, BV.BOLD, maxLines = 1)
+                        }
+                        when {
+                            customer?.isBigSpender == true -> Badge("Mua nhiều", C.accentDeep, C.peachCode, 11f, 20f, 6f)
+                            isNew -> Badge("Mới", C.green, C.greenSoft, 11f, 20f, 6f)
+                            isOld -> Badge("Khách cũ", C.oldInk, C.oldSoft, 11f, 20f, 6f)
+                            else -> Box(Modifier.weight(1f, fill = false)) { T("@" + c.uniqueId, 11f, BV.MEDIUM, C.muted, maxLines = 1) }
+                        }
                     }
                 }
                 T(timeText(c.ts), 11f, BV.MEDIUM, C.muted, maxLines = 1)

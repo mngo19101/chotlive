@@ -23,6 +23,9 @@ enum Theme {
     static let green = Color.dynamic(0x107A54, 0x4ADE9C)
     static let greenSoft = Color.dynamic(0xE6F7EF, 0x12291F)
     static let greenBright = Color(hex: 0x4ADE9C)
+    // Nhãn "Khách cũ" trong live: tím, khác hẳn xanh "Mới" và màu chủ đạo.
+    static let oldInk = Color.dynamic(0x5B3FC4, 0xB9A6FF)
+    static let oldSoft = Color.dynamic(0xEFEBFE, 0x251E3D)
     static let red = Color.dynamic(0xB3261E, 0xFF8A80)
     static let redSoft = Color.dynamic(0xFDECEC, 0x3A1A1C)
     static let live = Color.dynamic(0xE5484D, 0xFF6369)

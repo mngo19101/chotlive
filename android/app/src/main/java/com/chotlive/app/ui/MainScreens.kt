@@ -399,6 +399,8 @@ fun CustomerDetailScreen(customerId: String) {
     val app = LocalApp.current
     val store = app.store
     val ui = LocalAppUI.current
+    /** Các ngày đang mở trong lịch sử mua hàng. */
+    var openDays by remember { mutableStateOf(setOf<java.time.LocalDate>()) }
     SubPage("Hồ sơ khách hàng") {
         val c = store.customers.firstOrNull { it.id == customerId }
         if (c == null) {
@@ -418,7 +420,11 @@ fun CustomerDetailScreen(customerId: String) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Box(Modifier.weight(1f, fill = false)) { T(c.displayName, 18f, BV.BOLD, shrink = true, minScale = 0.85f) }
-                            if (c.isBigSpender) Badge("Mua nhiều")
+                            when {
+                                c.isBigSpender -> Badge("Mua nhiều")
+                                c.isNewToday -> Badge("Mới", C.green, C.greenSoft)
+                                c.items.isNotEmpty() -> Badge("Khách cũ", C.oldInk, C.oldSoft)
+                            }
                         }
                         T("@" + c.uniqueId, 13f, BV.MEDIUM, C.muted, maxLines = 1)
                     }
@@ -454,15 +460,30 @@ fun CustomerDetailScreen(customerId: String) {
                 HairLine()
                 AddressRow("Ghi chú giao", a.note)
             }
-            // Lịch sử
+            // Lịch sử: gom theo ngày, ấn vào ngày để mở các đơn riêng của ngày đó (không gộp).
+            val days = remember(orders) {
+                orders.groupBy { Clock.day(it.lastTs) }.toList()
+                    .map { (day, list) -> day to list.sortedByDescending { it.lastTs } }
+                    .sortedByDescending { it.first }
+            }
             Column(Modifier.fillMaxWidth().cardStyle(20f).padding(start = 17.dp, end = 17.dp, top = 15.dp, bottom = 8.dp)) {
                 Row(Modifier.padding(bottom = 5.dp)) {
                     T("Lịch sử mua hàng", 15f, BV.BOLD, modifier = Modifier.weight(1f))
-                    T("${orders.size} đơn", 12f, BV.MEDIUM, C.muted)
+                    T("${orders.size} đơn · ${days.size} ngày", 12f, BV.MEDIUM, C.muted)
                 }
-                orders.forEachIndexed { i, o ->
+                days.forEachIndexed { i, (day, list) ->
                     if (i > 0) HairLine()
-                    HistoryRow(o) { ui.push(Route.Order(o.id)) }
+                    val open = day in openDays
+                    DayHeader(day, list, open) { openDays = if (open) openDays - day else openDays + day }
+                    if (open) {
+                        Column(Modifier.padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            list.forEach { o ->
+                                val title = o.items.firstNotNullOfOrNull { it.sessionId }
+                                    ?.let { sid -> store.sessions.firstOrNull { it.id == sid }?.title } ?: "Đơn tạo tay"
+                                OrderBox(o, title) { ui.push(Route.Order(o.id)) }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -485,17 +506,46 @@ private fun AddressRow(label: String, value: String) {
     }
 }
 
+/** Một dòng ngày trong lịch sử mua hàng: ấn để mở / đóng các đơn của ngày đó. */
 @Composable
-private fun HistoryRow(o: Order, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().plainTap(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.width(64.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            T(shortDate(o.lastTs), 15f, BV.HEAVY, C.ink, track = -0.4f)
-            T(timeText(o.lastTs), 11f, BV.MEDIUM, C.muted)
+private fun DayHeader(day: java.time.LocalDate, orders: List<Order>, open: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().plainTap(onClick = onClick).padding(vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.width(16.dp), contentAlignment = Alignment.Center) {
+            Icon(if (open) IconName.CHEVRON_DOWN else IconName.CHEVRON_RIGHT, 14f, 2.6f, if (open) C.accentDeep else C.muted)
         }
-        T("${o.productCount} sản phẩm", 13f, BV.MEDIUM, C.muted, Modifier.weight(1f), maxLines = 1)
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            T(money(o.total), 14f, BV.HEAVY, maxLines = 1)
+        T("${weekdayLabel(day)} ${shortDate(day)}", 15f, BV.HEAVY, C.ink, track = -0.4f, maxLines = 1)
+        if (day == Clock.today()) T("· hôm nay", 12f, BV.MEDIUM, C.muted, maxLines = 1)
+        Box(Modifier.weight(1f))
+        Badge("${orders.size} đơn", C.accentDeep, C.peachSoft)
+        T(money(orders.sumOf { it.total }), 14f, BV.HEAVY, maxLines = 1)
+    }
+}
+
+/** Một đơn riêng trong ngày: phiên, giờ, trạng thái và các món. */
+@Composable
+private fun OrderBox(o: Order, title: String, onClick: () -> Unit) {
+    Column(Modifier.padding(start = 24.dp).fillMaxWidth().cardStyle(14f, fill = C.field).plainTap(onClick = onClick)
+        .padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.weight(1f, fill = false)) { T(title, 14f, BV.BOLD, maxLines = 1) }
+            T(timeText(o.lastTs), 12f, BV.MEDIUM, C.muted, maxLines = 1)
+            Box(Modifier.weight(1f))
             if (com.chotlive.app.model.VtpTrack.isReturned(o)) Badge("Hoàn về", C.red, C.redSoft) else StatusBadge(o.status)
+        }
+        o.items.forEach { item ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.weight(1f, fill = false)) { T(item.productLabel, 13f, BV.SEMIBOLD, maxLines = 1) }
+                T("× ${maxOf(item.qty, 1)}", 12f, BV.MEDIUM, C.muted, maxLines = 1)
+                Box(Modifier.weight(1f))
+                T(money(item.lineTotal), 13f, BV.SEMIBOLD, maxLines = 1)
+            }
+        }
+        if (o.items.size > 1) {
+            Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                T("Tổng", 13f, BV.MEDIUM, C.muted, Modifier.weight(1f))
+                T(money(o.total), 14f, BV.HEAVY, maxLines = 1)
+            }
         }
     }
 }

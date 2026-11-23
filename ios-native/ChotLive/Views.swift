@@ -685,6 +685,8 @@ struct CustomerDetailView: View {
     let customerId: String
     @EnvironmentObject var store: Store
     @EnvironmentObject var ui: AppUI
+    /// Các ngày đang mở trong lịch sử mua hàng (đầu ngày).
+    @State private var openDays: Set<Date> = []
 
     var body: some View {
         SubPage(title: "Hồ sơ khách hàng") {
@@ -714,7 +716,13 @@ struct CustomerDetailView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 10) {
                         T(c.displayName, 18, .bold).lineLimit(1).minimumScaleFactor(0.8)
-                        if c.isBigSpender { Badge(text: "Mua nhiều") }
+                        if c.isBigSpender {
+                            Badge(text: "Mua nhiều")
+                        } else if c.isNewToday {
+                            Badge(text: "Mới", color: Theme.green, fill: Theme.greenSoft)
+                        } else if !c.items.isEmpty {
+                            Badge(text: "Khách cũ", color: Theme.oldInk, fill: Theme.oldSoft)
+                        }
                     }
                     T("@" + c.uniqueId, 13, .medium, Theme.muted).lineLimit(1)
                 }
@@ -788,17 +796,41 @@ struct CustomerDetailView: View {
         .padding(.vertical, 10)
     }
 
+    /// Các đơn của khách trong một ngày. Mỗi đơn vẫn đứng riêng, không gộp.
+    private struct DayGroup: Identifiable {
+        let day: Date
+        let orders: [Order]
+        var id: Date { day }
+        var total: Int { orders.reduce(0) { $0 + $1.total } }
+    }
+
+    private func dayGroups(_ orders: [Order]) -> [DayGroup] {
+        let cal = Calendar.current
+        return Dictionary(grouping: orders) { cal.startOfDay(for: $0.lastTs) }
+            .map { day, list in DayGroup(day: day, orders: list.sorted { $0.lastTs > $1.lastTs }) }
+            .sorted { $0.day > $1.day }
+    }
+
     private func historyCard(_ orders: [Order]) -> some View {
-        VStack(spacing: 0) {
+        let groups = dayGroups(orders)
+        return VStack(spacing: 0) {
             HStack {
                 T("Lịch sử mua hàng", 15, .bold)
                 Spacer()
-                T("\(orders.count) đơn", 12, .medium, Theme.muted)
+                T("\(orders.count) đơn · \(groups.count) ngày", 12, .medium, Theme.muted)
             }
             .padding(.bottom, 5)
-            ForEach(Array(orders.enumerated()), id: \.element.id) { index, o in
+            ForEach(Array(groups.enumerated()), id: \.element.id) { index, g in
                 if index > 0 { HairLine() }
-                Button { ui.push(.order(o.id)) } label: { historyRow(o) }.buttonStyle(.plain)
+                dayHeader(g)
+                if openDays.contains(g.day) {
+                    VStack(spacing: 8) {
+                        ForEach(g.orders) { o in
+                            Button { ui.push(.order(o.id)) } label: { orderBox(o) }.buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.bottom, 10)
+                }
             }
         }
         .padding(.horizontal, 17)
@@ -807,25 +839,72 @@ struct CustomerDetailView: View {
         .cardStyle(20)
     }
 
-    private func historyRow(_ o: Order) -> some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                T(shortDate(o.lastTs), 15, .heavy, Theme.ink, track: -0.4)
-                T(timeText(o.lastTs), 11, .medium, Theme.muted)
+    /// Một dòng ngày: ấn để mở / đóng các đơn của ngày đó.
+    private func dayHeader(_ g: DayGroup) -> some View {
+        let open = openDays.contains(g.day)
+        return Button {
+            withAnimation(.easeOut(duration: 0.2)) {
+                if open { openDays.remove(g.day) } else { openDays.insert(g.day) }
             }
-            .frame(width: 64, alignment: .leading)
-            T("\(o.productCount) sản phẩm", 13, .medium, Theme.muted).lineLimit(1)
-            Spacer(minLength: 4)
-            VStack(alignment: .trailing, spacing: 3) {
-                T(money(o.total), 14, .heavy).lineLimit(1).fixedSize()
+        } label: {
+            HStack(spacing: 8) {
+                Icon(name: open ? .chevronDown : .chevronRight, size: 14, weight: 2.6, color: open ? Theme.accentDeep : Theme.muted)
+                    .frame(width: 16)
+                T("\(weekdayLabel(g.day)) \(shortDate(g.day))", 15, .heavy, Theme.ink, track: -0.4).lineLimit(1)
+                if Clock.isToday(g.day) {
+                    T("· hôm nay", 12, .medium, Theme.muted).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Badge(text: "\(g.orders.count) đơn", color: Theme.accentDeep, fill: Theme.peachSoft)
+                T(money(g.total), 14, .heavy).lineLimit(1).fixedSize()
+            }
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Một đơn riêng trong ngày: phiên, giờ, trạng thái và các món.
+    private func orderBox(_ o: Order) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                T(sessionTitle(o), 14, .bold).lineLimit(1)
+                T(timeText(o.lastTs), 12, .medium, Theme.muted).fixedSize()
+                Spacer(minLength: 4)
                 if VtpTrack.isReturned(o) {
                     Badge(text: "Hoàn về", color: Theme.red, fill: Theme.redSoft)
                 } else {
                     StatusBadge(status: o.status)
                 }
             }
+            ForEach(o.items) { it in
+                HStack(spacing: 6) {
+                    T(it.productLabel, 13, .semibold).lineLimit(1)
+                    T("× \(max(it.qty, 1))", 12, .medium, Theme.muted).fixedSize()
+                    Spacer(minLength: 4)
+                    T(money(it.lineTotal), 13, .semibold).lineLimit(1).fixedSize()
+                }
+            }
+            if o.items.count > 1 {
+                HStack {
+                    T("Tổng", 13, .medium, Theme.muted)
+                    Spacer()
+                    T(money(o.total), 14, .heavy).lineLimit(1).fixedSize()
+                }
+                .padding(.top, 2)
+            }
         }
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .cardStyle(14, fill: Theme.field)
+        .padding(.leading, 24)
         .contentShape(Rectangle())
+    }
+
+    /// "Phiên tối" theo phiên live của đơn; đơn tạo tay không thuộc phiên nào.
+    private func sessionTitle(_ o: Order) -> String {
+        guard let sid = o.items.compactMap(\.sessionId).first,
+              let s = store.sessions.first(where: { $0.id == sid }) else { return "Đơn tạo tay" }
+        return s.title
     }
 }

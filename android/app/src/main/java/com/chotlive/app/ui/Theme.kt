@@ -81,6 +81,9 @@ data class Palette(val dark: Boolean, val accentChoice: AccentChoice) {
     val green = d(0x107A54, 0x4ADE9C)
     val greenSoft = d(0xE6F7EF, 0x12291F)
     val greenBright = hex(0x4ADE9C)
+    /** Nhãn "Khách cũ" trong live: tím, khác hẳn xanh "Mới" và màu chủ đạo. */
+    val oldInk = d(0x5B3FC4, 0xB9A6FF)
+    val oldSoft = d(0xEFEBFE, 0x251E3D)
     val red = d(0xB3261E, 0xFF8A80)
     val redSoft = d(0xFDECEC, 0x3A1A1C)
     val live = d(0xE5484D, 0xFF6369)
