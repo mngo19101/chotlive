@@ -383,6 +383,8 @@ fun OrderDetailScreen(orderId: String) {
                                 }
                                 T(it.productLabel, 14f, BV.BOLD, modifier = Modifier.widthIn(max = 140.dp), maxLines = 1)
                                 T("${it.qty} × ${money(it.price)}", 12f, BV.MEDIUM, C.muted, Modifier.weight(1f), shrink = true)
+                                // Giờ khách bình luận chốt mã này.
+                                T(timeText(it.ts), 12f, BV.SEMIBOLD, C.muted, maxLines = 1)
                                 T(money(it.lineTotal), 14f, BV.BOLD, maxLines = 1)
                             }
                         }

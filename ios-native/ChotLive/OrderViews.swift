@@ -527,6 +527,8 @@ struct OrderDetailView: View {
                     T(r.item.productLabel, 14, .bold).lineLimit(1)
                     T("\(r.item.qty) × \(money(r.item.price))", 12, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
                     Spacer(minLength: 4)
+                    // Giờ khách bình luận chốt mã này.
+                    T(timeText(r.item.ts), 12, .semibold, Theme.muted).fixedSize()
                     T(money(r.item.lineTotal), 14, .bold).lineLimit(1).fixedSize()
                 }
                 .frame(height: 42)
