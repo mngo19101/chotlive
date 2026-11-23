@@ -17,12 +17,14 @@ export const stripAccents = (s) =>
   String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
 
 /**
+ * Số được dính liền chữ hai bên: "L30", "30L", "30M", "ao30" đều là giá 30.000 (chữ dính kèm thường là "lấy" hoặc size).
+ * Những số không phải giá (size, số lượng, cân nặng, giờ...) do isSizeOrQty loại sau.
  * Sau "tr", "triệu", "củ" được cách một dấu cách trước phần lẻ: "1 triệu 2" = 1.200.000.
  * Không tính khi số đó là số lượng hoặc một giá khác: "1tr 2 cái", "1tr 200k".
  * Giống regex của PriceParser trên app iPhone và Android.
  */
 const RE =
-  /(?:(?<![a-z\d])|(?<=^l|[^a-z\d]l))(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(?:(?<=tr|ieu|cu)\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3})?(?![a-z\d])/g;
+  /(?<!\d)(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)(?:\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)(?![a-z]))?(?:(?<=tr|ieu|cu)(?:\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3}))?(?!\d)/g;
 
 /**
  * Số điện thoại Việt Nam (0… hoặc +84…), kể cả viết tách bằng dấu cách, chấm, gạch:
@@ -39,19 +41,41 @@ function maskPhones(s) {
   });
 }
 
-/** Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2". */
-const SIZE_QTY_BEFORE = /(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$/;
+/** Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2", "size38". Dính sau "xl", "xxl" là size: "xl40". */
+const SIZE_QTY_BEFORE = /(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$|(?<![a-z\d])x+l$/;
 /** Số 1-2 chữ số ngay trước "cái", "đôi", "kg"... là số lượng/cân nặng: "lấy 2 cái", "50 kg". */
 const QTY_AFTER = /^\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon)(?![a-z\d])/;
+/** "x2", "× 3": số lượng ghi sau chữ x. */
+const TIMES_BEFORE = /(?<![a-z\d])[x×]\s?$/;
+/** Số có đơn vị đo/thời gian/phần trăm đi sau không phải giá: "45kg", "8h", "35t", "30p", "30%", "1m6". */
+const MEASURE_GLUED = /^(?:kg|g|gr|gram|cm|mm|ml|m(?=\d)|t|tuoi|h|gio|p|phut|ngay|thang|lan|tieng)(?![a-z])|^\s*%/;
+const MEASURE_SPACED = /^\s+(?:kg|gram|gr|cm|mm|ml|tuoi|gio|phut|ngay|thang|lan|tieng)(?![a-z])/;
+/** "1m65": số sau "m" của chiều cao. */
+const HEIGHT_BEFORE = /\dm$/;
+/** "L5": chữ "l" (lấy) đứng riêng ngay trước số. */
+const LONE_L_BEFORE = /(?<![a-z\d])l\s*$/;
 /** Có "mã" đứng trước thì vẫn là mã: "mã 99 bộ đồ". */
 const CODE_BEFORE = /(?<![a-z\d])ma\s*$/;
+/** "mã a12", "mã sp12": mã hàng có chữ đứng đầu, không phải giá. */
+const LETTER_CODE_BEFORE = /(?<![a-z\d])ma\s*[a-z]+$/;
 
-/** Số ở vị trí [start, end) của s là size hoặc số lượng, không phải giá. Giống isSizeOrQty trên app iPhone và Android. */
+const isLetter = (c) => c >= 'a' && c <= 'z';
+
+/**
+ * Số ở vị trí [start, end) của s là size, số lượng, cân nặng, giờ... không phải giá.
+ * Số có 1 chữ số dính liền chữ ("mix2", "ip6", "2k3") cũng bỏ, trừ "L5".
+ * Giống isSizeOrQty trên app iPhone và Android.
+ */
 function isSizeOrQty(s, start, end, rawNum, unit) {
   if (unit) return false;
   const before = s.slice(0, start);
-  if (SIZE_QTY_BEFORE.test(before)) return true;
-  return /^\d{1,2}$/.test(rawNum) && QTY_AFTER.test(s.slice(end)) && !CODE_BEFORE.test(before);
+  const afterNum = s.slice(start + rawNum.length);
+  if (SIZE_QTY_BEFORE.test(before) || HEIGHT_BEFORE.test(before) || LETTER_CODE_BEFORE.test(before)) return true;
+  if (MEASURE_GLUED.test(afterNum) || MEASURE_SPACED.test(afterNum)) return true;
+  const short = /^\d{1,2}$/.test(rawNum);
+  if (short && TIMES_BEFORE.test(before)) return true;
+  if (rawNum.length === 1 && (isLetter(before.slice(-1)) || isLetter(afterNum[0] || '')) && !LONE_L_BEFORE.test(before)) return true;
+  return short && QTY_AFTER.test(s.slice(end)) && !CODE_BEFORE.test(before);
 }
 
 const INQUIRY_RE =

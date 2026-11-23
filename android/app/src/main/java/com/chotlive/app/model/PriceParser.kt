@@ -5,10 +5,11 @@ import kotlin.math.roundToLong
 
 /** Bắt giá từ bình luận (port từ public/js/price.js). "59" -> 59.000, "5k" -> 5.000, "1tr2" -> 1.200.000. */
 object PriceParser {
-    /** Sau "tr", "triệu", "củ" được cách một dấu cách trước phần lẻ: "1 triệu 2" = 1.200.000,
+    /** Số được dính liền chữ hai bên ("L30", "30L", "30M", "ao30" đều là 30.000); số không phải giá do isSizeOrQty loại.
+     *  Sau "tr", "triệu", "củ" được cách một dấu cách trước phần lẻ: "1 triệu 2" = 1.200.000,
      *  trừ khi số đó là số lượng hoặc một giá khác ("1tr 2 cái", "1tr 200k"). Giống RE của public/js/price.js. */
     private val regex = Regex(
-        """(?:(?<![a-z\d])|(?<=^l|[^a-z\d]l))(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(?:(?<=tr|ieu|cu)\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3})?(?![a-z\d])"""
+        """(?<!\d)(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)(?:\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)(?![a-z]))?(?:(?<=tr|ieu|cu)(?:\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3}))?(?!\d)"""
     )
     private val grouped = Regex("""^\d{1,3}(?:[.,]\d{3})+$""")
     private val marks = Regex("""\p{Mn}+""")
@@ -28,20 +29,38 @@ object PriceParser {
             .replace("đ", "d").replace("Đ", "D")
             .let { Normalizer.normalize(it, Normalizer.Form.NFC) }
 
-    /** Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2". */
-    private val sizeQtyBefore = Regex("""(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$""")
+    /** Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2". Dính sau "xl", "xxl" là size: "xl40". */
+    private val sizeQtyBefore = Regex("""(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$|(?<![a-z\d])x+l$""")
     /** Số 1-2 chữ số ngay trước "cái", "đôi", "kg"... là số lượng/cân nặng: "lấy 2 cái", "50 kg". */
     private val qtyAfter = Regex("""^\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon)(?![a-z\d])""")
+    /** "x2", "× 3": số lượng ghi sau chữ x. */
+    private val timesBefore = Regex("""(?<![a-z\d])[x×]\s?$""")
+    /** Số có đơn vị đo/thời gian/phần trăm đi sau không phải giá: "45kg", "8h", "35t", "30p", "30%", "1m6". */
+    private val measureGlued = Regex("""^(?:kg|g|gr|gram|cm|mm|ml|m(?=\d)|t|tuoi|h|gio|p|phut|ngay|thang|lan|tieng)(?![a-z])|^\s*%""")
+    private val measureSpaced = Regex("""^\s+(?:kg|gram|gr|cm|mm|ml|tuoi|gio|phut|ngay|thang|lan|tieng)(?![a-z])""")
+    /** "1m65": số sau "m" của chiều cao. */
+    private val heightBefore = Regex("""\dm$""")
+    /** "L5": chữ "l" (lấy) đứng riêng ngay trước số. */
+    private val loneLBefore = Regex("""(?<![a-z\d])l\s*$""")
     /** Có "mã" đứng trước thì vẫn là mã: "mã 99 bộ đồ". */
     private val codeBefore = Regex("""(?<![a-z\d])ma\s*$""")
+    /** "mã a12", "mã sp12": mã hàng có chữ đứng đầu, không phải giá. */
+    private val letterCodeBefore = Regex("""(?<![a-z\d])ma\s*[a-z]+$""")
     private val oneOrTwoDigits = Regex("""^\d{1,2}$""")
 
-    /** Số ở vị trí [start, end) của s là size hoặc số lượng, không phải giá. Giống isSizeOrQty của public/js/price.js. */
+    /** Số ở vị trí [start, end) của s là size, số lượng, cân nặng, giờ... không phải giá.
+     *  Số có 1 chữ số dính liền chữ ("mix2", "ip6", "2k3") cũng bỏ, trừ "L5". Giống isSizeOrQty của public/js/price.js. */
     private fun isSizeOrQty(s: String, start: Int, end: Int, rawNum: String, unit: String): Boolean {
         if (unit.isNotEmpty()) return false
         val before = s.substring(0, start)
-        if (sizeQtyBefore.containsMatchIn(before)) return true
-        return oneOrTwoDigits.matches(rawNum) && qtyAfter.containsMatchIn(s.substring(end)) && !codeBefore.containsMatchIn(before)
+        val afterNum = s.substring(start + rawNum.length)
+        if (sizeQtyBefore.containsMatchIn(before) || heightBefore.containsMatchIn(before) || letterCodeBefore.containsMatchIn(before)) return true
+        if (measureGlued.containsMatchIn(afterNum) || measureSpaced.containsMatchIn(afterNum)) return true
+        val short = oneOrTwoDigits.matches(rawNum)
+        if (short && timesBefore.containsMatchIn(before)) return true
+        val glued = before.lastOrNull()?.let { it in 'a'..'z' } == true || afterNum.firstOrNull()?.let { it in 'a'..'z' } == true
+        if (rawNum.length == 1 && glued && !loneLBefore.containsMatchIn(before)) return true
+        return short && qtyAfter.containsMatchIn(s.substring(end)) && !codeBefore.containsMatchIn(before)
     }
 
     /** Một số/giá tìm thấy trong bình luận. `start`/`end` là vị trí trong chuỗi đã bỏ dấu. */

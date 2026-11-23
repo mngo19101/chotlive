@@ -2,10 +2,11 @@ import Foundation
 
 /// Bắt giá từ bình luận (port từ public/js/price.js). "59" -> 59.000, "5k" -> 5.000, "1tr2" -> 1.200.000.
 enum PriceParser {
+    /// Số được dính liền chữ hai bên ("L30", "30L", "30M", "ao30" đều là 30.000); số không phải giá do isSizeOrQty loại.
     /// Sau "tr", "triệu", "củ" được cách một dấu cách trước phần lẻ: "1 triệu 2" = 1.200.000,
     /// trừ khi số đó là số lượng hoặc một giá khác ("1tr 2 cái", "1tr 200k"). Giống RE của public/js/price.js.
     private static let regex = try! NSRegularExpression(
-        pattern: #"(?:(?<![a-z\d])|(?<=^l|[^a-z\d]l))(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)?(?:(?<=tr|ieu|cu)\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3})?(?![a-z\d])"#
+        pattern: #"(?<!\d)(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)(?:\s*(k|tr(?:ieu)?|cu|nghin|ngan|vnd|d)(?![a-z]))?(?:(?<=tr|ieu|cu)(?:\s(?=\d{1,3}(?!\d)(?![.,]\d)(?!\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon|k|tr|cu|nghin|ngan|d|vnd)(?![a-z]))))?(\d{1,3}))?(?!\d)"#
     )
     private static let grouped = try! NSRegularExpression(pattern: #"^\d{1,3}(?:[.,]\d{3})+$"#)
     /// Số điện thoại Việt Nam (0… hoặc +84…), kể cả viết tách: "0912 345 678", "098.812.3456".
@@ -27,26 +28,52 @@ enum PriceParser {
         return ns as String
     }
 
-    /// Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2".
-    private static let sizeQtyBefore = try! NSRegularExpression(pattern: #"(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$"#)
+    /// Số ngay sau "size", "sz", "sl", "số lượng" là size/số lượng: "size 38", "sl: 2". Dính sau "xl", "xxl" là size: "xl40".
+    private static let sizeQtyBefore = try! NSRegularExpression(pattern: #"(?<![a-z\d])(?:size|sz|sl|so luong)\s*:?\s*$|(?<![a-z\d])x+l$"#)
     /// Số 1-2 chữ số ngay trước "cái", "đôi", "kg"... là số lượng/cân nặng: "lấy 2 cái", "50 kg".
     private static let qtyAfter = try! NSRegularExpression(
         pattern: #"^\s*(?:cai|chiec|doi|bo|hop|set|kg|sp|goi|cap|chai|tui|lo|cuon)(?![a-z\d])"#
     )
+    /// "x2", "× 3": số lượng ghi sau chữ x.
+    private static let timesBefore = try! NSRegularExpression(pattern: #"(?<![a-z\d])[x×]\s?$"#)
+    /// Số có đơn vị đo/thời gian/phần trăm đi sau không phải giá: "45kg", "8h", "35t", "30p", "30%", "1m6".
+    private static let measureGlued = try! NSRegularExpression(
+        pattern: #"^(?:kg|g|gr|gram|cm|mm|ml|m(?=\d)|t|tuoi|h|gio|p|phut|ngay|thang|lan|tieng)(?![a-z])|^\s*%"#
+    )
+    private static let measureSpaced = try! NSRegularExpression(
+        pattern: #"^\s+(?:kg|gram|gr|cm|mm|ml|tuoi|gio|phut|ngay|thang|lan|tieng)(?![a-z])"#
+    )
+    /// "1m65": số sau "m" của chiều cao.
+    private static let heightBefore = try! NSRegularExpression(pattern: #"\dm$"#)
+    /// "L5": chữ "l" (lấy) đứng riêng ngay trước số.
+    private static let loneLBefore = try! NSRegularExpression(pattern: #"(?<![a-z\d])l\s*$"#)
     /// Có "mã" đứng trước thì vẫn là mã: "mã 99 bộ đồ".
     private static let codeBefore = try! NSRegularExpression(pattern: #"(?<![a-z\d])ma\s*$"#)
+    /// "mã a12", "mã sp12": mã hàng có chữ đứng đầu, không phải giá.
+    private static let letterCodeBefore = try! NSRegularExpression(pattern: #"(?<![a-z\d])ma\s*[a-z]+$"#)
     private static let oneOrTwoDigits = try! NSRegularExpression(pattern: #"^\d{1,2}$"#)
 
     private static func has(_ re: NSRegularExpression, _ s: String) -> Bool {
         re.firstMatch(in: s, range: NSRange(location: 0, length: (s as NSString).length)) != nil
     }
 
-    /// Số ở vị trí `range` của ns là size hoặc số lượng, không phải giá. Giống isSizeOrQty của public/js/price.js.
+    private static func isLetter(_ c: Character?) -> Bool {
+        guard let c else { return false }
+        return ("a"..."z").contains(c)
+    }
+
+    /// Số ở vị trí `range` của ns là size, số lượng, cân nặng, giờ... không phải giá.
+    /// Số có 1 chữ số dính liền chữ ("mix2", "ip6", "2k3") cũng bỏ, trừ "L5". Giống isSizeOrQty của public/js/price.js.
     private static func isSizeOrQty(_ ns: NSString, _ range: NSRange, rawNum: String, unit: String) -> Bool {
         if !unit.isEmpty { return false }
         let before = ns.substring(to: range.location)
-        if has(sizeQtyBefore, before) { return true }
-        return has(oneOrTwoDigits, rawNum) && has(qtyAfter, ns.substring(from: range.location + range.length))
+        let afterNum = ns.substring(from: range.location + (rawNum as NSString).length)
+        if has(sizeQtyBefore, before) || has(heightBefore, before) || has(letterCodeBefore, before) { return true }
+        if has(measureGlued, afterNum) || has(measureSpaced, afterNum) { return true }
+        let short = has(oneOrTwoDigits, rawNum)
+        if short && has(timesBefore, before) { return true }
+        if rawNum.count == 1 && (isLetter(before.last) || isLetter(afterNum.first)) && !has(loneLBefore, before) { return true }
+        return short && has(qtyAfter, ns.substring(from: range.location + range.length))
             && !has(codeBefore, before)
     }
 

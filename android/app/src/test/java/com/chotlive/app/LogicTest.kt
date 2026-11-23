@@ -41,6 +41,15 @@ class PriceParserTest {
         assertEquals(listOf("L40"), PriceParser.segments("L40").filter { it.isCode }.map { it.text })
     }
 
+    /** Cùng danh sách với GLUED_VECTORS của test/price.test.js (0 ở đây là null bên web). */
+    @Test
+    fun numberGluedToLettersIsAPrice() {
+        for ((text, price) in listOf("30L" to 30000, "30l" to 30000, "chốt 30L" to 30000, "30M" to 30000, "30XL" to 30000, "ao30" to 30000, "chot30" to 30000, "áo 30L size M" to 30000, "L5" to 5000, "150ka" to 150000, "150 200" to 200000, "150 2" to 150000, "size38" to 0, "1m6" to 0, "cao 1m65" to 0, "45kg" to 0, "8h" to 0, "35t" to 0, "30%" to 0, "2k3" to 0, "mix2" to 0, "x2" to 0, "350k x2" to 350000, "35 tuổi" to 0, "giao 3 ngày" to 0, "mã a12" to 0, "ma30" to 30000))
+            assertEquals(text, price, PriceParser.parse(text))
+        for (text in listOf("30L", "30L 40L")) assertTrue(text, PriceParser.isOnlyCodes(text))
+        assertEquals(listOf("30"), PriceParser.segments("30L").filter { it.isCode }.map { it.text })
+    }
+
     @Test
     fun matchesWebParser() {
         for ((text, price) in web) assertEquals(text, price, PriceParser.parse(text))

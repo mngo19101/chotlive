@@ -13,6 +13,20 @@ test('"L40" (lấy 40) là giá 40.000, "sl40"/"xl40" thì không', () => {
   for (const text of ['L40', 'L 40', 'L40, L50']) assert.equal(isOnlyCodes(text), true, text);
 });
 
+// Android (LogicTest.kt) và iOS (PriceParserTests.swift) giữ đúng danh sách này.
+const GLUED_VECTORS = [
+  ['30L', 30000], ['30l', 30000], ['chốt 30L', 30000], ['30M', 30000], ['30XL', 30000], ['ao30', 30000],
+  ['chot30', 30000], ['áo 30L size M', 30000], ['L5', 5000], ['150ka', 150000], ['150 200', 200000], ['150 2', 150000],
+  ['size38', null], ['1m6', null], ['cao 1m65', null], ['45kg', null], ['8h', null], ['35t', null], ['30%', null],
+  ['2k3', null], ['mix2', null], ['x2', null], ['350k x2', 350000], ['35 tuổi', null], ['giao 3 ngày', null],
+  ['mã a12', null], ['ma30', 30000],
+];
+
+test('số dính chữ vẫn là giá ("30L", "ao30"), trừ size, số lượng, cân nặng, giờ, tuổi, phần trăm', () => {
+  for (const [text, v] of GLUED_VECTORS) assert.equal(parsePrice(text), v, text);
+  for (const text of ['30L', '30L 40L']) assert.equal(isOnlyCodes(text), true, text);
+});
+
 test('chỉ ghi mã mới tính là chốt đơn, có số thôi thì không', () => {
   for (const text of ['280', 'mã 150, 180', '150k', 'Mã 120 và 180']) assert.equal(isOnlyCodes(text), true, text);
   for (const text of ['Mã 130 giá sao', '35 tuổi', 'Cho em xem mã 25 với', '0905123456', 'sz 38 mã 250', '', 'hello'])

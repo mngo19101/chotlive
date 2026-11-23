@@ -38,6 +38,13 @@ final class PriceParserTests: XCTestCase {
         XCTAssertEqual(PriceParser.segments("L40").filter(\.isCode).map(\.text), ["L40"])
     }
 
+    /// Cùng danh sách với GLUED_VECTORS của test/price.test.js (0 ở đây là null bên web).
+    func testNumberGluedToLettersIsAPrice() {
+        let cases: [(String, Int)] = [("30L", 30000), ("30l", 30000), ("chốt 30L", 30000), ("30M", 30000), ("30XL", 30000), ("ao30", 30000), ("chot30", 30000), ("áo 30L size M", 30000), ("L5", 5000), ("150ka", 150000), ("150 200", 200000), ("150 2", 150000), ("size38", 0), ("1m6", 0), ("cao 1m65", 0), ("45kg", 0), ("8h", 0), ("35t", 0), ("30%", 0), ("2k3", 0), ("mix2", 0), ("x2", 0), ("350k x2", 350000), ("35 tuổi", 0), ("giao 3 ngày", 0), ("mã a12", 0), ("ma30", 30000)]
+        for (text, price) in cases { XCTAssertEqual(PriceParser.parse(text), price, text) }
+        for text in ["30L", "30L 40L"] { XCTAssertTrue(PriceParser.isOnlyCodes(text), text) }
+    }
+
     func testPhoneIsNotOnlyCodes() {
         for text in ["0912 345 678", "0912.345.678", "150 0912 345 678"] { XCTAssertFalse(PriceParser.isOnlyCodes(text), text) }
         XCTAssertTrue(PriceParser.isOnlyCodes("mã 150"))
