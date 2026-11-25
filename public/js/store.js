@@ -705,8 +705,8 @@ export function isOpenOrder(o) {
 export function clearManualCod(order) {
   let cleared = false;
   for (const o of state.orders || []) {
-    if (o.ship?.codOverride == null || !isOpenOrder(o) || !areSameCustomer(o, order)) continue;
-    o.ship = { ...o.ship, codOverride: null };
+    if ((o.ship?.codOverride == null && o.ship?.goodsOverride == null) || !isOpenOrder(o) || !areSameCustomer(o, order)) continue;
+    o.ship = { ...o.ship, codOverride: null, goodsOverride: null };
     cleared = true;
   }
   return cleared;

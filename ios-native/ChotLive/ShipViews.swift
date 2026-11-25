@@ -167,6 +167,11 @@ struct ShipReviewSheet: View {
     /// Đã sửa tay ô COD: số sửa tay thắng số tự cộng cho tới khi bấm "Tự tính" hoặc đổi lựa chọn khác.
     @State private var codEdited = false
     @FocusState private var codFocused: Bool
+    /// Giá trị đơn hàng: mặc định là tổng tiền các đơn đang tick; sửa tay (khách cọc, giảm giá...) thì thay tổng đó,
+    /// thu hộ tự tính lại = giá trị − tiền cọc, và là giá trị hàng khai với Viettel Post.
+    @State private var valueText = ""
+    @State private var valueEdited = false
+    @FocusState private var valueFocused: Bool
 
     private var all: [Order] { store.allOrders() }
     private var focus: Order? { store.order(id: orderId) }
@@ -180,6 +185,9 @@ struct ShipReviewSheet: View {
         return kg > 0 ? Int((kg * 1000).rounded()) : Vtp.defaultWeightG
     }
     private var codValue: Int? { codEdited ? Int(codText.filter(\.isNumber)) : nil }
+    private var goodsValue: Int? { valueEdited ? Int(valueText.filter(\.isNumber)) ?? 0 : nil }
+    /// Tổng tiền các đơn đang tick (chưa tick đơn nào thì đơn đang mở).
+    private var autoGoods: Int { (chosen.isEmpty ? focus.map { [$0] } ?? [] : chosen).reduce(0) { $0 + max(0, $1.total) } }
     private func cm(_ s: String) -> Int? { Int(s.filter(\.isNumber)).flatMap { $0 > 0 ? $0 : nil } }
     /// Từ 10kg Viettel Post cần kích thước kiện: hiện 3 ô Dài / Rộng / Cao và bắt buộc nhập.
     private var needsSize: Bool { weightG >= Vtp.sizeRequiredG }
@@ -187,7 +195,8 @@ struct ShipReviewSheet: View {
 
     /// Cài đặt đang chọn trong bảng, ghi vào đơn khi bấm nút.
     private func patch(first: Bool, cod: Int?) -> ShipInfo {
-        ShipInfo(pay: pay, payer: payer, deposit: first ? deposit : 0, shipFee: fee, codOverride: cod, weightG: weightG,
+        ShipInfo(pay: pay, payer: payer, deposit: first ? deposit : 0, shipFee: fee, codOverride: cod,
+                 goodsOverride: goodsValue, weightG: weightG,
                  lengthCm: needsSize ? cm(lengthText) : nil, widthCm: needsSize ? cm(widthText) : nil,
                  heightCm: needsSize ? cm(heightText) : nil)
     }
@@ -261,6 +270,13 @@ struct ShipReviewSheet: View {
             heightText = s.heightCm.map { String($0) } ?? ""
         }
         weightText = Swift.String(format: "%g", Double(w) / 1000).replacingOccurrences(of: ".", with: ",")
+        // Giá trị đơn đã sửa tay lúc duyệt trước thì giữ nguyên.
+        if let manual = list.reversed().compactMap({ $0.ship?.goodsOverride }).first {
+            valueEdited = true
+            valueText = moneyDigits(manual)
+        } else {
+            resetValue()
+        }
         resetCod()
         // Sửa nháp: COD đã sửa tay lúc duyệt thì giữ nguyên, không lặng lẽ quay về số tự cộng.
         if draftIds != nil, let manual = list.reversed().compactMap({ $0.ship?.codOverride }).first {
@@ -282,6 +298,12 @@ struct ShipReviewSheet: View {
     private func resetCod() {
         codEdited = false
         codText = moneyDigits(trial?.autoCod ?? 0)
+    }
+
+    /// Giá trị đơn quay về tổng tiền các đơn đang tick.
+    private func resetValue() {
+        valueEdited = false
+        valueText = moneyDigits(autoGoods)
     }
 
     // MARK: Danh sách đơn
@@ -319,6 +341,7 @@ struct ShipReviewSheet: View {
             : "\(timeText(o.lastTs)) · \(o.productCount) sản phẩm\(st == .ready ? " · đã duyệt" : "")"
         return Button {
             if on { checked.remove(o.id) } else { checked.insert(o.id) }
+            resetValue()
             resetCod()
         } label: {
             HStack(spacing: 12) {
@@ -388,6 +411,32 @@ struct ShipReviewSheet: View {
                     fieldLabel("Cân nặng (kg)")
                     input($weightText, keyboard: .decimalPad)
                 }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    fieldLabel("Giá trị đơn hàng")
+                    Spacer()
+                    if valueEdited {
+                        Button {
+                            resetValue()
+                            resetCod()
+                        } label: { T("Tổng các đơn", 12, .bold, Theme.accent) }.buttonStyle(.plain)
+                    }
+                }
+                TextField("", text: $valueText)
+                    .font(.bv(16, .semibold))
+                    .foregroundColor(Theme.ink)
+                    .keyboardType(.numberPad)
+                    .focused($valueFocused)
+                    .onChange(of: valueText) { _ in
+                        // Chỉ khi người bán gõ: đổi lúc mở bảng hay tick đơn không được xoá COD nhập tay.
+                        guard valueFocused else { return }
+                        valueEdited = true
+                        resetCod()
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(height: 44)
+                    .cardStyle(12)
             }
             if needsSize {
                 VStack(alignment: .leading, spacing: 6) {

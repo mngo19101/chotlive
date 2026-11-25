@@ -294,17 +294,19 @@ final class Store: ObservableObject {
 
     func takeCodResetNotice() -> String? {
         defer { codResetName = nil }
-        return codResetName.map { "Đơn của \($0) vừa đổi món: đã bỏ tiền thu hộ nhập tay, tính lại theo hàng mới." }
+        return codResetName.map { "Đơn của \($0) vừa đổi món: đã bỏ số tiền nhập tay, tính lại theo hàng mới." }
     }
 
-    /// Tiền thu hộ nhập tay là cho gói hàng cũ. Đơn chưa gửi của khách đổi món (thêm, sửa giá, bớt) thì bỏ số đó
+    /// Tiền thu hộ và giá trị đơn nhập tay là cho gói hàng cũ. Đơn chưa gửi của khách đổi món (thêm, sửa giá, bớt) thì bỏ số đó
     /// ở mọi đơn chưa gửi của khách, để thu hộ tính lại theo hàng mới, giống web.
     private func clearManualCod(customerIndex idx: Int) {
         let pending = Set(orders(of: customers[idx]).filter { Vtp.state($0).isPending }.flatMap { $0.items.map(\.id) })
         var cleared = false
         for ii in customers[idx].items.indices
-        where pending.contains(customers[idx].items[ii].id) && customers[idx].items[ii].ship?.codOverride != nil {
+        where pending.contains(customers[idx].items[ii].id)
+            && (customers[idx].items[ii].ship?.codOverride != nil || customers[idx].items[ii].ship?.goodsOverride != nil) {
             customers[idx].items[ii].ship?.codOverride = nil
+            customers[idx].items[ii].ship?.goodsOverride = nil
             cleared = true
         }
         if cleared { codResetName = customers[idx].displayName }
@@ -501,6 +503,7 @@ final class Store: ObservableObject {
             s.state = ShipState.ask.rawValue
             s.deposit = 0
             s.codOverride = nil
+            s.goodsOverride = nil
             changes[id] = s
         }
         for (i, id) in orderIds.enumerated() {

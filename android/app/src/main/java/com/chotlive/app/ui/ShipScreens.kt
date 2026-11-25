@@ -230,6 +230,8 @@ private class ReviewStart(focus: Order?, pending: List<Order>, draftIds: Set<Str
     val height: String = sized?.heightCm?.toString() ?: ""
     /** Sửa nháp: COD đã sửa tay lúc duyệt thì giữ nguyên, không lặng lẽ quay về số tự cộng. */
     val manualCod: Int? = if (draftIds != null) list.asReversed().firstNotNullOfOrNull { it.ship?.codOverride } else null
+    /** Giá trị đơn đã sửa tay lúc duyệt trước thì giữ nguyên. */
+    val manualGoods: Int? = list.asReversed().firstNotNullOfOrNull { it.ship?.goodsOverride }
 }
 
 /**
@@ -258,6 +260,10 @@ fun ShipReviewSheet(orderId: String, draftIds: Set<String>? = null) {
     // Đã sửa tay ô COD: số sửa tay thắng số tự cộng cho tới khi bấm "Tự tính" hoặc đổi lựa chọn khác.
     var codEdited by remember { mutableStateOf(start.manualCod != null) }
     var codText by remember { mutableStateOf(start.manualCod?.let { groupedNumber(it) } ?: "") }
+    // Giá trị đơn hàng: mặc định là tổng tiền các đơn đang tick; sửa tay (khách cọc, giảm giá...) thì thay tổng đó,
+    // thu hộ tự tính lại = giá trị − tiền cọc, và là giá trị hàng khai với Viettel Post.
+    var valueEdited by remember { mutableStateOf(start.manualGoods != null) }
+    var valueText by remember { mutableStateOf(start.manualGoods?.let { groupedNumber(it) } ?: "") }
 
     fun digits(s: String): Int? = s.filter { it.isDigit() }.take(9).toIntOrNull()
     fun cm(s: String): Int? = s.filter { it.isDigit() }.take(4).toIntOrNull()?.takeIf { it > 0 }
@@ -270,10 +276,13 @@ fun ShipReviewSheet(orderId: String, draftIds: Set<String>? = null) {
     val needsSize = weightG >= Vtp.SIZE_REQUIRED_G
     val sizeMissing = needsSize && (cm(lengthText) == null || cm(widthText) == null || cm(heightText) == null)
     val chosen = pending.filter { checked.contains(it.id) }
+    val autoGoods = chosen.ifEmpty { listOfNotNull(focus) }.sumOf { maxOf(0, it.total) }
+    val goodsValue = if (valueEdited) digits(valueText) ?: 0 else null
 
     /** Cài đặt đang chọn trong bảng, ghi vào đơn khi bấm nút. */
     fun patch(first: Boolean, cod: Int?) = ShipInfo(
-        pay = pay, payer = payer, deposit = if (first) deposit else 0, shipFee = start.fee, codOverride = cod, weightG = weightG,
+        pay = pay, payer = payer, deposit = if (first) deposit else 0, shipFee = start.fee, codOverride = cod,
+        goodsOverride = goodsValue, weightG = weightG,
         lengthCm = if (needsSize) cm(lengthText) else null, widthCm = if (needsSize) cm(widthText) else null,
         heightCm = if (needsSize) cm(heightText) else null,
     )
@@ -338,6 +347,7 @@ fun ShipReviewSheet(orderId: String, draftIds: Set<String>? = null) {
                             val on = checked.contains(o.id)
                             ReviewOrderRow(o, on) {
                                 checked = if (on) checked - o.id else checked + o.id
+                                valueEdited = false
                                 codEdited = false
                             }
                         }
@@ -375,6 +385,20 @@ fun ShipReviewSheet(orderId: String, draftIds: Set<String>? = null) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         FieldLabel("Cân nặng (kg)")
                         ReviewInput(weightInput, "1", KeyboardType.Decimal) { weightInput = it }
+                    }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f)) { FieldLabel("Giá trị đơn hàng") }
+                        if (valueEdited) T("Tổng các đơn", 12f, BV.BOLD, C.accent, Modifier.plainTap {
+                            valueEdited = false
+                            codEdited = false
+                        })
+                    }
+                    ReviewInput(if (valueEdited) valueText else groupedNumber(autoGoods), "0", KeyboardType.Number) {
+                        valueText = it
+                        valueEdited = true
+                        codEdited = false
                     }
                 }
                 if (needsSize) {

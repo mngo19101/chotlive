@@ -349,10 +349,6 @@ struct SessionDetailView: View {
     @State private var expandedId: String?
     /// Món vừa bỏ, còn hoàn tác được trong vài giây.
     @State private var undo: Store.RemovedItem?
-    /// Giữ danh sách đứng yên chốc lát khi có bình luận chốt (Tôi › Từ khoá chốt đơn).
-    @StateObject private var pacer = CommentPacer()
-    @AppStorage(LiveHold.enabledKey) private var holdOn = true
-    @AppStorage(LiveHold.secondsKey) private var holdSeconds = 0
 
     private var session: LiveSession? { store.sessions.first { $0.id == sessionId } }
 
@@ -379,14 +375,7 @@ struct SessionDetailView: View {
     /// Ấn tên khách để mở hồ sơ; khách chưa mua lần nào thì không có hồ sơ để mở.
     private func openCustomer(_ owner: Customer?) -> (() -> Void)? {
         guard let cu = owner, !cu.items.isEmpty else { return nil }
-        return {
-            // Danh sách vừa chạy: tên dưới ngón tay có thể là của khách khác.
-            if holdOn, pacer.movedBeforeTap(touchDown: TouchWatcher.shared.lastDown) {
-                pacer.showRetapNotice()
-                return
-            }
-            ui.push(.customer(cu.id))
-        }
+        return { ui.push(.customer(cu.id)) }
     }
 
     private var customerMap: [String: Customer] {
@@ -410,13 +399,10 @@ struct SessionDetailView: View {
         let closingIds = Set(comments.lazy.filter(store.isClosingComment).map(\.id))
         let count = counts(comments, map, closingCount: closingIds.count)
         let matching = filter(comments, map, closingIds: closingIds)
-        // Đang cuộn xuống đọc thì đứng yên hẳn; ở trên cùng thì bộ giữ nhịp quyết định lúc nào hiện bình luận mới.
-        let paceCut = holdOn ? pacer.cutoff : nil
-        let cut = frozenAt ?? paceCut
-        let shown = cut.map { at in matching.filter { $0.ts <= at } } ?? matching
+        // Ở trên cùng thì bình luận mới hiện lên ngay; đang cuộn xuống đọc thì đứng yên hẳn.
+        let shown = frozenAt.map { at in matching.filter { $0.ts <= at } } ?? matching
         let pending = isDemo ? 12 : matching.count - shown.count
         let newest = comments.first?.ts
-        let paceActive = holdOn && !isDemo && atTop && frozenAt == nil
 
         return SubPage(title: session?.title ?? "Phiên live", subtitle: subtitle, accessory: liveBadge, headerBottom: 16, trailing: {
             CircleButton(icon: .search) {
@@ -454,11 +440,6 @@ struct SessionDetailView: View {
                                            },
                                            onRemove: { it in confirmRemove(it, of: c) },
                                            onOpenCustomer: openCustomer(owner)) {
-                                    // Danh sách vừa chạy ngay trước khi chạm: ngón tay đang nhắm vào dòng ở chỗ cũ.
-                                    if holdOn, pacer.movedBeforeTap(touchDown: TouchWatcher.shared.lastDown) {
-                                        pacer.showRetapNotice()
-                                        return
-                                    }
                                     Task { @MainActor in
                                         ui.notify(await printComment(c, store: store, printer: printer))
                                     }
@@ -480,23 +461,7 @@ struct SessionDetailView: View {
                     let top = y > -80
                     guard top != atTop else { return }
                     atTop = top
-                    // Giữ đúng những gì đang thấy, kể cả khi bộ giữ nhịp còn bình luận chờ.
-                    frozenAt = top ? nil : (paceCut ?? newest ?? Date())
-                }
-                .onAppear { pacer.setActive(paceActive, newest: newest) }
-                .onChange(of: paceActive) { on in pacer.setActive(on, newest: newest) }
-                .onChange(of: comments.first?.id) { _ in
-                    pacer.arrived(comments, isClosing: store.isClosingComment,
-                                  touching: TouchWatcher.shared.isTouching, lastTouchUp: TouchWatcher.shared.lastUp)
-                }
-                .onChange(of: shown.first?.id) { _ in pacer.noteShift() }
-                .task(id: paceActive) { @MainActor in
-                    guard paceActive else { return }
-                    while !Task.isCancelled {
-                        pacer.fixedHold = holdSeconds
-                        pacer.tick(touching: TouchWatcher.shared.isTouching, lastTouchUp: TouchWatcher.shared.lastUp)
-                        try? await Task.sleep(nanoseconds: 100_000_000)
-                    }
+                    frozenAt = top ? nil : (newest ?? Date())
                 }
                 .task(id: client.serverSupportsSync) {
                     // Phiên cũ đã hết bình luận trên máy: tự tải luôn, khỏi thấy màn trống.
@@ -506,15 +471,11 @@ struct SessionDetailView: View {
                 .overlay(alignment: .bottom) {
                     if let r = undo {
                         undoBar(r)
-                    } else if pending > 0 && (frozenAt != nil || isDemo) {
+                    } else if pending > 0 {
                         newCommentsPill(pending) {
                             frozenAt = nil
                             withAnimation { proxy.scrollTo("top", anchor: .top) }
                         }
-                    } else if holdOn && pacer.retapNotice {
-                        holdNote("Danh sách vừa chạy, bấm in lại")
-                    } else if holdOn && pacer.holding && pending > 0 {
-                        holdNote("Đang giữ · \(pending) bình luận chờ")
                     }
                 }
             }
@@ -722,17 +683,6 @@ struct SessionDetailView: View {
             .onAccent(selected)
         }
         .buttonStyle(.plain)
-    }
-
-    /// Dòng báo nhỏ cuối màn khi đang giữ danh sách. Không bấm được, để khỏi thành chỗ bấm nhầm mới.
-    private func holdNote(_ text: String) -> some View {
-        T(text, 12.5, .semibold, Theme.muted)
-            .fixedSize()
-            .padding(.horizontal, 14)
-            .frame(height: 30)
-            .background(Capsule().fill(Theme.card).overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1)))
-            .allowsHitTesting(false)
-            .padding(.bottom, Metrics.safeBottom > 0 ? 0 : 12)
     }
 
     private func newCommentsPill(_ count: Int, action: @escaping () -> Void) -> some View {

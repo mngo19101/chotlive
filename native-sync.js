@@ -93,6 +93,8 @@ export function nativeShip(ship) {
     deposit: moneyOrNull(ship.deposit),
     shipFee: moneyOrNull(ship.shipFee),
     codOverride: moneyOrNull(ship.codOverride),
+    // Giá trị đơn hàng nhập tay ở bảng Duyệt đơn (khách cọc, giảm giá...), thay tổng tiền các đơn.
+    goodsOverride: moneyOrNull(ship.goodsOverride),
     weightG: moneyOrNull(ship.weightG),
     exportedAt: numOrNull(ship.exportedAt),
     batchId: ship.batchId ? String(ship.batchId) : null,

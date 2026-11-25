@@ -2866,6 +2866,8 @@ function shipPatch(first = true) {
     deposit: first ? shipCtx.deposit || 0 : 0,
     shipFee: shipCtx.fee,
     codOverride: shipCtx.cod,
+    // Web chưa có ô giá trị đơn nhập tay: duyệt lại trên web thì quay về tổng tiền các đơn.
+    goodsOverride: null,
     weightG: shipWeightG(),
     lengthCm: size ? size[0] : null,
     widthCm: size ? size[1] : null,
@@ -2975,7 +2977,7 @@ function applyShip(newState) {
     const dropped = pendingOrdersOfCustomer(state.orders, focus)
       .filter((o) => !ids.includes(o.id) && shipStateOf(o) === 'ready')
       .map((o) => o.id);
-    if (dropped.length) setOrdersShip(dropped, { state: 'ask', deposit: 0, codOverride: null });
+    if (dropped.length) setOrdersShip(dropped, { state: 'ask', deposit: 0, codOverride: null, goodsOverride: null });
   }
   const draft = shipCtx.draft;
   $('#modal-ship')?.close();
@@ -3976,7 +3978,7 @@ $('#btn-save-order-items')?.addEventListener('click', () => {
     save('order_items_edited');
     openOrderDetailView(currentDetailOrderId);
     $('#modal-edit-order-items')?.close();
-    if (codReset) toast(`Đơn của ${ord.nickname || ord.uniqueId} vừa đổi món: đã bỏ tiền thu hộ nhập tay, tính lại theo hàng mới`, 'ℹ️', 5000);
+    if (codReset) toast(`Đơn của ${ord.nickname || ord.uniqueId} vừa đổi món: đã bỏ số tiền nhập tay, tính lại theo hàng mới`, 'ℹ️', 5000);
     else toast(`Đã cập nhật${syncedWord()} sản phẩm trong đơn!`, '✓');
   }
 });
@@ -5480,7 +5482,7 @@ function printSingleComment(commentId) {
   const item = newItem || order.items.find((it) => it.commentId === c.id);
   if (!item) return toast('Không lưu được bình luận vào khách', '⚠️');
   if (isDuplicate) toast('Bình luận này đã lưu trước đó, in lại tem', 'ℹ️');
-  if (codReset) toast(`Đơn của ${order.nickname} có thêm món: đã bỏ tiền thu hộ nhập tay, tính lại theo hàng mới`, 'ℹ️', 5000);
+  if (codReset) toast(`Đơn của ${order.nickname} có thêm món: đã bỏ số tiền nhập tay, tính lại theo hàng mới`, 'ℹ️', 5000);
 
   c.printed = true;
   state.selectedCustomerUniqueId = c.uniqueId;

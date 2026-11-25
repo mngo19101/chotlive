@@ -24,7 +24,6 @@ struct ChotLiveApp: App {
                 .environmentObject(vtpDrafts.current)
                 .onAppear {
                     KeyboardDismisser.shared.install()
-                    TouchWatcher.shared.install()
                     SupportNotifier.shared.install()
                     client.onChat = { [store, client] c in
                         store.addComment(c, tiktok: client.liveUsername)
@@ -68,7 +67,6 @@ struct ChotLiveApp: App {
                     if phase == .active {
                         UIApplication.shared.isIdleTimerDisabled = true
                         KeyboardDismisser.shared.install()
-                        TouchWatcher.shared.install()
                         client.checkSocket()
                         Task { @MainActor in await vtpDrafts.refreshAll() }
                     } else {

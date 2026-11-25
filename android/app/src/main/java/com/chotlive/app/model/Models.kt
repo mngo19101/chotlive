@@ -103,7 +103,7 @@ data class OrderItem(
 /**
  * Thông tin giao của đơn, cùng JSON với `order.ship` trên web (public/js/vtp-export.js):
  * state ask | hold | ready | exported; pay cod | paid; payer receiver | sender;
- * deposit, shipFee, codOverride (đồng), weightG (gram), exportedAt (mili giây).
+ * deposit, shipFee, codOverride, goodsOverride (đồng), weightG (gram), exportedAt (mili giây).
  * Trường rỗng không gửi lên; máy chủ coi trường thiếu là đã bỏ (ví dụ COD nhập tay).
  */
 @Serializable
@@ -114,6 +114,8 @@ data class ShipInfo(
     val deposit: Int? = null,
     val shipFee: Int? = null,
     val codOverride: Int? = null,
+    /** Giá trị đơn hàng nhập tay ở bảng Duyệt đơn, thay tổng tiền các đơn (giá trị hàng khai Viettel Post). */
+    val goodsOverride: Int? = null,
     val weightG: Int? = null,
     val exportedAt: Long? = null,
     val batchId: String? = null,

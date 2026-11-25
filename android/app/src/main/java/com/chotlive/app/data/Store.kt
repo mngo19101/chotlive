@@ -293,11 +293,11 @@ class Store(private val directory: File, account: String?) {
     fun takeCodResetNotice(): String? {
         val name = codResetName ?: return null
         codResetName = null
-        return "Đơn của $name vừa đổi món: đã bỏ tiền thu hộ nhập tay, tính lại theo hàng mới."
+        return "Đơn của $name vừa đổi món: đã bỏ số tiền nhập tay, tính lại theo hàng mới."
     }
 
     /**
-     * Tiền thu hộ nhập tay là cho gói hàng cũ. Đơn chưa gửi của khách đổi món (thêm, sửa giá, bớt) thì bỏ số đó
+     * Tiền thu hộ và giá trị đơn nhập tay là cho gói hàng cũ. Đơn chưa gửi của khách đổi món (thêm, sửa giá, bớt) thì bỏ số đó
      * ở mọi đơn chưa gửi của khách, để thu hộ tính lại theo hàng mới, giống web.
      */
     private fun clearManualCod(customerId: String) {
@@ -308,9 +308,9 @@ class Store(private val directory: File, account: String?) {
         var cleared = false
         val items = c.items.map {
             val ship = it.ship
-            if (ship?.codOverride != null && pending.contains(it.id)) {
+            if (ship != null && (ship.codOverride != null || ship.goodsOverride != null) && pending.contains(it.id)) {
                 cleared = true
-                it.copy(ship = ship.copy(codOverride = null))
+                it.copy(ship = ship.copy(codOverride = null, goodsOverride = null))
             } else it
         }
         if (!cleared) return
@@ -502,7 +502,7 @@ class Store(private val directory: File, account: String?) {
         val changes = LinkedHashMap<String, ShipInfo>()
         for (id in dropped) {
             val s = order(id)?.ship ?: continue
-            changes[id] = s.copy(state = ShipState.ASK.raw, deposit = 0, codOverride = null)
+            changes[id] = s.copy(state = ShipState.ASK.raw, deposit = 0, codOverride = null, goodsOverride = null)
         }
         orderIds.forEachIndexed { i, id ->
             // Giữ mã vận đơn đã huỷ và lỗi lần gửi trước: lần gửi sau cần biết để không trùng mã đơn.

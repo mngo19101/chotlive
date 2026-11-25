@@ -116,8 +116,12 @@ object Vtp {
         // "shipOnly": dữ liệu cũ của web, coi như đã bank.
         val goodsPaid = { l: Line -> l.ship?.pay == "paid" || l.ship?.pay == "shipOnly" }
         val allPaid = lines.isNotEmpty() && lines.all(goodsPaid)
-        val goods = lines.sumOf { maxOf(0, it.total) }
-        val unpaidRaw = lines.filter { !goodsPaid(it) }.sumOf { maxOf(0, it.total) }
+        // Giá trị đơn nhập tay là cả gói: phần chưa trả là giá trị đó trừ tiền các đơn đã bank đủ.
+        val goodsOverride = last(lines) { it.goodsOverride }
+        val goods = goodsOverride ?: lines.sumOf { maxOf(0, it.total) }
+        val paidGoods = lines.filter(goodsPaid).sumOf { maxOf(0, it.total) }
+        val unpaidRaw = goodsOverride?.let { maxOf(0, it - paidGoods) }
+            ?: lines.filter { !goodsPaid(it) }.sumOf { maxOf(0, it.total) }
         val deposit = minOf(unpaidRaw, lines.sumOf { maxOf(0, it.ship?.deposit ?: 0) })
         val unpaid = unpaidRaw - deposit
         val feeIsReal = (realFee ?: 0) > 0

@@ -121,7 +121,7 @@ struct OrderItem: Identifiable, Codable, Equatable {
 
 /// Thông tin giao của đơn, cùng JSON với `order.ship` trên web (public/js/vtp-export.js):
 /// state ask | hold | ready | exported; pay cod | paid; payer receiver | sender;
-/// deposit, shipFee, codOverride (đồng), weightG (gram), exportedAt (mili giây).
+/// deposit, shipFee, codOverride, goodsOverride (đồng), weightG (gram), exportedAt (mili giây).
 struct ShipInfo: Codable, Equatable {
     var state: String? = nil
     var pay: String? = nil
@@ -129,6 +129,8 @@ struct ShipInfo: Codable, Equatable {
     var deposit: Int? = nil
     var shipFee: Int? = nil
     var codOverride: Int? = nil
+    /// Giá trị đơn hàng nhập tay ở bảng Duyệt đơn, thay tổng tiền các đơn (giá trị hàng khai Viettel Post).
+    var goodsOverride: Int? = nil
     var weightG: Int? = nil
     var exportedAt: Double? = nil
     var batchId: String? = nil
@@ -172,15 +174,15 @@ struct ShipInfo: Codable, Equatable {
     var draftKnown = false
 
     init(state: String? = nil, pay: String? = nil, payer: String? = nil, deposit: Int? = nil, shipFee: Int? = nil,
-         codOverride: Int? = nil, weightG: Int? = nil, exportedAt: Double? = nil, batchId: String? = nil,
-         lengthCm: Int? = nil, widthCm: Int? = nil, heightCm: Int? = nil) {
+         codOverride: Int? = nil, goodsOverride: Int? = nil, weightG: Int? = nil, exportedAt: Double? = nil,
+         batchId: String? = nil, lengthCm: Int? = nil, widthCm: Int? = nil, heightCm: Int? = nil) {
         self.state = state; self.pay = pay; self.payer = payer; self.deposit = deposit; self.shipFee = shipFee
-        self.codOverride = codOverride; self.weightG = weightG; self.exportedAt = exportedAt; self.batchId = batchId
+        self.codOverride = codOverride; self.goodsOverride = goodsOverride; self.weightG = weightG; self.exportedAt = exportedAt; self.batchId = batchId
         self.lengthCm = lengthCm; self.widthCm = widthCm; self.heightCm = heightCm
     }
 
     private enum CodingKeys: String, CodingKey {
-        case state, pay, payer, deposit, shipFee, codOverride, weightG, exportedAt, batchId, lengthCm, widthCm, heightCm
+        case state, pay, payer, deposit, shipFee, codOverride, goodsOverride, weightG, exportedAt, batchId, lengthCm, widthCm, heightCm
         case vtpCode, vtpOldCode, vtpFee, vtpCod, vtpGoods, vtpService, vtpStatus, vtpStatusName, vtpStatusAt, vtpKind, vtpNote, vtpError, vtpErrorAt
         case vtpHint, vtpHintCod
         case draftCode, draftAt, draftHash, draftAccount, draftError, draftErrorAt
@@ -209,6 +211,7 @@ struct ShipInfo: Codable, Equatable {
         deposit = Self.money(Self.number(c, .deposit))
         shipFee = Self.money(Self.number(c, .shipFee))
         codOverride = Self.money(Self.number(c, .codOverride))
+        goodsOverride = Self.money(Self.number(c, .goodsOverride))
         weightG = Self.money(Self.number(c, .weightG))
         exportedAt = Self.number(c, .exportedAt)
         batchId = try? c.decodeIfPresent(String.self, forKey: .batchId)
@@ -248,6 +251,7 @@ struct ShipInfo: Codable, Equatable {
         try c.encode(deposit, forKey: .deposit)
         try c.encode(shipFee, forKey: .shipFee)
         try c.encode(codOverride, forKey: .codOverride)
+        try c.encode(goodsOverride, forKey: .goodsOverride)
         try c.encode(weightG, forKey: .weightG)
         try c.encode(exportedAt, forKey: .exportedAt)
         try c.encode(batchId, forKey: .batchId)
