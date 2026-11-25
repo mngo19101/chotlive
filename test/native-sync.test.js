@@ -272,7 +272,7 @@ test('app nhận ship và mã đơn của web, gửi ship lên thì web thấy �
   assert.equal(item.orderCode, 'HD26110701');
   assert.deepEqual(item.ship, {
     state: 'hold', pay: 'cod', payer: 'receiver', deposit: 50000, shipFee: null, codOverride: null, goodsOverride: null,
-    weightG: 1500, exportedAt: null, batchId: null, lengthCm: null, widthCm: null, heightCm: null,
+    weightG: 1500, exportedAt: null, batchId: null, lengthCm: null, widthCm: null, heightCm: null, goodsName: null,
     draftCode: null, draftAt: null, draftHash: null, draftAccount: null, draftError: null, draftErrorAt: null
   });
 

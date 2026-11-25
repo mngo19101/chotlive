@@ -102,6 +102,8 @@ export function nativeShip(ship) {
     lengthCm: moneyOrNull(ship.lengthCm),
     widthCm: moneyOrNull(ship.widthCm),
     heightCm: moneyOrNull(ship.heightCm),
+    // Tên hàng hoá trên vận đơn, nhập ở bảng Duyệt đơn khi shop để trống tên hàng mặc định trong cài đặt.
+    goodsName: textOrNull(String(ship.goodsName ?? '').replace(/\s+/g, ' ').trim(), 100),
     // Nháp Viettel Post do app đẩy từ máy: app ghi, máy chủ chỉ lưu và đồng bộ lại.
     draftCode: textOrNull(ship.draftCode, 40),
     draftAt: numOrNull(ship.draftAt),

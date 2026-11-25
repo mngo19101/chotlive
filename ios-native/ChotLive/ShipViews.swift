@@ -172,6 +172,9 @@ struct ShipReviewSheet: View {
     @State private var valueText = ""
     @State private var valueEdited = false
     @FocusState private var valueFocused: Bool
+    /// Tên hàng trong cài đặt Máy in; để trống thì bảng có ô nhập tên hàng cho từng lần duyệt.
+    @AppStorage(Vtp.goodsNameKey) private var goodsSetting = Vtp.defaultGoodsName
+    @State private var goodsText = ""
 
     private var all: [Order] { store.allOrders() }
     private var focus: Order? { store.order(id: orderId) }
@@ -192,13 +195,17 @@ struct ShipReviewSheet: View {
     /// Từ 10kg Viettel Post cần kích thước kiện: hiện 3 ô Dài / Rộng / Cao và bắt buộc nhập.
     private var needsSize: Bool { weightG >= Vtp.sizeRequiredG }
     private var sizeMissing: Bool { needsSize && (cm(lengthText) == nil || cm(widthText) == nil || cm(heightText) == nil) }
+    private var asksGoods: Bool { Vtp.cleanGoods(goodsSetting).isEmpty }
+    private var goodsMissing: Bool { asksGoods && Vtp.cleanGoods(goodsText).isEmpty }
 
     /// Cài đặt đang chọn trong bảng, ghi vào đơn khi bấm nút.
     private func patch(first: Bool, cod: Int?) -> ShipInfo {
         ShipInfo(pay: pay, payer: payer, deposit: first ? deposit : 0, shipFee: fee, codOverride: cod,
                  goodsOverride: goodsValue, weightG: weightG,
                  lengthCm: needsSize ? cm(lengthText) : nil, widthCm: needsSize ? cm(widthText) : nil,
-                 heightCm: needsSize ? cm(heightText) : nil)
+                 heightCm: needsSize ? cm(heightText) : nil,
+                 // Giữ cả khi cài đặt đang có tên hàng, để lỡ xoá trống cài đặt thì tên đã nhập vẫn còn.
+                 goodsName: Vtp.cleanGoods(goodsText).isEmpty ? nil : Vtp.cleanGoods(goodsText))
     }
 
     /// Tính thử đúng như lúc xuất: tiền cọc ở đơn đầu, các cài đặt khác ở mọi đơn.
@@ -207,7 +214,8 @@ struct ShipReviewSheet: View {
         let list = chosen.isEmpty ? [focus] : chosen
         // Kèm cả số thu hộ nhập tay, để cảnh báo đơn dưới 17.000đ đúng với số sẽ gửi đi (autoCod không đổi theo số này).
         let lines = list.enumerated().map { i, o in Vtp.Line(total: o.total, qty: o.productCount, ship: patch(first: i == 0, cod: codValue)) }
-        return Vtp.summarize(lines, address: focus.customer.address, nickname: focus.customer.nickname)
+        return Vtp.summarize(lines, address: focus.customer.address, nickname: focus.customer.nickname,
+                             goodsSetting: Vtp.cleanGoods(goodsSetting))
     }
 
     var body: some View {
@@ -270,6 +278,7 @@ struct ShipReviewSheet: View {
             heightText = s.heightCm.map { String($0) } ?? ""
         }
         weightText = Swift.String(format: "%g", Double(w) / 1000).replacingOccurrences(of: ".", with: ",")
+        goodsText = list.reversed().compactMap { $0.ship?.goodsName }.first { !$0.isEmpty } ?? ""
         // Giá trị đơn đã sửa tay lúc duyệt trước thì giữ nguyên.
         if let manual = list.reversed().compactMap({ $0.ship?.goodsOverride }).first {
             valueEdited = true
@@ -319,7 +328,8 @@ struct ShipReviewSheet: View {
                 }
             }
             .cardStyle(18)
-            if let warn = trial?.problems.filter({ !$0.contains("kích thước") }), !warn.isEmpty {
+            // Thiếu kích thước, tên hàng: báo ngay dưới ô nhập, không ở đây (nút Sửa ở đây là sửa địa chỉ).
+            if let warn = trial?.problems.filter({ !$0.contains("kích thước") && $0 != Vtp.goodsNameMissing }), !warn.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     T(warn.joined(separator: " · "), 12.5, .medium, Theme.red).fixedSize(horizontal: false, vertical: true)
                     Button {
@@ -364,7 +374,7 @@ struct ShipReviewSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    T(o.code.map { "Đơn \($0)" } ?? "Đơn \(dayMonth(o.lastTs))", 15, .bold)
+                    T("Đơn \(dayMonth(o.lastTs))", 15, .bold)
                     T("\(o.productCount) sản phẩm · \(timeText(o.lastTs)) · \(dayMonth(o.lastTs))", 12, .medium, Theme.muted)
                 }
                 Spacer()
@@ -399,6 +409,26 @@ struct ShipReviewSheet: View {
                     // Thu tiền hàng thì người nhận trả cước, đã bank đủ thì shop trả.
                     payer = v == "cod" ? "receiver" : "sender"
                     resetCod()
+                }
+            }
+            if asksGoods {
+                VStack(alignment: .leading, spacing: 6) {
+                    fieldLabel("Tên hàng ") + T("*", 13, .bold, Theme.red)
+                    ZStack(alignment: .leading) {
+                        if goodsText.isEmpty { T("Ví dụ: Giày dép, Mỹ phẩm", 15, .medium, Theme.placeholder).lineLimit(1) }
+                        TextField("", text: $goodsText)
+                            .font(.bv(16, .semibold))
+                            .foregroundColor(Theme.ink)
+                            .textInputAutocapitalization(.sentences)
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(height: 44)
+                    .cardStyle(12)
+                    if goodsMissing {
+                        T("Viettel Post bắt buộc có tên hàng. Đặt tên hàng mặc định ở Tôi → Máy in để khỏi nhập mỗi lần.",
+                          12, .medium, Theme.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             HStack(spacing: 10) {
@@ -568,6 +598,10 @@ struct ShipReviewSheet: View {
             ui.notify("Hàng từ 10kg phải nhập đủ kích thước dài, rộng, cao (cm).")
             return
         }
+        if state == .ready && goodsMissing {
+            ui.notify("Nhập tên hàng trước khi gửi.")
+            return
+        }
         // Đơn đang Chờ gửi mà bị bỏ tick: đưa về chưa duyệt, không thì lúc tạo vận đơn vẫn bị gộp chung và cộng tiền.
         let dropped = state == .ready ? pending.filter { !checked.contains($0.id) && Vtp.state($0) == .ready }.map(\.id) : []
         store.approve(ids, state: state, base: patch(first: true, cod: codValue), dropped: dropped)
@@ -625,7 +659,7 @@ struct VtpExportSheet: View {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return true }
         let s = g.summary
-        let hay = ([s.receiver, s.phone, g.customer.nickname, g.customer.uniqueId] + g.orders.compactMap(\.code))
+        let hay = [s.receiver, s.phone, g.customer.nickname, g.customer.uniqueId]
             .joined(separator: " ").lowercased()
         return hay.contains(q)
     }
@@ -797,17 +831,13 @@ struct VtpExportSheet: View {
         let s = g.summary
         let q = quote(g)
         let name = s.receiver.isEmpty ? g.customer.nickname : s.receiver
-        let codes = g.orders.compactMap(\.code).filter { !$0.isEmpty }.joined(separator: " + ")
         let busy = isQuoting(g)
         let parsed = q?.parsed ?? ""
         let mismatch = q?.addrOk == false
         let feeOk = q?.ok == true
         return VStack(spacing: 0) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    T("Nháp · \(name)", 20, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.8)
-                    if !codes.isEmpty { T(codes, 12.5, .medium, Theme.muted).lineLimit(2) }
-                }
+                T("Nháp · \(name)", 20, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.8)
                 Spacer()
                 if embedded {
                     Button { detailId = nil } label: {
@@ -854,7 +884,8 @@ struct VtpExportSheet: View {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             T("Tên hàng", 13, .medium, Theme.muted).fixedSize()
                             Spacer(minLength: 8)
-                            T("\(Vtp.goodsName) · \(max(s.qty, 1)) món", 13, .semibold, Theme.ink).lineLimit(1)
+                            T("\(s.goodsName.isEmpty ? "Chưa có tên hàng" : s.goodsName) · \(max(s.qty, 1)) món", 13, .semibold,
+                              s.goodsName.isEmpty ? Theme.red : Theme.ink).lineLimit(1)
                             // Sửa cân nặng, kích thước, COD, tiền cọc, người trả cước của đúng các đơn trong nháp này.
                             if let last = g.orders.last, !sending {
                                 Button {

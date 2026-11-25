@@ -243,15 +243,9 @@ enum VtpTrack {
     /// Dữ liệu một khách gửi lên máy chủ, cùng cách tính với file Excel và với web (vtpPayload).
     static func payload(_ g: Vtp.Group, now: Date = Clock.now) -> [String: Any] {
         let s = g.summary
-        let codes = g.orders.compactMap(\.code).filter { !$0.isEmpty }.joined(separator: "+")
-        let base = codes.isEmpty ? g.customer.id : codes
-        // Vận đơn cũ đã huỷ thì Viettel Post không nhận lại đúng mã đơn đó: thêm hậu tố.
-        let retry = g.orders.contains { ($0.ship?.vtpOldCode ?? "").isEmpty == false }
-            ? "-" + String(String(Int64(now.timeIntervalSince1970 * 1000), radix: 36).suffix(4)) : ""
         var p: [String: Any] = [
             "key": g.id,
             "itemIds": g.orders.flatMap { $0.items.map(\.id) },
-            "ref": String(base.prefix(50 - retry.count)) + retry,
             "receiver": s.receiver,
             "phone": s.phone,
             "address": s.address.line,
@@ -260,7 +254,7 @@ enum VtpTrack {
                 "province": s.address.newProvince.isEmpty ? s.address.province : s.address.newProvince,
                 "ward": s.address.newWard.isEmpty ? s.address.ward : s.address.newWard
             ],
-            "goodsName": Vtp.goodsName,
+            "goodsName": s.goodsName,
             "qty": max(s.qty, 1),
             "weightG": s.weightG,
             "goods": s.goods,

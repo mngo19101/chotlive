@@ -121,7 +121,7 @@ struct OrdersView: View {
         if !q.isEmpty {
             l = l.filter {
                 $0.customer.matchesName(q)
-                    || ($0.code ?? "").lowercased().contains(q) || ($0.customer.address?.phone ?? "").contains(q)
+                    || ($0.customer.address?.phone ?? "").contains(q)
                     || ($0.ship?.vtpCode ?? "").lowercased().contains(q.replacingOccurrences(of: " ", with: ""))
             }
         }

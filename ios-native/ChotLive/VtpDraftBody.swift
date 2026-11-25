@@ -32,7 +32,7 @@ enum VtpDraftBody {
         // Ghép từng phần cho trình biên dịch Swift khỏi chậm với một từ điển quá lớn.
         var b: [String: Any] = [:]
         b["ORDER_NUMBER"] = ""
-        b["ORDER_REFERENCE"] = reference(g)
+        b["ORDER_REFERENCE"] = ""
         b["ORDER_TYPE"] = 1
         b["TYPE"] = 12
         b["DELIVERY_DATE"] = VtpDraftClient.dateText(now)
@@ -56,7 +56,7 @@ enum VtpDraftBody {
         b["RECEIVER_WARD"] = place.ward
         b["RECEIVER_LATITUDE"] = 0
         b["RECEIVER_LONGITUDE"] = 0
-        b["PRODUCT_NAME"] = Vtp.goodsName
+        b["PRODUCT_NAME"] = clip(s.goodsName)
         b["PRODUCT_DESCRIPTION"] = ""
         b["PRODUCT_QUANTITY"] = quantity
         b["PRODUCT_PRICE"] = s.goods
@@ -78,7 +78,7 @@ enum VtpDraftBody {
         }
         var item: [String: Any] = [:]
         item["ORDER_NUMBER_ITEM"] = 1
-        item["PRODUCT_NAME"] = Vtp.goodsName
+        item["PRODUCT_NAME"] = clip(s.goodsName)
         item["PRODUCT_QUANTITY"] = quantity
         item["PRODUCT_WEIGHT"] = max(1, s.weightG)
         item["PRODUCT_PRICE"] = s.goods
@@ -87,15 +87,6 @@ enum VtpDraftBody {
         b["REMOVE_PICKUP_DATE"] = true
         b["XMG_EXTRA_MONEY"] = 0
         return b
-    }
-
-    private static let badRefRe = try! NSRegularExpression(pattern: #"[^A-Za-z0-9_+-]+"#)
-
-    /// Mã đơn ChốtLive của các đơn trong nháp (giống cột "Mã đơn hàng" file Excel), tối đa 50 ký tự.
-    static func reference(_ g: Vtp.Group) -> String {
-        let codes = g.orders.compactMap(\.code).filter { !$0.isEmpty }.joined(separator: "+")
-        let clean = badRefRe.stringByReplacingMatches(in: codes, range: NSRange(location: 0, length: (codes as NSString).length), withTemplate: "-")
-        return String(clean.prefix(50))
     }
 
     /// Viettel Post giới hạn 150 BYTE: cắt theo byte, không cắt giữa ký tự.
@@ -114,16 +105,18 @@ enum VtpDraftBody {
     // MARK: - Nháp còn khớp đơn không
 
     /// Băm những gì quyết định nội dung nháp: người nhận, địa chỉ, tiền, ai trả cước, cân nặng, kích thước,
-    /// dịch vụ, ghi chú và danh sách đơn. Đổi một trong số đó là nháp trên Viettel Post đã cũ.
+    /// dịch vụ, ghi chú, tên hàng và danh sách đơn. Đổi một trong số đó là nháp trên Viettel Post đã cũ.
     static func hash(_ g: Vtp.Group, service: String) -> String {
         // Bản tạm tính (chưa áp cước thật): cước Viettel Post báo về sau không làm nháp vừa đẩy bị coi là cũ.
         let s = g.baseSummary ?? g.summary
         let size = s.size.map { "\($0.0)x\($0.1)x\($0.2)" } ?? ""
-        let parts: [String] = [
+        var parts: [String] = [
             s.receiver, s.phone, s.address.line, String(s.goods), String(s.cod), s.senderPays ? "S" : "R",
             String(s.weightG), size, String(max(1, s.qty)), service.isEmpty ? Vtp.defaultService : service, s.note,
             g.orders.map(\.id).sorted().joined(separator: ",")
         ]
+        // Tên hàng mặc định không đưa vào băm: nháp đẩy trước khi có cài đặt tên hàng vẫn còn khớp.
+        if s.goodsName != Vtp.defaultGoodsName { parts.append(s.goodsName) }
         let digest = SHA256.hash(data: Data(parts.joined(separator: "|").utf8))
         return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
     }

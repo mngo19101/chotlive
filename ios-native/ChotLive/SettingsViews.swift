@@ -309,6 +309,7 @@ struct PrinterView: View {
     @EnvironmentObject var ui: AppUI
     @AppStorage("paperWidth") private var paperWidth = 576
     @AppStorage("shopName") private var shopName = "ChốtLive"
+    @AppStorage(Vtp.goodsNameKey) private var goodsName = Vtp.defaultGoodsName
     @State private var wifiHost = ""
     @State private var wifiPort = ""
     @State private var wifiError: String?
@@ -371,6 +372,20 @@ struct PrinterView: View {
                             Chip(title: "58mm", selected: paperWidth == 384) { paperWidth = 384 }
                         }
                         LabeledField(label: "Tên shop trên tem", placeholder: "ChốtLive", text: $shopName)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardStyle(20)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        T("Tên hàng hoá", 15, .bold)
+                        LabeledField(label: "Tên hàng trên vận đơn Viettel Post", placeholder: "Để trống: nhập khi duyệt đơn",
+                                     text: $goodsName)
+                        T(Vtp.cleanGoods(goodsName).isEmpty
+                          ? "Đang để trống: mỗi lần duyệt đơn sẽ có ô nhập tên hàng."
+                          : "Mọi vận đơn ghi tên hàng này. Xoá trống nếu muốn nhập riêng ở mỗi lần duyệt đơn.",
+                          12.5, .medium, Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -107,12 +107,34 @@ final class VtpExportTests: XCTestCase {
         XCTAssertEqual(rows[6].count, 22)
         let row = rows[7]
         XCTAssertEqual(row.count, 22)
-        XCTAssertEqual(row[1], .text("HD05+HD08"))
+        XCTAssertNil(row[1], "cột Mã đơn hàng để trống")
         XCTAssertEqual(row[4], .text("12 Trần Thái Tông, Phường Cầu Giấy, TP.Hà Nội"))
         XCTAssertEqual(row[5], .text("Quần áo"))
         XCTAssertEqual(row[9], .number(320_000))
         XCTAssertEqual(row[12], .text("VSL9"))
         XCTAssertEqual(row[18], .text("Người nhận trả"))
+    }
+
+    func testGoodsNameFromSettingOrReview() {
+        let named = ShipInfo(state: "ready", pay: "cod", goodsName: "  Giày   dép ")
+        let lines = [Vtp.Line(total: 100_000, qty: 1, ship: named)]
+        // Cài đặt có tên hàng: dùng tên cài đặt, bỏ qua tên nhập lúc duyệt.
+        XCTAssertEqual(Vtp.summarize(lines, address: nil, nickname: "A", goodsSetting: "Mỹ phẩm").goodsName, "Mỹ phẩm")
+        // Cài đặt để trống: lấy tên nhập lúc duyệt, gọn khoảng trắng.
+        let fromReview = Vtp.summarize(lines, address: nil, nickname: "A", goodsSetting: "")
+        XCTAssertEqual(fromReview.goodsName, "Giày dép")
+        XCTAssertFalse(fromReview.problems.contains(Vtp.goodsNameMissing))
+        // Cài đặt để trống mà chưa nhập: báo thiếu tên hàng.
+        let none = Vtp.summarize([Vtp.Line(total: 100_000, qty: 1, ship: ShipInfo(state: "ready"))], address: nil, nickname: "A",
+                                 goodsSetting: "")
+        XCTAssertEqual(none.goodsName, "")
+        XCTAssertTrue(none.problems.contains(Vtp.goodsNameMissing))
+    }
+
+    func testGoodsNameSurvivesJson() throws {
+        let s = ShipInfo(state: "ready", goodsName: "Giày dép")
+        let back = try JSONDecoder().decode(ShipInfo.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(back.goodsName, "Giày dép")
     }
 
     func testHeavyParcelNeedsSize() {
@@ -230,7 +252,8 @@ final class VtpExportTests: XCTestCase {
         let p = VtpTrack.payload(g, now: Date(timeIntervalSince1970: 1_800_000_000))
         XCTAssertEqual(p["key"] as? String, "lan.anh")
         XCTAssertEqual(p["itemIds"] as? [String], ["a-1", "b-1"])
-        XCTAssertEqual(p["ref"] as? String, "HDa+HDb")
+        XCTAssertNil(p["ref"], "không gửi mã đơn HD")
+        XCTAssertEqual(p["goodsName"] as? String, "Quần áo")
         XCTAssertEqual(p["cod"] as? Int, 180_000)
         XCTAssertEqual(p["goods"] as? Int, 200_000)
         XCTAssertEqual(p["phone"] as? String, "0912345678")
@@ -239,13 +262,10 @@ final class VtpExportTests: XCTestCase {
         XCTAssertEqual(p["address"] as? String, g.summary.address.line)
         XCTAssertNil(p["size"])
 
-        // Vận đơn cũ đã huỷ: thêm hậu tố để Viettel Post nhận lại mã đơn.
         var again = ShipInfo(state: "ready", pay: "cod")
         again.vtpOldCode = "156288120034"
         again.vtpKind = "cancelled"
         let c = order("c", ship: again)
-        let p2 = VtpTrack.payload(Vtp.readyGroups([c])[0])
-        XCTAssertTrue((p2["ref"] as? String ?? "").hasPrefix("HDc-"))
         XCTAssertEqual(VtpTrack.cancelledCode(c), "156288120034")
     }
 

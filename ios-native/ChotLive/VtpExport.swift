@@ -24,8 +24,19 @@ enum Vtp {
     /// Đơn thu hộ dưới mức này mà shop trả cước thì cộng phí ship vào tiền thu hộ.
     static let smallOrderLimit = 17_000
     static let smallOrderShipFee = 17_000
-    /// Tên hàng hoá trên vận đơn: shop bán quần áo, không lấy tên/mã từ bình luận.
-    static let goodsName = "Quần áo"
+    /// Tên hàng hoá mặc định trên vận đơn (không lấy tên/mã từ bình luận). Shop đổi ở cài đặt Máy in.
+    static let defaultGoodsName = "Quần áo"
+    static let goodsNameKey = "vtpGoodsName"
+    static let goodsNameMissing = "Chưa nhập tên hàng"
+
+    /// Tên hàng trong cài đặt Máy in; chuỗi rỗng là shop chọn nhập tên hàng ở mỗi lần duyệt đơn.
+    static var goodsSetting: String {
+        cleanGoods(UserDefaults.standard.object(forKey: goodsNameKey) as? String ?? defaultGoodsName)
+    }
+
+    static func cleanGoods(_ s: String) -> String {
+        s.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
 
     /// Gói dịch vụ; mặc định Flashsale thỏa thuận (VSL9), giống web.
     static let services: [(code: String, name: String)] = [
@@ -99,6 +110,8 @@ enum Vtp {
         var phone = ""
         var address = VtpAddress.Resolved()
         var note = ""
+        /// Tên hàng hoá trên vận đơn; rỗng khi cài đặt để trống mà đơn chưa nhập tên hàng.
+        var goodsName = Vtp.defaultGoodsName
         var problems: [String] = []
     }
 
@@ -114,8 +127,13 @@ enum Vtp {
     /// `lines` cũ nhất trước: cài đặt của đơn mới nhất thắng, giống web.
     /// `realFee`: cước thật Viettel Post vừa báo cho nháp này. Có thì đơn thu hộ thấp hơn cước đó chuyển
     /// người gửi trả cước và cộng đúng cước đó vào thu hộ; chưa có thì tạm tính theo 17.000đ.
-    static func summarize(_ lines: [Line], address: DeliveryAddress?, nickname: String, realFee: Int? = nil) -> Summary {
+    static func summarize(_ lines: [Line], address: DeliveryAddress?, nickname: String, realFee: Int? = nil,
+                          goodsSetting: String = Vtp.goodsSetting) -> Summary {
         var s = Summary()
+        // Cài đặt có tên hàng thì mọi vận đơn dùng tên đó; để trống thì lấy tên nhập lúc duyệt (đơn mới nhất thắng).
+        s.goodsName = goodsSetting.isEmpty
+            ? (last(lines) { $0.goodsName.map(cleanGoods).flatMap { $0.isEmpty ? nil : $0 } } ?? "")
+            : goodsSetting
         // "shipOnly": dữ liệu cũ của web, coi như đã bank.
         let goodsPaid = { (l: Line) in l.ship?.pay == "paid" || l.ship?.pay == "shipOnly" }
         s.allPaid = !lines.isEmpty && lines.allSatisfy(goodsPaid)
@@ -172,6 +190,7 @@ enum Vtp {
         }
         if !s.address.ok { s.problems.append(s.address.reason) }
         if s.weightG >= sizeRequiredG && s.size == nil { s.problems.append("Từ 10kg phải nhập kích thước") }
+        if s.goodsName.isEmpty { s.problems.append(goodsNameMissing) }
         return s
     }
 
@@ -246,12 +265,11 @@ enum Vtp {
         ]
         for (i, g) in groups.enumerated() {
             let s = g.summary
-            let codes = String(g.orders.compactMap(\.code).filter { !$0.isEmpty }.joined(separator: "+").prefix(50))
             let note = String(s.note.prefix(150))
             let size: [Cell?] = s.size.map { [Cell.number($0.0), Cell.number($0.1), Cell.number($0.2)] } ?? [nil, nil, nil]
             var row: [Cell?] = [Cell.number(i + 1)]
-            row.append(codes.isEmpty ? nil : t(codes))
-            row += [t(s.receiver), t(s.phone), t(s.address.line), t(goodsName)]
+            row.append(nil) // Mã đơn hàng: để trống, Viettel Post tự cấp mã vận đơn
+            row += [t(s.receiver), t(s.phone), t(s.address.line), t(String(s.goodsName.prefix(150)))]
             row += [Cell.number(max(s.qty, 1)), Cell.number(s.weightG), Cell.number(s.goods), Cell.number(s.cod)]
             row += [t("Bưu kiện"), nil, t(service.isEmpty ? defaultService : service)]
             row += [nil, nil] // Dịch vụ cộng thêm: để trống, không SMS; Thu tiền xem hàng

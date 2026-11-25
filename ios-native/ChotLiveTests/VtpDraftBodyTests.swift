@@ -50,7 +50,8 @@ final class VtpDraftBodyTests: XCTestCase {
         XCTAssertEqual(b["GROUPADDRESS_ID"] as? String, "777")
         XCTAssertEqual(b["CUS_ID"] as? Int, 45)
         XCTAssertEqual(b["ORDER_SERVICE"] as? String, "VSL9")
-        XCTAssertEqual(b["ORDER_REFERENCE"] as? String, "HDa+HDb")
+        XCTAssertEqual(b["ORDER_REFERENCE"] as? String, "", "không gửi mã đơn HD lên Viettel Post")
+        XCTAssertEqual(b["PRODUCT_NAME"] as? String, "Quần áo")
         XCTAssertEqual((b["LIST_ITEM"] as? [[String: Any]])?.first?["PRODUCT_PRICE"] as? Int, 419_000)
         // Body phải đổi được sang JSON để gửi đi.
         XCTAssertNotNil(try? JSONSerialization.data(withJSONObject: b))
@@ -90,6 +91,12 @@ final class VtpDraftBodyTests: XCTestCase {
         XCTAssertNotEqual(h, VtpDraftBody.hash(addr, service: "VSL9"), "sửa địa chỉ")
         let more = group([order("a", ship: ShipInfo(state: "ready", pay: "cod")), order("b", ship: ShipInfo(state: "ready", pay: "cod"))])
         XCTAssertNotEqual(h, VtpDraftBody.hash(more, service: "VSL9"), "thêm đơn")
+        var renamed = base
+        renamed.summary.goodsName = "Giày dép"
+        XCTAssertNotEqual(h, VtpDraftBody.hash(renamed, service: "VSL9"), "đổi tên hàng")
+        var same = base
+        same.summary.goodsName = Vtp.defaultGoodsName
+        XCTAssertEqual(h, VtpDraftBody.hash(same, service: "VSL9"), "tên hàng mặc định: nháp cũ vẫn khớp")
     }
 
     func testStatus() {
