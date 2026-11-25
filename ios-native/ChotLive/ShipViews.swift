@@ -167,8 +167,8 @@ struct ShipReviewSheet: View {
     /// Đã sửa tay ô COD: số sửa tay thắng số tự cộng cho tới khi bấm "Tự tính" hoặc đổi lựa chọn khác.
     @State private var codEdited = false
     @FocusState private var codFocused: Bool
-    /// Giá trị đơn hàng: mặc định là tổng tiền các đơn đang tick; sửa tay (khách cọc, giảm giá...) thì thay tổng đó,
-    /// thu hộ tự tính lại = giá trị − tiền cọc, và là giá trị hàng khai với Viettel Post.
+    /// Giá trị đơn hàng: ô "Giá trị hàng" khai với Viettel Post. Mặc định là tổng tiền các đơn đang tick,
+    /// sửa tay được (khách cọc, giảm giá...). Không đổi tiền thu hộ.
     @State private var valueText = ""
     @State private var valueEdited = false
     @FocusState private var valueFocused: Bool
@@ -417,10 +417,7 @@ struct ShipReviewSheet: View {
                     fieldLabel("Giá trị đơn hàng")
                     Spacer()
                     if valueEdited {
-                        Button {
-                            resetValue()
-                            resetCod()
-                        } label: { T("Tổng các đơn", 12, .bold, Theme.accent) }.buttonStyle(.plain)
+                        Button { resetValue() } label: { T("Tổng các đơn", 12, .bold, Theme.accent) }.buttonStyle(.plain)
                     }
                 }
                 TextField("", text: $valueText)
@@ -429,10 +426,8 @@ struct ShipReviewSheet: View {
                     .keyboardType(.numberPad)
                     .focused($valueFocused)
                     .onChange(of: valueText) { _ in
-                        // Chỉ khi người bán gõ: đổi lúc mở bảng hay tick đơn không được xoá COD nhập tay.
-                        guard valueFocused else { return }
-                        valueEdited = true
-                        resetCod()
+                        // Chỉ khi người bán gõ, không tính lúc mở bảng hay tick đơn.
+                        if valueFocused { valueEdited = true }
                     }
                     .padding(.horizontal, 14)
                     .frame(height: 44)

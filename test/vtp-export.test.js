@@ -298,17 +298,19 @@ test('khách cọc trừ vào COD, nhập tay COD, chọn người trả cước
   assert.equal(buildVtpRows([g4])[7][18], 'Người gửi trả');
 });
 
-test('giá trị đơn nhập tay thay tổng tiền hàng, thu hộ = giá trị − cọc', () => {
-  // Hàng 150.000đ, khách cọc 50.000đ, sửa giá trị đơn còn 120.000đ: thu hộ 70.000đ, khai giá trị 120.000đ.
-  const o = order({ ship: { state: 'ready', pay: 'cod', deposit: 50000, goodsOverride: 120000 } });
+test('giá trị đơn nhập tay chỉ đổi giá trị hàng khai Viettel Post, không đổi thu hộ', () => {
+  // Hàng 150.000đ, khách cọc 50.000đ, khai giá trị 100.000đ: thu hộ vẫn 100.000đ (150.000 − 50.000).
+  const o = order({ ship: { state: 'ready', pay: 'cod', deposit: 50000, goodsOverride: 100000 } });
   const g = groupByCustomer([o], [customer], 'ready')[0];
-  assert.equal(g.goods, 120000);
-  assert.equal(g.cod, 70000);
+  assert.equal(g.goods, 100000);
+  assert.equal(g.cod, 100000);
   assert.equal(g.goodsOverridden, true);
-  assert.equal(buildVtpRows([g])[7][8], 120000);
-  // Đơn 0đ (chưa bắt được giá) nhập giá trị 200.000đ: thu hộ đủ 200.000đ.
-  const zero = order({ items: [{ name: 'Mã 1', price: 0, qty: 1 }], ship: { state: 'ready', pay: 'cod', goodsOverride: 200000 } });
-  assert.equal(groupByCustomer([zero], [customer], 'ready')[0].cod, 200000);
+  assert.equal(buildVtpRows([g])[7][8], 100000);
+  // Khai giá trị thấp hẳn cũng không kéo thu hộ xuống, không thành đơn nhỏ.
+  const low = order({ ship: { state: 'ready', pay: 'cod', goodsOverride: 5000, payer: 'receiver' } });
+  const gl = groupByCustomer([low], [customer], 'ready')[0];
+  assert.equal(gl.cod, 150000);
+  assert.equal(gl.senderPays, false);
   // Đã bank đủ: thu hộ vẫn 0đ, chỉ đổi giá trị khai.
   const paid = order({ ship: { state: 'ready', pay: 'paid', payer: 'sender', goodsOverride: 90000 } });
   const gp = groupByCustomer([paid], [customer], 'ready')[0];

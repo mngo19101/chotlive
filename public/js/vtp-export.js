@@ -13,8 +13,8 @@
  *   payer: 'receiver' (mặc định) | 'sender' người trả cước; đơn dưới 17.000đ luôn xuất người gửi trả và cộng phí ship vào COD
  *   shipFee: phí ship cộng vào thu hộ khi shop ứng trước (mặc định 17.000đ)
  *   codOverride: nhập tay tiền thu hộ, đè lên mọi cách tính
- *   goodsOverride: nhập tay giá trị đơn hàng (giá trị hàng khai Viettel Post), thay cho tổng tiền các đơn;
- *                  tiền thu hộ tự tính = giá trị này − tiền cọc
+ *   goodsOverride: nhập tay giá trị đơn hàng, chỉ là ô "Giá trị hàng" khai Viettel Post (thay tổng tiền các đơn);
+ *                  không đổi tiền thu hộ
  *   weightG: cân nặng cả kiện (gram), mặc định 1000
  *   lengthCm, widthCm, heightCm: kích thước kiện (cm), app điện thoại bắt buộc nhập khi nặng từ 10kg
  */
@@ -147,14 +147,10 @@ export function summarizeGroup({ orders, customer }, { realFee = null } = {}) {
   // Đơn đã bank đủ hoặc chỉ còn thiếu ship thì không thu tiền hàng nữa.
   const goodsPaid = (o) => o.ship?.pay === 'paid' || o.ship?.pay === 'shipOnly'; // 'shipOnly': dữ liệu cũ, coi như đã bank
   const allPaid = orders.length > 0 && orders.every(goodsPaid);
+  // Giá trị đơn nhập tay chỉ là giá trị hàng khai Viettel Post; tiền thu hộ vẫn tính theo tiền các đơn.
   const goodsOverride = moneyOrNull(lastShipField(orders, 'goodsOverride'));
   const goods = goodsOverride ?? orders.reduce((s, o) => s + goodsTotal(o), 0);
-  // Giá trị đơn nhập tay là cả gói: phần chưa trả là giá trị đó trừ tiền các đơn đã bank đủ.
-  const paidGoods = orders.filter(goodsPaid).reduce((s, o) => s + goodsTotal(o), 0);
-  const unpaidRaw =
-    goodsOverride === null
-      ? orders.filter((o) => !goodsPaid(o)).reduce((s, o) => s + goodsTotal(o), 0)
-      : Math.max(0, goodsOverride - paidGoods);
+  const unpaidRaw = orders.filter((o) => !goodsPaid(o)).reduce((s, o) => s + goodsTotal(o), 0);
   const deposit = Math.min(unpaidRaw, orders.reduce((s, o) => s + (moneyOrNull(o.ship?.deposit) || 0), 0));
   const unpaid = unpaidRaw - deposit;
   const quoted = moneyOrNull(realFee);

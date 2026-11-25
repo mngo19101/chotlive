@@ -260,8 +260,8 @@ fun ShipReviewSheet(orderId: String, draftIds: Set<String>? = null) {
     // Đã sửa tay ô COD: số sửa tay thắng số tự cộng cho tới khi bấm "Tự tính" hoặc đổi lựa chọn khác.
     var codEdited by remember { mutableStateOf(start.manualCod != null) }
     var codText by remember { mutableStateOf(start.manualCod?.let { groupedNumber(it) } ?: "") }
-    // Giá trị đơn hàng: mặc định là tổng tiền các đơn đang tick; sửa tay (khách cọc, giảm giá...) thì thay tổng đó,
-    // thu hộ tự tính lại = giá trị − tiền cọc, và là giá trị hàng khai với Viettel Post.
+    // Giá trị đơn hàng: ô "Giá trị hàng" khai với Viettel Post. Mặc định là tổng tiền các đơn đang tick,
+    // sửa tay được (khách cọc, giảm giá...). Không đổi tiền thu hộ.
     var valueEdited by remember { mutableStateOf(start.manualGoods != null) }
     var valueText by remember { mutableStateOf(start.manualGoods?.let { groupedNumber(it) } ?: "") }
 
@@ -390,15 +390,11 @@ fun ShipReviewSheet(orderId: String, draftIds: Set<String>? = null) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.weight(1f)) { FieldLabel("Giá trị đơn hàng") }
-                        if (valueEdited) T("Tổng các đơn", 12f, BV.BOLD, C.accent, Modifier.plainTap {
-                            valueEdited = false
-                            codEdited = false
-                        })
+                        if (valueEdited) T("Tổng các đơn", 12f, BV.BOLD, C.accent, Modifier.plainTap { valueEdited = false })
                     }
                     ReviewInput(if (valueEdited) valueText else groupedNumber(autoGoods), "0", KeyboardType.Number) {
                         valueText = it
                         valueEdited = true
-                        codEdited = false
                     }
                 }
                 if (needsSize) {

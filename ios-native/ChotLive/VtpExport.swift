@@ -87,7 +87,7 @@ enum Vtp {
         var deposit = 0
         var autoCod = 0
         var codOverridden = false
-        /// Giá trị đơn nhập tay thay cho tổng tiền các đơn.
+        /// Giá trị hàng khai Viettel Post là số nhập tay, không phải tổng tiền các đơn.
         var goodsOverridden = false
         var goods = 0
         var cod = 0
@@ -119,12 +119,10 @@ enum Vtp {
         // "shipOnly": dữ liệu cũ của web, coi như đã bank.
         let goodsPaid = { (l: Line) in l.ship?.pay == "paid" || l.ship?.pay == "shipOnly" }
         s.allPaid = !lines.isEmpty && lines.allSatisfy(goodsPaid)
-        // Giá trị đơn nhập tay là cả gói: phần chưa trả là giá trị đó trừ tiền các đơn đã bank đủ.
+        // Giá trị đơn nhập tay chỉ là giá trị hàng khai Viettel Post; tiền thu hộ vẫn tính theo tiền các đơn.
         let goodsOverride = last(lines) { $0.goodsOverride }
         s.goods = goodsOverride ?? lines.reduce(0) { $0 + max(0, $1.total) }
-        let paidGoods = lines.filter(goodsPaid).reduce(0) { $0 + max(0, $1.total) }
-        let unpaidRaw = goodsOverride.map { max(0, $0 - paidGoods) }
-            ?? lines.filter { !goodsPaid($0) }.reduce(0) { $0 + max(0, $1.total) }
+        let unpaidRaw = lines.filter { !goodsPaid($0) }.reduce(0) { $0 + max(0, $1.total) }
         s.deposit = min(unpaidRaw, lines.reduce(0) { $0 + max(0, $1.ship?.deposit ?? 0) })
         let unpaid = unpaidRaw - s.deposit
         s.feeIsReal = (realFee ?? 0) > 0
