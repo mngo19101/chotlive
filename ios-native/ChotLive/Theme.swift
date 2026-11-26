@@ -160,7 +160,7 @@ enum AppTab: Int, CaseIterable {
         switch self {
         case .sales: return "Doanh số"
         case .comments: return "Bình luận"
-        case .customers: return "Khách\nhàng"
+        case .customers: return "Khách hàng"
         case .orders: return "Đơn hàng"
         case .me: return "Tôi"
         }

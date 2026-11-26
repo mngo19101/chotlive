@@ -48,7 +48,8 @@ struct VtpConnectView: View {
             }
         }
         .onAppear {
-            if client.vtp == nil { client.refreshVtp() }
+            // Hỏi lại mỗi lần mở: webhook vừa chạy thì phần 1 hiện "Đang chạy" và phần 2 mở khoá ngay.
+            client.refreshVtp()
             if client.vtpConnected && senders.isEmpty { loadSenders() }
         }
         .onChange(of: client.vtp?.connected) { on in

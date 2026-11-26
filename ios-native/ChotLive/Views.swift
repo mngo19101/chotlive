@@ -149,7 +149,7 @@ struct TabsContainer: View {
     }
 }
 
-/// Thanh tab theo mẫu: 5 cột đều, nhãn "Khách hàng" xuống dòng.
+/// Thanh tab theo mẫu: 5 cột đều, nhãn một dòng (gọn hơn bản cũ khoảng 15%).
 struct TabBar: View {
     @Binding var selection: AppTab
 
@@ -159,8 +159,8 @@ struct TabBar: View {
                 let active = selection == t
                 Button { selection = t } label: {
                     VStack(spacing: 3) {
-                        Icon(name: t.icon, size: 22, color: active ? Theme.accent : Theme.muted)
-                        T(t.title, 11, .semibold, active ? Theme.accent : Theme.muted)
+                        Icon(name: t.icon, size: 21, color: active ? Theme.accent : Theme.muted)
+                        T(t.title, 10.5, .semibold, active ? Theme.accent : Theme.muted)
                             .multilineTextAlignment(.center)
                             .lineSpacing(0.5)
                             .fixedSize()
@@ -172,8 +172,8 @@ struct TabBar: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 5)
-        .frame(height: 75)
+        .padding(.top, 4)
+        .frame(height: 62)
         .padding(.bottom, max(Metrics.safeBottom - 25, 0))
         .background(
             Theme.tabBar

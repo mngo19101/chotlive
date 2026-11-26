@@ -19,8 +19,9 @@ struct VtpDraftSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gap) {
-            if !client.vtpConnected {
-                // Phần 2 cần phần 1 trước: chỉ phần 1 (token đối tác) mới nhận trạng thái đơn Viettel Post trả về.
+            if !client.vtpRunning {
+                // Phần 2 cần phần 1 "Đang chạy" trước (đã lưu token và đã nhận trạng thái đơn qua webhook):
+                // chỉ phần 1 mới nhận trạng thái đơn Viettel Post trả về.
                 // Máy đã đăng nhập từ trước thì vẫn hiện thẻ tài khoản để còn đăng xuất được.
                 lockedCard
                 if active.loggedIn { accountCard }
@@ -128,9 +129,16 @@ struct VtpDraftSection: View {
         if c.loggedIn && c.otpStep == nil { vtpDrafts.didLogin(c) }
     }
 
-    // MARK: Khoá khi chưa kết nối phần 1
+    // MARK: Khoá khi phần 1 chưa chạy
 
-    /// Phần 1 chưa kết nối: ô đăng nhập mờ và không bấm được, kèm lời nhắc kết nối phần 1 trước.
+    /// Chưa lưu token: kết nối phần 1. Đã lưu token mà Viettel Post chưa báo trạng thái về: cài webhook rồi lên một vận đơn.
+    private var lockNote: String {
+        client.vtpConnected
+            ? "Phần 1 chưa “Đang chạy”. Dán địa chỉ webhook ở thẻ “Tự cập nhật trạng thái” phía trên vào partner2.viettelpost.vn, rồi Lên vận đơn một đơn. Khi Viettel Post báo trạng thái về, phần 2 tự mở."
+            : "Kết nối phần 1 trước để app nhận trạng thái đơn Viettel Post trả về."
+    }
+
+    /// Phần 1 chưa "Đang chạy": ô đăng nhập mờ và không bấm được, kèm lời nhắc cần làm gì ở phần 1.
     private var lockedCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -138,7 +146,7 @@ struct VtpDraftSection: View {
                 Spacer(minLength: 4)
                 HStack(spacing: 4) {
                     Icon(name: .lock, size: 11, weight: 2.6, color: Theme.accent)
-                    T("Cần phần 1 trước", 11, .semibold, Theme.accent).lineLimit(1).fixedSize()
+                    T(client.vtpConnected ? "Chờ phần 1 chạy" : "Cần phần 1 trước", 11, .semibold, Theme.accent).lineLimit(1).fixedSize()
                 }
                 .padding(.horizontal, 8)
                 .frame(height: 21)
@@ -146,7 +154,7 @@ struct VtpDraftSection: View {
             }
             HStack(alignment: .top, spacing: 9) {
                 Icon(name: .lock, size: 15, weight: 2.4, color: Theme.accent).padding(.top, 1)
-                T("Kết nối phần 1 trước để app nhận trạng thái đơn Viettel Post trả về.", 12.5, .semibold, Theme.accent)
+                T(lockNote, 12.5, .semibold, Theme.accent)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }

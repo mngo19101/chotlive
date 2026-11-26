@@ -676,6 +676,10 @@ struct VtpExportSheet: View {
     @State private var touched = false
     @State private var service = UserDefaults.standard.string(forKey: Vtp.serviceKey) ?? Vtp.defaultService
     @State private var picking = false
+    /// Đang mở bảng giải thích hai nút (nút "?" cạnh "Đã chọn").
+    @State private var showHelp = false
+    /// Thẻ khách đang mở rộng trong tab Chờ gửi (mặc định thẻ gọn).
+    @State private var expanded: Set<String> = []
     /// Nháp đã hỏi cước, theo chữ ký nháp (VtpQuote.signature). Đang hỏi thì nằm trong `quoting`.
     @State private var quotes: [String: VtpQuote] = [:]
     @State private var quoting: Set<String> = []
@@ -764,7 +768,10 @@ struct VtpExportSheet: View {
         }
         .frame(height: embedded ? nil : Metrics.sheetHeight(top: UIScreen.main.bounds.height * 0.12))
         .frame(maxHeight: embedded ? .infinity : nil)
-        .onAppear { takeDetailRequest() }
+        .onAppear {
+            takeDetailRequest()
+            if client.vtpConnected && !client.vtpRunning { client.refreshVtp() }
+        }
         .onChange(of: ui.draftDetail) { _ in takeDetailRequest() }
         .onChange(of: client.vtp?.sender?.id) { _ in
             quotes = [:]
@@ -1020,8 +1027,20 @@ struct VtpExportSheet: View {
                 .padding(.horizontal, Metrics.gutter)
             }
 
-            HStack {
+            HStack(spacing: 8) {
                 T("ĐÃ CHỌN \(pick.count)", 12, .bold, Theme.muted, track: 0.4)
+                if embedded {
+                    Button { withAnimation(.easeOut(duration: 0.15)) { showHelp.toggle() } } label: {
+                        T("?", 11.5, .heavy, showHelp ? Theme.card : Theme.muted)
+                            .frame(width: 20, height: 20)
+                            .background(Circle().fill(showHelp ? Theme.ink : Color.clear))
+                            .overlay(Circle().strokeBorder(showHelp ? Theme.ink : Theme.placeholder, lineWidth: 1.5))
+                            .frame(width: 32, height: 26)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, -6)
+                }
                 Spacer()
                 Button {
                     selected = pick.count == ok.count ? [] : ok
@@ -1042,8 +1061,18 @@ struct VtpExportSheet: View {
                 }
             }
             .padding(.horizontal, Metrics.gutter + 4)
-            .padding(.top, embedded ? 8 : 12)
-            .padding(.bottom, 8)
+            .padding(.top, embedded ? 6 : 12)
+            .padding(.bottom, embedded ? 6 : 8)
+            // Bảng giải thích hai nút dưới cùng, nổi đè lên danh sách khi bấm "?".
+            .overlay(alignment: .top) {
+                if showHelp {
+                    buttonHelp
+                        .padding(.horizontal, Metrics.gutter - 4)
+                        .padding(.top, 34)
+                        .transition(.opacity)
+                }
+            }
+            .zIndex(2)
 
             ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 10) {
@@ -1051,13 +1080,7 @@ struct VtpExportSheet: View {
                         T(embedded && !all.isEmpty ? "Không có khách nào khớp." : "Chưa có đơn nào đã duyệt.", 14, .medium, Theme.muted)
                             .padding(.vertical, 30)
                     }
-                    if embedded && !list.isEmpty {
-                        T("Đẩy nháp: vào mục Đơn nháp trên viettelpost.vn, chưa gọi bưu tá. Lên vận đơn: duyệt thẳng nháp giữ nguyên mã (hoặc tạo mới nếu chưa có nháp).",
-                          12.5, .medium, Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 4)
-                    } else if api && !list.isEmpty {
+                    if !embedded && api && !list.isEmpty {
                         T("Viettel Post chưa nhận đơn nào. Soát xong rồi mới bấm Tạo.", 12.5, .medium, Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1073,6 +1096,15 @@ struct VtpExportSheet: View {
                 .padding(.bottom, 12)
             }
             .frame(maxHeight: .infinity)
+            .overlay {
+                // Đang mở giải thích: lớp mờ, chạm ra ngoài là đóng.
+                if showHelp {
+                    Theme.ink.opacity(0.12)
+                        .contentShape(Rectangle())
+                        .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { showHelp = false } }
+                        .transition(.opacity)
+                }
+            }
 
             footer(list, pick)
         }
@@ -1101,8 +1133,28 @@ struct VtpExportSheet: View {
                     if !tags.isEmpty {
                         HStack(spacing: 6) { ForEach(tags.indices, id: \.self) { i in tag(tags[i].0, tags[i].1, tags[i].2) } }
                     }
+                    // Tab Chờ gửi: thẻ gọn (địa chỉ 1 dòng, không hộp xanh), bấm mũi tên để xem đủ.
+                    let compact = embedded && !expanded.contains(g.id)
                     let contact = [s.phone, s.address.line].filter { !$0.isEmpty }.joined(separator: " · ")
-                    if !contact.isEmpty {
+                    if embedded {
+                        HStack(alignment: .top, spacing: 4) {
+                            T(contact.isEmpty ? " " : contact, 12.5, .medium, Theme.muted)
+                                .lineLimit(compact ? 1 : nil)
+                                .fixedSize(horizontal: false, vertical: !compact)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    if expanded.contains(g.id) { expanded.remove(g.id) } else { expanded.insert(g.id) }
+                                }
+                            } label: {
+                                Icon(name: compact ? .chevronDown : .chevronUp, size: 14, color: Theme.muted)
+                                    .frame(width: 30, height: 20)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, -6)
+                        }
+                    } else if !contact.isEmpty {
                         T(contact, 12.5, .medium, Theme.muted).fixedSize(horizontal: false, vertical: true)
                     }
                     if g.isBad {
@@ -1112,6 +1164,24 @@ struct VtpExportSheet: View {
                                 ui.dismissSheet()
                                 ui.push(.addressEdit(g.customer.id))
                             } label: { T("Sửa", 12.5, .bold, Theme.accent) }
+                            .buttonStyle(.plain)
+                        }
+                    } else if compact {
+                        if api, !isQuoting(g), let q = quote(g), !q.ok {
+                            T(q.error, 12, .semibold, Theme.red).fixedSize(horizontal: false, vertical: true)
+                        }
+                        HStack(spacing: 0) {
+                            if api && addressConfirmed(g) {
+                                T("✓ Địa chỉ đúng · ", 12, .semibold, Theme.green).lineLimit(1).fixedSize()
+                            }
+                            T(shortDetail(s), 12, .medium, Theme.muted).lineLimit(1).minimumScaleFactor(0.85)
+                        }
+                        HStack(alignment: .firstTextBaseline) {
+                            if api { T(feeText(g), 12.5, .bold, Theme.ink).lineLimit(1).minimumScaleFactor(0.8) }
+                            Spacer(minLength: 8)
+                            Button { detailId = g.id } label: {
+                                T("Soát chi tiết ›", 12.5, .bold, Theme.accent).fixedSize()
+                            }
                             .buttonStyle(.plain)
                         }
                     } else {
@@ -1210,6 +1280,67 @@ struct VtpExportSheet: View {
             .background(Capsule().fill(fill))
     }
 
+    /// Viettel Post đã đọc ra địa chỉ và khớp (thẻ gọn chỉ hiện dấu ✓ thay cho hộp xanh).
+    private func addressConfirmed(_ g: Vtp.Group) -> Bool {
+        guard !isQuoting(g), let q = quote(g) else { return false }
+        return !q.parsed.isEmpty && q.addrOk != false
+    }
+
+    /// Dòng tóm tắt của thẻ gọn: ai trả ship, tiền ship cộng vào thu hộ (nếu có), cân nặng.
+    private func shortDetail(_ s: Vtp.Summary) -> String {
+        let who = s.senderPays ? "Shop trả ship" : "Khách trả ship"
+        let cod = s.shipFee > 0 ? "COD +\(money(s.shipFee))" : ""
+        return [who, cod, weightText(s.weightG)].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// Bảng giải thích hai nút dưới cùng của tab Chờ gửi (mở bằng nút "?" cạnh "Đã chọn").
+    private var buttonHelp: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            T("Hai nút dưới cùng khác nhau thế nào?", 14, .heavy)
+            helpItem(icon: .arrowRight, color: VtpDraftColors.brand, fill: nil, title: "Đẩy nháp VTP",
+                     text: "Đơn vào mục Đơn nháp trên viettelpost.vn, chưa gọi bưu tá. Sửa hoặc xoá nháp được.")
+            if api {
+                helpItem(icon: .truck, color: Theme.ink, fill: Theme.orange, title: "Lên vận đơn",
+                         text: "Tạo vận đơn thật, Viettel Post cho bưu tá tới lấy. Khách đã đẩy nháp thì duyệt thẳng nháp, giữ nguyên mã; chưa có nháp thì tạo mới.")
+            } else {
+                helpItem(icon: .download, color: Theme.ink, fill: Theme.orange, title: "Xuất Excel",
+                         text: "Tải file Excel để tự nhập lên Viettel Post. Kết nối phần 1 ở Tôi › ViettelPost để bấm Lên vận đơn ngay trong app.")
+            }
+            HStack {
+                Spacer()
+                Button { withAnimation(.easeOut(duration: 0.15)) { showHelp = false } } label: {
+                    T("Đã hiểu", 13.5, .heavy, Theme.accent)
+                        .padding(.vertical, 4)
+                        .padding(.leading, 12)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Theme.card)
+                .shadow(color: Color.black.opacity(0.18), radius: 18, x: 0, y: 8)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
+    }
+
+    private func helpItem(icon: IconName, color: Color, fill: Color?, title: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Icon(name: icon, size: 13, weight: 2.4, color: color)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(fill ?? Color.clear))
+                .overlay(Circle().strokeBorder(fill == nil ? color : Color.clear, lineWidth: 1.5))
+            VStack(alignment: .leading, spacing: 2) {
+                T(title, 13, .heavy)
+                T(text, 12.5, .medium, Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private func detail(_ s: Vtp.Summary) -> String {
         let who = s.senderPays ? "Shop trả ship" : "Khách trả ship"
         let small = s.shipFee > 0 ? " (\(s.allPaid ? "thu tiền ship" : "thu hộ thấp hơn ship"), COD +\(money(s.shipFee))\(s.feeIsReal ? "" : " tạm tính"))" : ""
@@ -1225,8 +1356,8 @@ struct VtpExportSheet: View {
         let feeTotal = picked.reduce(0) { $0 + (quote($1).flatMap { $0.ok ? $0.fee : nil } ?? 0) }
         // Trong tab Chờ gửi: chân gọn hơn (không nhãn "Dịch vụ", nút thấp hơn) để danh sách khách có thêm chỗ.
         let compact = embedded
-        let btnH: CGFloat = compact ? 44 : 52
-        return VStack(spacing: compact ? 10 : 14) {
+        let btnH: CGFloat = compact ? 38 : 52
+        return VStack(spacing: compact ? 8 : 14) {
             HStack(alignment: compact ? .center : .bottom) {
                 VStack(alignment: .leading, spacing: 5) {
                     if !compact { fieldLabel("Dịch vụ") }
@@ -1236,21 +1367,21 @@ struct VtpExportSheet: View {
                             Icon(name: picking ? .chevronUp : .chevronDown, size: 14, color: Theme.muted)
                         }
                         .padding(.horizontal, compact ? 10 : 12)
-                        .frame(height: compact ? 32 : 38)
+                        .frame(height: compact ? 30 : 38)
                         .cardStyle(compact ? 10 : 12, fill: Theme.field)
                     }
                     .buttonStyle(.plain)
                     .overlay(alignment: .bottomLeading) {
-                        if picking { servicePicker.offset(y: compact ? -40 : -46).fixedSize() }
+                        if picking { servicePicker.offset(y: compact ? -38 : -46).fixedSize() }
                     }
                 }
                 .zIndex(1)
                 Spacer(minLength: 8)
                 if compact {
                     VStack(alignment: .trailing, spacing: 0) {
-                        T(money(total), 18, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.7)
+                        T(money(total), 17, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.7)
                         T(["\(pick.count) khách", api && feeTotal > 0 ? "cước \(money(feeTotal))" : ""]
-                            .filter { !$0.isEmpty }.joined(separator: " · "), 11.5, .semibold, Theme.muted)
+                            .filter { !$0.isEmpty }.joined(separator: " · "), 11, .semibold, Theme.muted)
                             .lineLimit(1).minimumScaleFactor(0.8)
                     }
                 } else {
@@ -1271,12 +1402,12 @@ struct VtpExportSheet: View {
             let canApproveOnly = !api && vtpDrafts.anyLoggedIn && allPushedDrafts
             if embedded {
                 HStack(spacing: 10) {
-                    // Chưa kết nối phần 1 hoặc chưa đăng nhập phần 2: nút mờ có ổ khoá, bấm vào thì báo cần đăng nhập.
-                    let draftLocked = !api || !vtpDrafts.anyLoggedIn
+                    // Phần 1 chưa "Đang chạy" hoặc chưa đăng nhập phần 2: nút mờ có ổ khoá, bấm vào thì mở phần 2 / báo cần đăng nhập.
+                    let draftLocked = !client.vtpRunning || !vtpDrafts.anyLoggedIn
                     Button { pushDrafts(picked) } label: {
                         HStack(spacing: 6) {
                             Icon(name: draftLocked ? .lock : .arrowRight, size: 14, weight: 2.4, color: VtpDraftColors.brand)
-                            T("Đẩy nháp VTP", 14.5, .bold, VtpDraftColors.brand).lineLimit(1).minimumScaleFactor(0.8)
+                            T("Đẩy nháp VTP", 14, .bold, VtpDraftColors.brand).lineLimit(1).minimumScaleFactor(0.8)
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: btnH)
@@ -1288,11 +1419,11 @@ struct VtpExportSheet: View {
                     .opacity(pick.isEmpty || sending ? 0.45 : (draftLocked ? 0.6 : 1))
                     if api || canApproveOnly {
                         PrimaryButton(title: sending ? (allPushedDrafts ? "Đang duyệt…" : "Đang tạo…") : busy ? "Đang tính cước…" : "Lên vận đơn",
-                                      icon: .truck, fontSize: 14.5, height: btnH, enabled: !pick.isEmpty && !sending && !busy) {
+                                      icon: .truck, fontSize: 14, height: btnH, enabled: !pick.isEmpty && !sending && !busy) {
                             create(picked)
                         }
                     } else {
-                        PrimaryButton(title: "Xuất Excel", icon: .download, fontSize: 14.5, height: btnH, enabled: !pick.isEmpty) {
+                        PrimaryButton(title: "Xuất Excel", icon: .download, fontSize: 14, height: btnH, enabled: !pick.isEmpty) {
                             export(picked)
                         }
                     }
@@ -1325,8 +1456,8 @@ struct VtpExportSheet: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
-        .padding(.top, compact ? 10 : 14)
-        .padding(.bottom, compact ? 8 : 0)
+        .padding(.top, compact ? 8 : 14)
+        .padding(.bottom, compact ? 6 : 0)
         .background(Theme.card.overlay(alignment: .top) { HairLine() })
     }
 
@@ -1445,9 +1576,9 @@ struct VtpExportSheet: View {
     /// Phần 2 cần phần 1 trước; chưa đăng nhập phần 2 thì hiện thông báo "Cần đăng nhập phần 2".
     private func pushDrafts(_ chosen: [Vtp.Group]) {
         guard !chosen.isEmpty else { return }
-        // Máy chủ đã trả lời là chưa kết nối phần 1 (vtp nil = chưa hỏi xong, không chặn nhầm):
-        // mở thẳng phần 2 đang khoá, ở đó ghi rõ cần kết nối phần 1 trước.
-        if client.vtp != nil && !api {
+        // Máy chủ đã trả lời là phần 1 chưa "Đang chạy" (vtp nil = chưa hỏi xong, không chặn nhầm):
+        // mở thẳng phần 2 đang khoá, ở đó ghi rõ cần làm gì ở phần 1.
+        if client.vtp != nil && !client.vtpRunning {
             ui.dismissSheet()
             ui.push(.vtpDraft)
             return

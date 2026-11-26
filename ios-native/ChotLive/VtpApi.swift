@@ -271,6 +271,9 @@ enum VtpTrack {
 
 extension LiveClient {
     var vtpConnected: Bool { vtp?.connected == true }
+    /// Phần 1 "Đang chạy": đã lưu token VÀ Viettel Post đã báo trạng thái đơn về qua webhook ít nhất một lần.
+    /// Phần 2 (Đẩy nháp) chỉ mở khi phần 1 chạy, vì app cần trạng thái Viettel Post trả về để biết đơn đi tới đâu.
+    var vtpRunning: Bool { vtpConnected && vtp?.lastHookAt != nil }
 
     private static func errorText(_ r: (Int, [String: Any])?, _ fallback: String) -> String {
         guard let r else { return "Không kết nối được máy chủ ChốtLive. Kiểm tra mạng rồi thử lại." }
