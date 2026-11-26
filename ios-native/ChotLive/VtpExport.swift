@@ -28,6 +28,11 @@ enum Vtp {
     static let defaultGoodsName = "Quần áo"
     static let goodsNameKey = "vtpGoodsName"
     static let goodsNameMissing = "Chưa nhập tên hàng"
+    /// Đầu `batchId` của đơn duyệt xong chuyển thẳng Đang giao khi chưa kết nối Viettel Post (shop tự gửi).
+    static let selfShipBatchPrefix = "self_"
+
+    /// Đơn đã chuyển Đang giao theo kiểu shop tự gửi (không xuất file, không có vận đơn).
+    static func isSelfShipped(_ o: Order) -> Bool { (o.ship?.batchId ?? "").hasPrefix(selfShipBatchPrefix) }
 
     /// Tên hàng trong cài đặt Máy in; chuỗi rỗng là shop chọn nhập tên hàng ở mỗi lần duyệt đơn.
     static var goodsSetting: String {

@@ -531,6 +531,16 @@ final class Store: ObservableObject {
         setShip(changes)
     }
 
+    /// Chưa kết nối Viettel Post: duyệt xong chuyển thẳng Đang giao (shop tự gửi), không qua Chờ gửi.
+    /// Ghi như đã xuất (`exported`) nên bảng Duyệt đơn vẫn có "Hoàn tác xuất" để đưa về Chờ gửi khi lỡ tay.
+    func approveAndShip(_ orderIds: [String], base: ShipInfo, dropped: [String] = [], at now: Date = Clock.now) {
+        approve(orderIds, state: .ready, base: base, dropped: dropped)
+        // Đọc lại đơn sau khi duyệt để giữ ship vừa ghi (cọc, COD, tên hàng…).
+        let fresh = orderIds.compactMap { order(id: $0) }
+        guard !fresh.isEmpty else { return }
+        markExported(fresh, at: now, batchPrefix: Vtp.selfShipBatchPrefix)
+    }
+
     // MARK: - Nháp Viettel Post (đẩy từ máy)
 
     /// Đẩy nháp thành công: mọi đơn của khách trong lần đẩy mang cùng mã nháp và băm nội dung đã gửi.
@@ -576,8 +586,9 @@ final class Store: ObservableObject {
     }
 
     /// Đã xuất file Viettel Post: các đơn chuyển Đang giao và rời khỏi thanh Sẵn sàng xuất.
-    func markExported(_ orders: [Order], at now: Date = Clock.now) {
-        let batch = "vtp_" + String(Int(now.timeIntervalSince1970 * 1000), radix: 36)
+    /// `batchPrefix` "self_": shop tự gửi (chưa kết nối Viettel Post), để màn đơn ghi đúng là không xuất file.
+    func markExported(_ orders: [Order], at now: Date = Clock.now, batchPrefix: String = "vtp_") {
+        let batch = batchPrefix + String(Int(now.timeIntervalSince1970 * 1000), radix: 36)
         var changes: [String: ShipInfo] = [:]
         for o in orders {
             var s = o.ship ?? ShipInfo()

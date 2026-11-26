@@ -152,6 +152,7 @@ struct ShipReviewSheet: View {
     var draftIds: Set<String>? = nil
     @EnvironmentObject var store: Store
     @EnvironmentObject var ui: AppUI
+    @EnvironmentObject var client: LiveClient
 
     @State private var loaded = false
     @State private var checked: Set<String> = []
@@ -197,6 +198,10 @@ struct ShipReviewSheet: View {
     private var sizeMissing: Bool { needsSize && (cm(lengthText) == nil || cm(widthText) == nil || cm(heightText) == nil) }
     private var asksGoods: Bool { Vtp.cleanGoods(goodsSetting).isEmpty }
     private var goodsMissing: Bool { asksGoods && Vtp.cleanGoods(goodsText).isEmpty }
+    /// Máy chủ đã trả lời là chưa kết nối Viettel Post phần 1 (phần 2 cũng khoá theo): duyệt xong chuyển thẳng
+    /// Đang giao, không qua Chờ gửi. `vtp` nil là chưa hỏi xong thì vẫn vào Chờ gửi như cũ, không chuyển nhầm.
+    /// Sửa Hàng & tiền của nháp (`draftIds`) thì luôn ở Chờ gửi.
+    private var shipsDirect: Bool { draftIds == nil && client.vtp != nil && !client.vtpConnected }
 
     /// Cài đặt đang chọn trong bảng, ghi vào đơn khi bấm nút.
     private func patch(first: Bool, cod: Int?) -> ShipInfo {
@@ -241,6 +246,7 @@ struct ShipReviewSheet: View {
                     VStack(alignment: .leading, spacing: 14) {
                         if isSent { sentBox(focus) } else { ordersBox(focus) }
                         if !isSent { form }
+                        if !isSent && draftIds == nil { nextStepNote }
                     }
                     .padding(.horizontal, Metrics.gutter)
                     .padding(.bottom, 12)
@@ -394,6 +400,7 @@ struct ShipReviewSheet: View {
         if let code = VtpTrack.code(o) {
             return "Đã tạo vận đơn \(VtpTrack.pretty(code))\(day). In tem hoặc huỷ vận đơn ở chi tiết đơn."
         }
+        if Vtp.state(o) == .exported && Vtp.isSelfShipped(o) { return "Đã chuyển Đang giao\(day) (shop tự gửi, chưa kết nối Viettel Post)." }
         if Vtp.state(o) == .exported { return "Đã xuất Viettel Post\(day)." }
         return "Đơn đã chuyển \(o.status == .delivered ? "Đã giao" : "Đang giao")."
     }
@@ -554,12 +561,38 @@ struct ShipReviewSheet: View {
 
     // MARK: Nút cuối bảng
 
+    /// Dòng nhắc dưới form: bấm xác nhận thì đơn đi đâu (Đang giao thẳng, hay Chờ gửi để Lên vận đơn).
+    @ViewBuilder private var nextStepNote: some View {
+        if shipsDirect {
+            HStack(alignment: .top, spacing: 9) {
+                Icon(name: .truck, size: 15, weight: 2.3, color: Theme.muted).padding(.top, 1)
+                T("Chưa kết nối Viettel Post (Tôi › ViettelPost). Xác nhận xong, đơn chuyển thẳng sang Đang giao, không qua Chờ gửi.",
+                  12.5, .semibold, Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 11)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.grayBadge))
+        } else if client.vtpConnected {
+            HStack(alignment: .top, spacing: 9) {
+                Icon(name: .check, size: 15, weight: 2.6, color: Theme.green).padding(.top, 1)
+                T("Đã kết nối Viettel Post phần 1. Xác nhận xong, đơn vào Chờ gửi để bấm Lên vận đơn.", 12.5, .semibold, Theme.green)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 11)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.greenSoft))
+        }
+    }
+
     @ViewBuilder private func footer(_ focus: Order) -> some View {
         HStack(spacing: 10) {
             if isSent {
                 // Vận đơn tạo qua API thì huỷ ở phần ViettelPost của chi tiết đơn, không hoàn tác ở đây.
                 if Vtp.state(focus) == .exported && focus.status == .shipping && VtpTrack.code(focus) == nil {
-                    OutlineButton(title: "Hoàn tác xuất", height: 52) {
+                    OutlineButton(title: Vtp.isSelfShipped(focus) ? "Về Chờ gửi" : "Hoàn tác xuất", height: 52) {
                         store.undoExport(focus)
                         ui.dismissSheet()
                     }
@@ -578,7 +611,8 @@ struct ShipReviewSheet: View {
                     OutlineButton(title: "Gom sau", height: 52) { apply(.hold) }
                         .frame(maxWidth: .infinity)
                 }
-                PrimaryButton(title: draftIds == nil ? "Xác nhận gửi" : "Lưu thay đổi", fontSize: 15) { apply(.ready) }
+                PrimaryButton(title: draftIds != nil ? "Lưu thay đổi" : (shipsDirect ? "Xác nhận · Đang giao" : "Xác nhận gửi"),
+                              icon: shipsDirect ? IconName.truck : nil, fontSize: 15) { apply(.ready) }
                     .frame(maxWidth: .infinity)
                     .layoutPriority(1)
                     .frame(minWidth: (Metrics.screenWidth - 50) * 0.6)
@@ -594,17 +628,23 @@ struct ShipReviewSheet: View {
             ui.notify("Tick ít nhất một đơn.")
             return
         }
-        if state == .ready && sizeMissing {
+        // Gửi thẳng Đang giao (chưa kết nối Viettel Post) thì không tạo vận đơn: không bắt kích thước, tên hàng.
+        let direct = state == .ready && shipsDirect
+        if state == .ready && !direct && sizeMissing {
             ui.notify("Hàng từ 10kg phải nhập đủ kích thước dài, rộng, cao (cm).")
             return
         }
-        if state == .ready && goodsMissing {
+        if state == .ready && !direct && goodsMissing {
             ui.notify("Nhập tên hàng trước khi gửi.")
             return
         }
         // Đơn đang Chờ gửi mà bị bỏ tick: đưa về chưa duyệt, không thì lúc tạo vận đơn vẫn bị gộp chung và cộng tiền.
         let dropped = state == .ready ? pending.filter { !checked.contains($0.id) && Vtp.state($0) == .ready }.map(\.id) : []
-        store.approve(ids, state: state, base: patch(first: true, cod: codValue), dropped: dropped)
+        if direct {
+            store.approveAndShip(ids, base: patch(first: true, cod: codValue), dropped: dropped)
+        } else {
+            store.approve(ids, state: state, base: patch(first: true, cod: codValue), dropped: dropped)
+        }
         if draftIds != nil {
             // Lưu thì mở lại nháp để soát tiếp.
             backToDraft(open: state == .ready)
@@ -1231,9 +1271,11 @@ struct VtpExportSheet: View {
             let canApproveOnly = !api && vtpDrafts.anyLoggedIn && allPushedDrafts
             if embedded {
                 HStack(spacing: 10) {
+                    // Chưa kết nối phần 1 hoặc chưa đăng nhập phần 2: nút mờ có ổ khoá, bấm vào thì báo cần đăng nhập.
+                    let draftLocked = !api || !vtpDrafts.anyLoggedIn
                     Button { pushDrafts(picked) } label: {
                         HStack(spacing: 6) {
-                            Icon(name: .arrowRight, size: 14, weight: 2.4, color: VtpDraftColors.brand)
+                            Icon(name: draftLocked ? .lock : .arrowRight, size: 14, weight: 2.4, color: VtpDraftColors.brand)
                             T("Đẩy nháp VTP", 14.5, .bold, VtpDraftColors.brand).lineLimit(1).minimumScaleFactor(0.8)
                         }
                         .frame(maxWidth: .infinity)
@@ -1243,7 +1285,7 @@ struct VtpExportSheet: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(pick.isEmpty || sending)
-                    .opacity(pick.isEmpty || sending ? 0.45 : 1)
+                    .opacity(pick.isEmpty || sending ? 0.45 : (draftLocked ? 0.6 : 1))
                     if api || canApproveOnly {
                         PrimaryButton(title: sending ? (allPushedDrafts ? "Đang duyệt…" : "Đang tạo…") : busy ? "Đang tính cước…" : "Lên vận đơn",
                                       icon: .truck, fontSize: 14.5, height: btnH, enabled: !pick.isEmpty && !sending && !busy) {
@@ -1399,19 +1441,34 @@ struct VtpExportSheet: View {
         }
     }
 
-    /// Đẩy các khách đã chọn vào mục Đơn nháp trên Viettel Post, từ máy này. Chưa đăng nhập phần 2 thì mở màn đăng nhập.
+    /// Đẩy các khách đã chọn vào mục Đơn nháp trên Viettel Post, từ máy này.
+    /// Phần 2 cần phần 1 trước; chưa đăng nhập phần 2 thì hiện thông báo "Cần đăng nhập phần 2".
     private func pushDrafts(_ chosen: [Vtp.Group]) {
         guard !chosen.isEmpty else { return }
+        // Máy chủ đã trả lời là chưa kết nối phần 1 (vtp nil = chưa hỏi xong, không chặn nhầm):
+        // mở thẳng phần 2 đang khoá, ở đó ghi rõ cần kết nối phần 1 trước.
+        if client.vtp != nil && !api {
+            ui.dismissSheet()
+            ui.push(.vtpDraft)
+            return
+        }
         // Tài khoản đang dùng chưa đăng nhập hoặc hết phiên mà có tài khoản khác còn phiên: dùng tài khoản đó.
         if !vtpDrafts.current.loggedIn || vtpDrafts.current.sessionExpired,
            let other = vtpDrafts.loggedInClients.first(where: { !$0.sessionExpired }) {
             vtpDrafts.select(other.accountId)
         }
         guard vtpDrafts.current.loggedIn, !vtpDrafts.current.sessionExpired else {
-            ui.dismissSheet()
-            ui.push(.vtpDraft)
-            ui.notify(vtpDrafts.current.sessionExpired ? "Phiên Viettel Post trên máy này đã hết. Đăng nhập lại rồi đẩy nháp."
-                                              : "Đăng nhập Viettel Post trên máy này (phần 2 · Đẩy nháp) rồi đẩy nháp.")
+            let expired = vtpDrafts.current.sessionExpired
+            let lead = expired
+                ? "Phiên Viettel Post trên máy này đã hết. Đăng nhập lại ở Tôi › ViettelPost › phần 2 “Đẩy nháp” rồi đẩy nháp."
+                : "Đẩy nháp cần đăng nhập Viettel Post trên máy này ở Tôi › ViettelPost › phần 2 “Đẩy nháp”."
+            let tail = api ? "\n\nBạn vẫn có thể bấm “Lên vận đơn” ngay mà không cần đẩy nháp." : ""
+            ui.confirm = ConfirmItem(title: expired ? "Cần đăng nhập lại phần 2" : "Cần đăng nhập phần 2",
+                                     message: lead + tail,
+                                     action: "Đăng nhập phần 2", cancel: "Để sau", destructive: false) {
+                ui.dismissSheet()
+                ui.push(.vtpDraft)
+            }
             return
         }
         let svc = service

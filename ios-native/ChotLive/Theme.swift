@@ -206,6 +206,10 @@ struct ConfirmItem: Identifiable {
     var title: String
     var message: String
     var action: String
+    /// Chữ nút đóng thông báo.
+    var cancel: String = "Huỷ"
+    /// Nút làm việc tô đỏ (xoá, đăng xuất…). false cho nút thường như "Đăng nhập phần 2".
+    var destructive: Bool = true
     var run: () -> Void
 }
 

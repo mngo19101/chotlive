@@ -19,15 +19,22 @@ struct VtpDraftSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gap) {
-            if vtpDrafts.clients.count > 1 { accountsCard }
-            if active.otpStep != nil {
-                otpCard
-            } else if !active.loggedIn || active.sessionExpired {
-                loginCard
+            if !client.vtpConnected {
+                // Phần 2 cần phần 1 trước: chỉ phần 1 (token đối tác) mới nhận trạng thái đơn Viettel Post trả về.
+                // Máy đã đăng nhập từ trước thì vẫn hiện thẻ tài khoản để còn đăng xuất được.
+                lockedCard
+                if active.loggedIn { accountCard }
+            } else {
+                if vtpDrafts.clients.count > 1 { accountsCard }
+                if active.otpStep != nil {
+                    otpCard
+                } else if !active.loggedIn || active.sessionExpired {
+                    loginCard
+                }
+                if active.loggedIn { accountCard }
+                if active.loggedIn, let warn = accountMismatch { mismatchCard(warn) }
+                if active.loggedIn && vtpDrafts.clients.count == 1 { addAccountButton }
             }
-            if active.loggedIn { accountCard }
-            if active.loggedIn, let warn = accountMismatch { mismatchCard(warn) }
-            if active.loggedIn && vtpDrafts.clients.count == 1 { addAccountButton }
         }
         .onAppear {
             prefillUser()
@@ -119,6 +126,59 @@ struct VtpDraftSection: View {
     /// Đăng nhập (kể cả qua OTP) xong: báo hub để bỏ chỗ cũ trùng số.
     private func afterLogin(_ c: VtpDraftClient) {
         if c.loggedIn && c.otpStep == nil { vtpDrafts.didLogin(c) }
+    }
+
+    // MARK: Khoá khi chưa kết nối phần 1
+
+    /// Phần 1 chưa kết nối: ô đăng nhập mờ và không bấm được, kèm lời nhắc kết nối phần 1 trước.
+    private var lockedCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                T(active.loggedIn ? "Đẩy nháp đang khoá" : "Đăng nhập trên máy này", 15, .bold).lineLimit(1)
+                Spacer(minLength: 4)
+                HStack(spacing: 4) {
+                    Icon(name: .lock, size: 11, weight: 2.6, color: Theme.accent)
+                    T("Cần phần 1 trước", 11, .semibold, Theme.accent).lineLimit(1).fixedSize()
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 21)
+                .background(Capsule().fill(Theme.peachSoft))
+            }
+            HStack(alignment: .top, spacing: 9) {
+                Icon(name: .lock, size: 15, weight: 2.4, color: Theme.accent).padding(.top, 1)
+                T("Kết nối phần 1 trước để app nhận trạng thái đơn Viettel Post trả về.", 12.5, .semibold, Theme.accent)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Theme.peachSoft)
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.peachLine, lineWidth: 1))
+            )
+            if !active.loggedIn {
+                VStack(alignment: .leading, spacing: 10) {
+                    lockedField("Số điện thoại / tên đăng nhập", "0987…")
+                    lockedField("Mật khẩu Viettel Post", "••••••••")
+                }
+                .opacity(0.5)
+                PrimaryButton(title: "Đăng nhập", fontSize: 15, enabled: false) {}
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle(20)
+    }
+
+    private func lockedField(_ label: String, _ placeholder: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            T(label, 12, .medium, Theme.muted)
+            T(placeholder, 15, .semibold, Theme.placeholder)
+                .padding(.horizontal, 15)
+                .frame(maxWidth: .infinity, minHeight: 48, maxHeight: 48, alignment: .leading)
+                .cardStyle(14, fill: Theme.field)
+        }
     }
 
     // MARK: Chưa đăng nhập / phiên hết

@@ -63,8 +63,8 @@ struct MainShell: View {
         }
         .alert(ui.confirm?.title ?? "", isPresented: Binding(get: { ui.confirm != nil }, set: { if !$0 { ui.confirm = nil } }),
                presenting: ui.confirm) { item in
-            Button("Huỷ", role: .cancel) {}
-            Button(item.action, role: .destructive) { item.run() }
+            Button(item.cancel, role: .cancel) {}
+            Button(item.action, role: item.destructive ? ButtonRole.destructive : nil) { item.run() }
         } message: { item in
             Text(item.message)
         }

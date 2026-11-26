@@ -350,16 +350,6 @@ struct FlowChips: View {
 
 @MainActor
 enum VtpActions {
-    static func printLabels(_ codes: [String], client: LiveClient, ui: AppUI) {
-        guard !codes.isEmpty else { return }
-        let size = UserDefaults.standard.string(forKey: VtpTrack.labelSizeKey) ?? "a6"
-        Task { @MainActor in
-            let r = await client.vtpPrintURL(codes, size: size)
-            if let e = r.error { ui.notify(e); return }
-            if let url = r.url { await UIApplication.shared.open(url) }
-        }
-    }
-
     static func track(_ code: String) {
         if let url = VtpTrack.trackURL(code) { UIApplication.shared.open(url) }
     }
@@ -379,6 +369,8 @@ struct VtpResultView: View {
     var onDone: (() -> Void)? = nil
     @EnvironmentObject var client: LiveClient
     @EnvironmentObject var ui: AppUI
+    @EnvironmentObject var labels: VtpLabelPrinter
+    @EnvironmentObject var printer: PrinterManager
 
     private func done() { if let onDone { onDone() } else { ui.dismissSheet() } }
 
@@ -427,8 +419,10 @@ struct VtpResultView: View {
 
             VStack(spacing: 10) {
                 if !okList.isEmpty && client.vtpConnected {
-                    PrimaryButton(title: "In tem \(okList.count) vận đơn", icon: .printer, fontSize: 15) {
-                        VtpActions.printLabels(okList.map(\.code), client: client, ui: ui)
+                    let codes = okList.map(\.code)
+                    let busy = codes.contains { labels.isPrinting($0) }
+                    PrimaryButton(title: busy ? "Đang in tem…" : "In tem \(okList.count) vận đơn", icon: .printer, fontSize: 15, enabled: !busy) {
+                        labels.printLabels(codes, client: client, printer: printer, ui: ui)
                     }
                 }
                 OutlineButton(title: "Xong", height: 52) { done() }
@@ -619,9 +613,7 @@ struct VtpOrderBox: View {
             }
 
             HStack(spacing: 8) {
-                OutlineButton(title: "In tem", icon: .printer, filled: true) {
-                    VtpActions.printLabels([code], client: client, ui: ui)
-                }
+                VtpLabelButton(code: code)
                 OutlineButton(title: "Theo dõi", icon: .truck) { VtpActions.track(code) }
             }
 

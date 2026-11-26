@@ -212,9 +212,7 @@ struct OrdersView: View {
 
             HStack(spacing: 8) {
                 if let code = VtpTrack.code(o) {
-                    OutlineButton(title: "In tem", icon: .printer, filled: true) {
-                        VtpActions.printLabels([code], client: client, ui: ui)
-                    }
+                    VtpLabelButton(code: code)
                     OutlineButton(title: "Theo dõi", icon: .truck) { ui.push(.order(o.id)) }
                 } else {
                     OutlineButton(title: o.isPrinted ? "In lại" : "In đơn", icon: .printer, filled: !o.isPrinted) {

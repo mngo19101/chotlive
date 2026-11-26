@@ -11,6 +11,8 @@ struct ChotLiveApp: App {
     /// Đẩy nháp Viettel Post ngay trên máy (phiên web riêng của máy này, không qua máy chủ), nhiều tài khoản.
     /// Màn hình dùng `VtpDraftClient` là tài khoản đang dùng; đổi tài khoản thì cả app nhận client mới.
     @StateObject private var vtpDrafts = VtpDraftHub(appAccount: AuthStorage.currentAccountKey())
+    /// In tem Viettel Post thẳng ra máy in và nhớ vận đơn đã in tem (nút "In tem" đổi màu).
+    @StateObject private var labels = VtpLabelPrinter()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -22,6 +24,7 @@ struct ChotLiveApp: App {
                 .environmentObject(appearance)
                 .environmentObject(vtpDrafts)
                 .environmentObject(vtpDrafts.current)
+                .environmentObject(labels)
                 .onAppear {
                     KeyboardDismisser.shared.install()
                     SupportNotifier.shared.install()
