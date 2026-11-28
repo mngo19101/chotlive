@@ -134,6 +134,8 @@ struct ShipInfo: Codable, Equatable {
     var weightG: Int? = nil
     var exportedAt: Double? = nil
     var batchId: String? = nil
+    /// Lúc đơn vào Chờ gửi (duyệt, hoàn tác xuất, huỷ vận đơn), mili giây: Chờ gửi xếp đơn mới duyệt lên đầu.
+    var readyAt: Double? = nil
     /// Kích thước kiện (cm), bắt buộc khi nặng từ 10kg.
     var lengthCm: Int? = nil
     var widthCm: Int? = nil
@@ -190,7 +192,7 @@ struct ShipInfo: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case state, pay, payer, deposit, shipFee, codOverride, goodsOverride, weightG, exportedAt, batchId, lengthCm, widthCm, heightCm
+        case state, pay, payer, deposit, shipFee, codOverride, goodsOverride, weightG, exportedAt, batchId, readyAt, lengthCm, widthCm, heightCm
         case goodsName, extras, orderNote
         case vtpCode, vtpOldCode, vtpFee, vtpCod, vtpGoods, vtpService, vtpStatus, vtpStatusName, vtpStatusAt, vtpKind, vtpNote, vtpError, vtpErrorAt
         case vtpHint, vtpHintCod
@@ -224,6 +226,7 @@ struct ShipInfo: Codable, Equatable {
         weightG = Self.money(Self.number(c, .weightG))
         exportedAt = Self.number(c, .exportedAt)
         batchId = try? c.decodeIfPresent(String.self, forKey: .batchId)
+        readyAt = Self.number(c, .readyAt)
         lengthCm = Self.money(Self.number(c, .lengthCm))
         widthCm = Self.money(Self.number(c, .widthCm))
         heightCm = Self.money(Self.number(c, .heightCm))
@@ -266,6 +269,7 @@ struct ShipInfo: Codable, Equatable {
         try c.encode(goodsOverride, forKey: .goodsOverride)
         try c.encode(weightG, forKey: .weightG)
         try c.encode(exportedAt, forKey: .exportedAt)
+        try c.encode(readyAt, forKey: .readyAt)
         try c.encode(batchId, forKey: .batchId)
         try c.encode(lengthCm, forKey: .lengthCm)
         try c.encode(widthCm, forKey: .widthCm)

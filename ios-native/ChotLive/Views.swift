@@ -159,7 +159,7 @@ struct TabBar: View {
                 let active = selection == t
                 Button { selection = t } label: {
                     VStack(spacing: 3.5) {
-                        Icon(name: t.icon, size: 26.5, color: active ? Theme.accent : Theme.muted)
+                        Icon(name: t.icon, size: 23, color: active ? Theme.accent : Theme.muted)
                         T(t.title, 13, .semibold, active ? Theme.accent : Theme.muted)
                             .multilineTextAlignment(.center)
                             .lineSpacing(0.5)

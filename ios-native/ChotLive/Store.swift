@@ -496,7 +496,8 @@ final class Store: ObservableObject {
     /// Bảng Duyệt đơn: chuyển các đơn được tick sang Chờ gửi (`ready`) hoặc Gom sau (`hold`).
     /// Tiền cọc ghi ở đơn đầu tiên, các cài đặt khác ghi ở mọi đơn, giống web.
     /// `dropped`: đơn đã duyệt nhưng bị bỏ tick, đưa về chưa duyệt để không còn gộp chung vận đơn.
-    func approve(_ orderIds: [String], state: ShipState, base: ShipInfo, dropped: [String] = []) {
+    func approve(_ orderIds: [String], state: ShipState, base: ShipInfo, dropped: [String] = [], at now: Date = Clock.now) {
+        let stamp = (now.timeIntervalSince1970 * 1000).rounded()
         var changes: [String: ShipInfo] = [:]
         for id in dropped {
             guard var s = order(id: id)?.ship else { continue }
@@ -526,6 +527,7 @@ final class Store: ObservableObject {
             }
             s.exportedAt = nil
             s.batchId = nil
+            s.readyAt = state == .ready ? stamp : nil
             changes[id] = s
         }
         setShip(changes)
@@ -534,7 +536,7 @@ final class Store: ObservableObject {
     /// Chưa kết nối Viettel Post: duyệt xong chuyển thẳng Đang giao (shop tự gửi), không qua Chờ gửi.
     /// Ghi như đã xuất (`exported`) nên bảng Duyệt đơn vẫn có "Hoàn tác xuất" để đưa về Chờ gửi khi lỡ tay.
     func approveAndShip(_ orderIds: [String], base: ShipInfo, dropped: [String] = [], at now: Date = Clock.now) {
-        approve(orderIds, state: .ready, base: base, dropped: dropped)
+        approve(orderIds, state: .ready, base: base, dropped: dropped, at: now)
         // Đọc lại đơn sau khi duyệt để giữ ship vừa ghi (cọc, COD, tên hàng…).
         let fresh = orderIds.compactMap { order(id: $0) }
         guard !fresh.isEmpty else { return }
@@ -610,6 +612,7 @@ final class Store: ObservableObject {
             s.state = ShipState.ready.rawValue
             s.exportedAt = nil
             s.batchId = nil
+            s.readyAt = (Clock.now.timeIntervalSince1970 * 1000).rounded()
             changes[x.id] = s
         }
         setShip(changes, shipping: false)

@@ -95,7 +95,7 @@ struct VtpCreateResult: Identifiable, Equatable {
 }
 
 /// Cước dự tính và địa chỉ Viettel Post hiểu cho một nháp (máy chủ hỏi giá, không tạo đơn).
-struct VtpQuote: Equatable {
+struct VtpQuote: Equatable, Codable {
     var ok: Bool
     var fee: Int
     /// "Phường Thuỷ Xuân, Thành phố Huế": phường/tỉnh Viettel Post đọc ra từ dòng địa chỉ.
@@ -126,6 +126,73 @@ struct VtpQuote: Equatable {
         let size = s.size.map { "\($0.0)x\($0.1)x\($0.2)" } ?? ""
         return [g.id, s.address.line, "\(s.cod)", "\(s.goods)", "\(s.weightG)", size, service,
                 s.extras.joined(separator: ",")].joined(separator: "|")
+    }
+}
+
+/// Cước dự tính đã hỏi, nhớ chung cả app và lưu xuống máy: mở lại Chờ gửi (hay mở lại app) hiện giá ngay,
+/// chỉ hỏi Viettel Post cho khách mới duyệt hoặc vừa sửa địa chỉ / tiền / cân nặng / gói.
+final class VtpQuoteCache: ObservableObject {
+    static let shared = VtpQuoteCache()
+
+    private struct Entry: Codable {
+        var quote: VtpQuote
+        var at: Double
+    }
+
+    /// Giá đúng giữ 6 tiếng; lỗi chỉ giữ 90 giây để lần mở sau hỏi lại.
+    static let okLife: TimeInterval = 6 * 3600
+    static let errorLife: TimeInterval = 90
+    /// Mỗi lượt gửi máy chủ 4 khách (máy chủ hỏi 4 khách cùng lúc): xong lượt nào hiện giá lượt đó.
+    static let chunk = 4
+    private static let diskKey = "vtpQuoteCache.v1"
+
+    @Published private var entries: [String: Entry] = [:]
+    @Published private(set) var quoting: Set<String> = []
+
+    init() {
+        guard let data = UserDefaults.standard.data(forKey: Self.diskKey),
+              let saved = try? JSONDecoder().decode([String: Entry].self, from: data) else { return }
+        let now = Date().timeIntervalSince1970
+        entries = saved.filter { now - $0.value.at < Self.okLife && $0.value.quote.ok }
+    }
+
+    /// Khoá cước: tài khoản app + điểm lấy hàng + chữ ký nháp (đổi điểm lấy hàng là giá khác).
+    static func key(account: String, sender: String, signature: String) -> String {
+        "\(account)|\(sender)|\(signature)"
+    }
+
+    func quote(_ key: String) -> VtpQuote? {
+        guard let e = entries[key] else { return nil }
+        let life = e.quote.ok ? Self.okLife : Self.errorLife
+        return Date().timeIntervalSince1970 - e.at < life ? e.quote : nil
+    }
+
+    func isQuoting(_ key: String) -> Bool { quoting.contains(key) }
+
+    /// Hỏi cước những khách chưa có giá, theo đúng thứ tự danh sách (khách trên cùng có giá trước).
+    /// Chạy riêng, không theo màn: rời tab giữa chừng thì giá vẫn về và được nhớ.
+    func fetch(_ need: [(key: String, group: Vtp.Group)], service: String, client: LiveClient) {
+        let todo = need.filter { quote($0.key) == nil && !quoting.contains($0.key) }
+        guard !todo.isEmpty else { return }
+        quoting.formUnion(todo.map(\.key))
+        Task { @MainActor in
+            for start in stride(from: 0, to: todo.count, by: Self.chunk) {
+                let part = Array(todo[start..<min(start + Self.chunk, todo.count)])
+                let r = await client.vtpQuote(service: service, groups: part.map { VtpTrack.payload($0.group) })
+                let now = Date().timeIntervalSince1970
+                for item in part {
+                    entries[item.key] = Entry(quote: r.quotes[item.group.id] ?? VtpQuote(error: r.error ?? "Không tính được cước"), at: now)
+                    quoting.remove(item.key)
+                }
+            }
+            save()
+        }
+    }
+
+    private func save() {
+        let now = Date().timeIntervalSince1970
+        let keep = entries.filter { $0.value.quote.ok && now - $0.value.at < Self.okLife }
+        if let data = try? JSONEncoder().encode(keep) { UserDefaults.standard.set(data, forKey: Self.diskKey) }
     }
 }
 
@@ -490,6 +557,7 @@ extension Store {
         for o in allOrders() where o.ship?.vtpCode == code {
             var s = o.ship ?? ShipInfo()
             s.state = ShipState.ready.rawValue
+            s.readyAt = (Clock.now.timeIntervalSince1970 * 1000).rounded()
             s.vtpOldCode = code
             s.vtpCode = nil
             s.vtpKind = "cancelled"

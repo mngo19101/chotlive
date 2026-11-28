@@ -1213,9 +1213,8 @@ struct VtpExportSheet: View {
     @State private var showHelp = false
     /// Thẻ khách đang mở rộng trong tab Chờ gửi (mặc định thẻ gọn).
     @State private var expanded: Set<String> = []
-    /// Nháp đã hỏi cước, theo chữ ký nháp (VtpQuote.signature). Đang hỏi thì nằm trong `quoting`.
-    @State private var quotes: [String: VtpQuote] = [:]
-    @State private var quoting: Set<String> = []
+    /// Cước đã hỏi, nhớ chung cả app (mở lại tab không hỏi lại từ đầu).
+    @ObservedObject private var quoteCache = VtpQuoteCache.shared
     /// Nháp đang mở để soát chi tiết (mã khách); nil là đang ở danh sách nháp.
     @State private var detailId: String?
     /// Đang xoá nháp trên Viettel Post (một khách hoặc nhiều khách).
@@ -1263,7 +1262,7 @@ struct VtpExportSheet: View {
     /// Đơn ở Chờ gửi là nháp sẵn. Viettel Post hiểu địa chỉ sang phường/tỉnh khác thì nháp đó chưa cho tạo.
     private func makeAllGroups() -> [Vtp.Group] {
         rawGroups.map { g in
-            guard api, let q = quotes[VtpQuote.signature(g, service: service)] else { return g }
+            guard api, let q = quote(g) else { return g }
             var out = g
             // Đã có cước thật: đơn thu hộ thấp hơn cước đó chuyển người gửi trả và cộng đúng cước đó vào thu hộ.
             if q.ok, q.fee > 0 {
@@ -1306,20 +1305,14 @@ struct VtpExportSheet: View {
             if client.vtpConnected && !client.vtpRunning { client.refreshVtp() }
         }
         .onChange(of: ui.draftDetail) { _ in takeDetailRequest() }
-        .onChange(of: client.vtp?.sender?.id) { _ in
-            quotes = [:]
-            quoting = []
-        }
         .onChange(of: client.currentAccountKey) { _ in
-            quotes = [:]
-            quoting = []
             detailId = nil
             result = nil
             selected = []
             touched = false
         }
         // Khoá theo mọi nháp đủ địa chỉ (không theo cái đang hỏi), để lượt hỏi đang chạy không bị huỷ giữa chừng.
-        .task(id: quoteKey) { await loadQuotes() }
+        .task(id: quoteKey) { loadQuotes() }
     }
 
     /// Vừa sửa Hàng & tiền xong (bảng Duyệt đơn): mở lại đúng nháp của khách đó.
@@ -1335,30 +1328,20 @@ struct VtpExportSheet: View {
             .map { VtpQuote.signature($0, service: service) }.sorted()).joined(separator: ",")
     }
 
-    /// Nháp đủ địa chỉ chưa có cước cho gói đang chọn.
-    private var quoteNeeds: [(String, Vtp.Group)] {
-        guard api, client.vtp?.sender != nil else { return [] }
-        return rawGroups
-            .filter { !$0.isBad }
-            .map { (VtpQuote.signature($0, service: service), $0) }
-            .filter { quotes[$0.0] == nil && !quoting.contains($0.0) }
+    private func cacheKey(_ g: Vtp.Group) -> String {
+        VtpQuoteCache.key(account: client.currentAccountKey, sender: client.vtp?.sender?.id ?? "",
+                          signature: VtpQuote.signature(g, service: service))
     }
 
-    private func loadQuotes() async {
-        let need = quoteNeeds
-        guard !need.isEmpty else { return }
-        let sigs = Dictionary(need.map { ($0.1.id, $0.0) }, uniquingKeysWith: { a, _ in a })
-        quoting.formUnion(sigs.values)
-        let r = await client.vtpQuote(service: service, groups: need.map { VtpTrack.payload($0.1) })
-        guard !Task.isCancelled else { return }
-        for (key, sig) in sigs {
-            quotes[sig] = r.quotes[key] ?? VtpQuote(error: r.error ?? "Không tính được cước")
-        }
-        quoting.subtract(sigs.values)
+    /// Hỏi cước các khách đủ địa chỉ chưa có giá cho gói đang chọn, theo thứ tự danh sách.
+    private func loadQuotes() {
+        guard api, client.vtp?.sender != nil else { return }
+        let need = rawGroups.filter { !$0.isBad }.map { (key: cacheKey($0), group: $0) }
+        quoteCache.fetch(need, service: service, client: client)
     }
 
-    private func quote(_ g: Vtp.Group) -> VtpQuote? { quotes[VtpQuote.signature(g, service: service)] }
-    private func isQuoting(_ g: Vtp.Group) -> Bool { quoting.contains(VtpQuote.signature(g, service: service)) }
+    private func quote(_ g: Vtp.Group) -> VtpQuote? { quoteCache.quote(cacheKey(g)) }
+    private func isQuoting(_ g: Vtp.Group) -> Bool { quoteCache.isQuoting(cacheKey(g)) }
 
     /// Ô "Viettel Post hiểu": phường/tỉnh họ đọc ra từ dòng địa chỉ, hỏi trước khi tạo đơn.
     @ViewBuilder private func quoteLine(_ g: Vtp.Group) -> some View {

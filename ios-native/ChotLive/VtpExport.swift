@@ -243,7 +243,16 @@ enum Vtp {
                          recentExported: recentExported(of: c.id, in: all, now: now),
                          summary: summary)
         }
-        .sorted { $0.orders[0].lastTs < $1.orders[0].lastTs }
+        // Khách vừa duyệt lên đầu, duyệt trước trôi dần xuống. Đơn duyệt từ bản cũ (chưa có mốc duyệt) lấy giờ chốt.
+        .sorted { a, b in
+            let ta = readyTime(a), tb = readyTime(b)
+            return ta != tb ? ta > tb : a.id < b.id
+        }
+    }
+
+    /// Lần gần nhất một đơn của khách vào Chờ gửi (mili giây).
+    static func readyTime(_ g: Group) -> Double {
+        g.orders.map { $0.ship?.readyAt ?? ($0.lastTs.timeIntervalSince1970 * 1000).rounded() }.max() ?? 0
     }
 
     // MARK: - File Excel
