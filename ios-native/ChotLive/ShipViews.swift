@@ -1877,35 +1877,42 @@ struct VtpExportSheet: View {
         let feeTotal = picked.reduce(0) { $0 + (quote($1).flatMap { $0.ok ? $0.fee : nil } ?? 0) }
         // Trong tab Chờ gửi: chân gọn hơn (không nhãn "Dịch vụ", nút thấp hơn) để danh sách khách có thêm chỗ.
         let compact = embedded
-        let btnH: CGFloat = compact ? 48 : 52
-        let btnFont: CGFloat = compact ? 17 : 15
-        return VStack(spacing: compact ? 10 : 14) {
+        let btnH: CGFloat = compact ? 42 : 52
+        let btnFont: CGFloat = 15
+        return VStack(spacing: compact ? 9 : 14) {
             HStack(alignment: compact ? .center : .bottom) {
                 VStack(alignment: .leading, spacing: 5) {
                     if !compact { fieldLabel("Dịch vụ") }
                     Button { picking.toggle() } label: {
                         HStack(spacing: 4) {
-                            T(serviceName, compact ? 16 : 14, .bold).lineLimit(1).fixedSize()
-                            Icon(name: picking ? .chevronUp : .chevronDown, size: compact ? 16 : 14, color: Theme.muted)
+                            // Chân Chờ gửi: tên dịch vụ dài thì tự rút gọn "…" để tổng tiền bên phải luôn hiện đủ.
+                            if compact {
+                                T(serviceName, 14, .bold).lineLimit(1).truncationMode(.tail)
+                            } else {
+                                T(serviceName, 14, .bold).lineLimit(1).fixedSize()
+                            }
+                            Icon(name: picking ? .chevronUp : .chevronDown, size: 14, color: Theme.muted)
                         }
-                        .padding(.horizontal, compact ? 13 : 12)
-                        .frame(height: compact ? 38 : 38)
-                        .cardStyle(compact ? 11 : 12, fill: Theme.field)
+                        .padding(.horizontal, compact ? 11 : 12)
+                        .frame(height: compact ? 32 : 38)
+                        .cardStyle(compact ? 10 : 12, fill: Theme.field)
                     }
                     .buttonStyle(.plain)
                     .overlay(alignment: .bottomLeading) {
-                        if picking { servicePicker.offset(y: compact ? -46 : -46).fixedSize() }
+                        if picking { servicePicker.offset(y: compact ? -40 : -46).fixedSize() }
                     }
                 }
                 .zIndex(1)
                 Spacer(minLength: 8)
                 if compact {
                     VStack(alignment: .trailing, spacing: 0) {
-                        T(money(total), 22, .heavy, Theme.ink, track: -0.35).lineLimit(1).minimumScaleFactor(0.7)
+                        T(money(total), 19, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.7)
                         T(["\(pick.count) khách", api && feeTotal > 0 ? "cước \(money(feeTotal))" : ""]
-                            .filter { !$0.isEmpty }.joined(separator: " · "), 14, .semibold, Theme.muted)
+                            .filter { !$0.isEmpty }.joined(separator: " · "), 12, .semibold, Theme.muted)
                             .lineLimit(1).minimumScaleFactor(0.8)
                     }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
                 } else {
                     VStack(alignment: .trailing, spacing: 2) {
                         T(api ? "Tổng thu hộ · \(pick.count) khách" : "Tổng thu hộ", 12, .semibold, Theme.muted)
@@ -1928,7 +1935,7 @@ struct VtpExportSheet: View {
                     let draftLocked = !client.vtpRunning || !vtpDrafts.anyLoggedIn
                     Button { pushDrafts(picked) } label: {
                         HStack(spacing: 6) {
-                            Icon(name: draftLocked ? .lock : .arrowRight, size: 16, weight: 2.4, color: VtpDraftColors.brand)
+                            Icon(name: draftLocked ? .lock : .arrowRight, size: 14, weight: 2.4, color: VtpDraftColors.brand)
                             T("Đẩy nháp VTP", btnFont, .bold, VtpDraftColors.brand).lineLimit(1).minimumScaleFactor(0.8)
                         }
                         .frame(maxWidth: .infinity)
@@ -1978,8 +1985,9 @@ struct VtpExportSheet: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
-        .padding(.top, compact ? 10 : 14)
-        .padding(.bottom, compact ? 8 : 0)
+        .padding(.top, compact ? 9 : 14)
+        // Chừa 12pt hở để hai nút không sát thanh tab bên dưới.
+        .padding(.bottom, compact ? 12 : 0)
         .background(Theme.card.overlay(alignment: .top) { HairLine() })
     }
 

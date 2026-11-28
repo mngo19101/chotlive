@@ -158,9 +158,9 @@ struct TabBar: View {
             ForEach(AppTab.allCases, id: \.self) { t in
                 let active = selection == t
                 Button { selection = t } label: {
-                    VStack(spacing: 3.5) {
-                        Icon(name: t.icon, size: 23, color: active ? Theme.accent : Theme.muted)
-                        T(t.title, 13, .semibold, active ? Theme.accent : Theme.muted)
+                    VStack(spacing: 3) {
+                        Icon(name: t.icon, size: 20, color: active ? Theme.accent : Theme.muted)
+                        T(t.title, 10.5, .semibold, active ? Theme.accent : Theme.muted)
                             .multilineTextAlignment(.center)
                             .lineSpacing(0.5)
                             .fixedSize()
@@ -172,8 +172,8 @@ struct TabBar: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .frame(height: 78)
+        .padding(.top, 4)
+        .frame(height: 56)
         .padding(.bottom, max(Metrics.safeBottom - 25, 0))
         .background(
             Theme.tabBar
