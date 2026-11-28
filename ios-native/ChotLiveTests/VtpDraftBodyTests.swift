@@ -97,6 +97,25 @@ final class VtpDraftBodyTests: XCTestCase {
         var same = base
         same.summary.goodsName = Vtp.defaultGoodsName
         XCTAssertEqual(h, VtpDraftBody.hash(same, service: "VSL9"), "tên hàng mặc định: nháp cũ vẫn khớp")
+        let extra = group([order("a", ship: ShipInfo(state: "ready", pay: "cod", extras: "GBH,GDK"))])
+        XCTAssertNotEqual(h, VtpDraftBody.hash(extra, service: "VSL9"), "chọn dịch vụ cộng thêm")
+        let noted = group([order("a", ship: ShipInfo(state: "ready", pay: "cod", orderNote: "Cho khách xem hàng"))])
+        XCTAssertNotEqual(h, VtpDraftBody.hash(noted, service: "VSL9"), "sửa ghi chú")
+    }
+
+    func testBodySendsExtrasAndChosenNote() {
+        var addr = address
+        addr.note = "Gọi trước khi giao"
+        let plain = group([order("a", ship: ShipInfo(state: "ready", pay: "cod"), address: addr)])
+        let b0 = VtpDraftBody.make(plain, kho: kho, place: place, service: "VSL9")
+        XCTAssertEqual(b0["ORDER_SERVICE_ADD"] as? String, "", "không chọn dịch vụ thì để trống như cũ")
+        XCTAssertEqual(b0["ORDER_NOTE"] as? String, "Gọi trước khi giao", "chưa chọn ghi chú: dùng ghi chú giao hàng của khách")
+
+        let picked = group([order("a", ship: ShipInfo(state: "ready", pay: "cod", extras: "SMS,gbh,XYZ",
+                                                      orderNote: "Cho khách xem hàng; Giao sau 17h"), address: addr)])
+        let b = VtpDraftBody.make(picked, kho: kho, place: place, service: "VSL9")
+        XCTAssertEqual(b["ORDER_SERVICE_ADD"] as? String, "GBH,SMS", "chỉ mã hợp lệ, theo thứ tự danh sách")
+        XCTAssertEqual(b["ORDER_NOTE"] as? String, "Cho khách xem hàng; Giao sau 17h")
     }
 
     func testStatus() {

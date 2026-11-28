@@ -117,6 +117,8 @@ enum Vtp {
         var note = ""
         /// Tên hàng hoá trên vận đơn; rỗng khi cài đặt để trống mà đơn chưa nhập tên hàng.
         var goodsName = Vtp.defaultGoodsName
+        /// Mã dịch vụ cộng thêm đã chọn ("GBH", "GDK"…), theo thứ tự danh sách VtpExtras.
+        var extras: [String] = []
         var problems: [String] = []
     }
 
@@ -189,7 +191,9 @@ enum Vtp {
         s.address = VtpAddress.resolve(address)
         s.receiver = cleanName((address?.receiver ?? "").isEmpty ? nickname : address!.receiver)
         s.phone = (address?.phone ?? "").filter { $0.isNumber || $0 == "+" }
-        s.note = address?.note ?? ""
+        // Ghi chú chọn ở bảng Duyệt đơn (đơn mới nhất thắng); chưa chọn thì vẫn là ghi chú giao hàng của khách.
+        s.note = last(lines) { $0.orderNote.flatMap { $0.isEmpty ? nil : $0 } } ?? address?.note ?? ""
+        s.extras = VtpExtras.clean(last(lines) { $0.extras })
         if phoneRe.firstMatch(in: s.phone, range: NSRange(location: 0, length: (s.phone as NSString).length)) == nil {
             s.problems.append("Thiếu số điện thoại")
         }
@@ -277,7 +281,8 @@ enum Vtp {
             row += [t(s.receiver), t(s.phone), t(s.address.line), t(String(s.goodsName.prefix(150)))]
             row += [Cell.number(max(s.qty, 1)), Cell.number(s.weightG), Cell.number(s.goods), Cell.number(s.cod)]
             row += [t("Bưu kiện"), nil, t(service.isEmpty ? defaultService : service)]
-            row += [nil, nil] // Dịch vụ cộng thêm: để trống, không SMS; Thu tiền xem hàng
+            // Dịch vụ cộng thêm: mã đã chọn ở bảng Duyệt đơn, cách nhau dấu phẩy; Thu tiền xem hàng để trống.
+            row += [s.extras.isEmpty ? nil : t(s.extras.joined(separator: ",")), nil]
             row += size // Dài, Rộng, Cao (cm)
             row.append(t(s.senderPays ? "Người gửi trả" : "Người nhận trả"))
             row.append(note.isEmpty ? nil : t(note))

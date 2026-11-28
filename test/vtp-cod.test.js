@@ -34,8 +34,11 @@ const fakeVtp = http.createServer((req, res) => {
     if (req.url === '/v2/user/LoginVTP') return okData({ token: 'partner', phone: '0900000000', userId: 1 });
     if (req.url === '/v2/user/listInventory') return okData([{ groupaddressId: 1, name: 'Shop', phone: '0900000000', address: '1 Lê Lợi, Phường Thuận Hoá, TP.Huế' }]);
     if (req.url === '/v2/order/getPriceNlp' || req.url === '/v2/order/getPriceAllNlp') {
-      quoted.push({ url: req.url, ...JSON.parse(body || '{}') });
-      return okData({ MONEY_TOTAL: 22000 });
+      const q = JSON.parse(body || '{}');
+      quoted.push({ url: req.url, ...q });
+      // Dịch vụ cộng thêm: Khai giá +5.000đ, Phát tận tay xác thực gói này không nhận.
+      if (String(q.ORDER_SERVICE_ADD || '').includes('PTTX')) return send({ status: 204, error: true, message: 'Price does not apply to this itinerary!' });
+      return okData({ MONEY_TOTAL: 22000 + (String(q.ORDER_SERVICE_ADD || '').includes('GBH') ? 5000 : 0) });
     }
     if (req.url === '/v2/order/createOrderNlp') {
       sent.push(JSON.parse(body || '{}'));
@@ -352,4 +355,16 @@ test('BL-10: web gửi mã đơn máy chủ chưa có: từ chối cả nhóm, k
   assert.match(r.body.results[0].error, /đồng bộ/);
   assert.equal(sent.length, before);
   assert.equal((await findOrder('bl10b')).ship.vtpCode, undefined);
+});
+
+test('bảng dịch vụ cộng thêm: máy chủ trả giá từng dịch vụ, mã gói không nhận là null, thu hộ sai thì từ chối', async () => {
+  const r = await api('/api/vtp/extras', { service: 'VSL9', group: group('x', ['x'], 450000) });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.base, 22000);
+  assert.equal(r.body.prices.GBH, 5000);
+  assert.equal(r.body.prices.SMS, 0);
+  assert.equal(r.body.prices.PTTX, null);
+  const bad = await api('/api/vtp/extras', { service: 'VSL9', group: group('x', ['x'], '450.000') });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /thu hộ/i);
 });

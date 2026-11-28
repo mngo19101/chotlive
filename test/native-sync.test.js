@@ -273,6 +273,7 @@ test('app nhận ship và mã đơn của web, gửi ship lên thì web thấy �
   assert.deepEqual(item.ship, {
     state: 'hold', pay: 'cod', payer: 'receiver', deposit: 50000, shipFee: null, codOverride: null, goodsOverride: null,
     weightG: 1500, exportedAt: null, batchId: null, lengthCm: null, widthCm: null, heightCm: null, goodsName: null,
+    extras: null, orderNote: null,
     draftCode: null, draftAt: null, draftHash: null, draftAccount: null, draftError: null, draftErrorAt: null
   });
 
@@ -286,6 +287,14 @@ test('app nhận ship và mã đơn của web, gửi ship lên thì web thấy �
       items: [{ ...item, ship: { ...item.ship, state: 'ready', codOverride: 300000, payer: 'bogus' } }] }]
   });
   assert.deepEqual(state.orders[0].ship, { state: 'ready', pay: 'cod', deposit: 50000, codOverride: 300000, weightG: 1500 });
+
+  // Dịch vụ cộng thêm và ghi chú vận đơn chọn ở bảng Duyệt đơn: giữ mã hợp lệ, bỏ mã lạ, gọn khoảng trắng.
+  applyNativeUpdate(state, {
+    customers: [{ ...snap.customers.find((c) => c.id === 'linh.nguyen'),
+      items: [{ ...item, ship: { ...item.ship, state: 'ready', extras: 'sms,GBH,XYZ', orderNote: '  Gọi trước;   Cho xem hàng ' } }] }]
+  });
+  assert.equal(state.orders[0].ship.extras, 'GBH,SMS');
+  assert.equal(state.orders[0].ship.orderNote, 'Gọi trước; Cho xem hàng');
 
   // App xuất Viettel Post: Đang giao + exported.
   applyNativeUpdate(state, {

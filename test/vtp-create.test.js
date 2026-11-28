@@ -15,6 +15,8 @@ const WARDS = [
 // Danh mục thật có hơn 10.000 dòng; mock lặp cho đủ ngưỡng "không rỗng".
 const WARD_LIST = [...WARDS, ...Array.from({ length: 1000 }, (_, i) => ({ WARDS_ID: 100000 + i, WARDS_ID_NEW: 60000 + i, WARDS_NAME: 'X', WARDS_NAME_NEW: 'Xã X', PROVINCE_ID_NEW: 1, PROVINCE_NAME_NEW: 'Tỉnh X' }))];
 
+const EXTRA_PRICE = { GBH: 5000, GBP: 5500, GDK: 16500, GGC: 10000, GST: 120000, GTT: 5500, PTTX: 7000, SMS: 1500, ZNS: 600 };
+
 const server = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
@@ -42,7 +44,15 @@ const server = http.createServer((req, res) => {
       if (json.ORDER_NUMBER === '998') return send({ status: 200, error: true, message: 'Trạng thái đơn hàng không hợp lệ' });
       return send({ status: 200, error: false, message: 'OK', data: null });
     }
-    if (req.url === '/v2/order/getPriceNlp') return send({ status: 200, error: false, message: 'OK', data: { MONEY_TOTAL: json.ORDER_SERVICE === 'STK' ? 20000 : 18480 } });
+    if (req.url === '/v2/order/getPriceNlp') {
+      // Giá dịch vụ cộng thêm như Viettel Post thật (đã gồm VAT); gói VSL9 không nhận Phát tận tay xác thực.
+      const adds = String(json.ORDER_SERVICE_ADD || '').split(',').filter(Boolean);
+      if (adds.includes('XYZ') || (json.ORDER_SERVICE === 'VSL9' && adds.includes('PTTX'))) {
+        return send({ status: 204, error: true, message: 'Price does not apply to this itinerary!' });
+      }
+      const extra = adds.reduce((n, c) => n + (EXTRA_PRICE[c] ?? 0), 0);
+      return send({ status: 200, error: false, message: 'OK', data: { MONEY_TOTAL: (json.ORDER_SERVICE === 'STK' ? 20000 : 18480) + extra } });
+    }
     if (req.url === '/v2/order/getPriceAllNlp') {
       const addr = String(json.RECEIVER_ADDRESS);
       const ward = /Hà Nội/.test(addr) ? 1 : 7969;
@@ -239,4 +249,33 @@ test('applyVtpAdopted chuyển đơn sang Đang giao, ghi vtpCode và xoá nhãn
   assert.equal(o.ship.draftHash, undefined);
   assert.equal(o.ship.draftAccount, undefined);
   assert.equal(o.ship.draftError, undefined);
+});
+
+test('dịch vụ cộng thêm: tạo vận đơn gửi đúng mã đã lọc, không chọn thì gửi null', async () => {
+  let r = await vtp.vtpCreateOrder(store, 'u1', group({ extras: 'sms, gbh,XYZ,GBH' }), 'VSL9', wards);
+  assert.equal(r.ok, true);
+  assert.equal(calls.findLast((c) => c.url === '/v2/order/createOrderNlp').body.ORDER_SERVICE_ADD, 'GBH,SMS');
+  r = await vtp.vtpCreateOrder(store, 'u1', group(), 'VSL9', wards);
+  assert.equal(calls.findLast((c) => c.url === '/v2/order/createOrderNlp').body.ORDER_SERVICE_ADD, null);
+});
+
+test('dịch vụ cộng thêm: hỏi cước nháp có cộng dịch vụ đã chọn', async () => {
+  const q = await vtp.vtpQuote(store, 'u1', group({ extras: 'GBH,GDK,SMS' }), 'VSL9', wards);
+  assert.equal(q.ok, true);
+  assert.equal(q.fee, 18480 + 5000 + 16500 + 1500);
+  assert.equal(calls.findLast((c) => c.url === '/v2/order/getPriceNlp').body.ORDER_SERVICE_ADD, 'GBH,GDK,SMS');
+});
+
+test('dịch vụ cộng thêm: giá từng dịch vụ là phần chênh, gói không nhận thì null', async () => {
+  const r = await vtp.vtpExtraPrices(store, 'u1', group(), 'VSL9');
+  assert.equal(r.ok, true);
+  assert.equal(r.base, 18480);
+  assert.deepEqual(Object.keys(r.prices).sort(), [...vtp.VTP_EXTRAS].sort());
+  assert.equal(r.prices.GBH, 5000);
+  assert.equal(r.prices.GDK, 16500);
+  assert.equal(r.prices.GG1P, 0);
+  assert.equal(r.prices.PTTX, null);
+  assert.equal((await vtp.vtpExtraPrices(store, 'u1', group(), 'STK')).prices.PTTX, 7000);
+  const bad = await vtp.vtpExtraPrices(store, 'u1', group({ cod: -1 }), 'VSL9');
+  assert.equal(bad.ok, false);
 });

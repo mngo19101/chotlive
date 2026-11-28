@@ -54,6 +54,18 @@ export const isPending = (o) => PENDING_STATES.includes(shipStateOf(o));
  */
 export const vtpAttemptOpen = (o) => !o?.ship?.vtpCode && ['creating', 'unknown'].includes(o?.ship?.vtpKind);
 export const VTP_UNKNOWN_PROBLEM = 'Chưa rõ vận đơn trước đã tạo chưa, mở đơn để kiểm tra';
+/**
+ * Dịch vụ cộng thêm shop được chọn ở bảng Duyệt đơn: đúng 11 dịch vụ trang tạo đơn viettelpost.vn hiện ra.
+ * Viettel Post trả danh sách dài hơn (phụ phí, loại hàng…) nhưng các mã đó không phải để shop tick, nên lọc theo đây.
+ */
+export const VTP_EXTRAS = ['GBH', 'GBP', 'GDK', 'GG1P', 'GGC', 'GGDH', 'GST', 'GTT', 'PTTX', 'SMS', 'ZNS'];
+
+/** "gbh, GDK,xyz" hay ['GDK','GBH'] → ['GBH','GDK']: chỉ giữ mã trong danh sách, không trùng, theo thứ tự danh sách. */
+export function cleanExtras(v) {
+  const list = Array.isArray(v) ? v : String(v ?? '').split(',');
+  const picked = new Set(list.map((x) => String(x ?? '').trim().toUpperCase()));
+  return VTP_EXTRAS.filter((c) => picked.has(c));
+}
 
 export function goodsTotal(o) {
   const sub = (o.items || []).reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 1), 0);

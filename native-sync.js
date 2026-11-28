@@ -9,7 +9,7 @@
  * - Trường chỉ web mới có (mã đơn, phí ship, giảm giá...) được giữ nguyên.
  */
 import crypto from 'node:crypto';
-import { vtpAttemptOpen } from './public/js/vtp-export.js';
+import { cleanExtras, vtpAttemptOpen } from './public/js/vtp-export.js';
 
 const TIME_ZONE = 'Asia/Ho_Chi_Minh';
 const hmFormat = new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit' });
@@ -104,6 +104,10 @@ export function nativeShip(ship) {
     heightCm: moneyOrNull(ship.heightCm),
     // Tên hàng hoá trên vận đơn, nhập ở bảng Duyệt đơn khi shop để trống tên hàng mặc định trong cài đặt.
     goodsName: textOrNull(String(ship.goodsName ?? '').replace(/\s+/g, ' ').trim(), 100),
+    // Dịch vụ cộng thêm chọn ở bảng Duyệt đơn ("GBH,GDK"): chỉ giữ mã trong danh sách được chọn.
+    extras: textOrNull(cleanExtras(ship.extras).join(','), 80),
+    // Ghi chú vận đơn shop chọn/gõ ở bảng Duyệt đơn; null là dùng ghi chú giao hàng của khách như trước.
+    orderNote: textOrNull(String(ship.orderNote ?? '').replace(/\s+/g, ' ').trim(), 300),
     // Nháp Viettel Post do app đẩy từ máy: app ghi, máy chủ chỉ lưu và đồng bộ lại.
     draftCode: textOrNull(ship.draftCode, 40),
     draftAt: numOrNull(ship.draftAt),

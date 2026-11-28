@@ -109,6 +109,23 @@ router.post('/api/vtp/quote', requireAuth, async (req, res) => {
   res.json({ ok: true, results });
 });
 
+// Bảng chọn dịch vụ cộng thêm: giá từng dịch vụ cho đúng đơn đang duyệt và gói đang chọn, chưa tạo đơn nào.
+const vtpExtraTries = createLimiter({ max: 30, windowMs: 60 * 1000 });
+router.post('/api/vtp/extras', requireAuth, async (req, res) => {
+  const userId = req.user.id;
+  const conn = vtpStore.get(userId);
+  if (!conn?.siteToken) return res.status(400).json({ error: 'Chưa kết nối Viettel Post' });
+  if (!conn.sender) return res.status(400).json({ error: 'Chưa chọn điểm lấy hàng' });
+  // Mỗi lần mở bảng là 12 lần hỏi Viettel Post: chặn bấm liên tục.
+  if (vtpExtraTries.retryAfter(userId) > 0) return res.status(429).json({ error: 'Hỏi giá quá nhiều lần, đợi một phút.' });
+  vtpExtraTries.hit(userId);
+  const service = String(req.body?.service || 'VSL9').slice(0, 10);
+  const g = req.body?.group && typeof req.body.group === 'object' ? req.body.group : {};
+  const r = await vtp.vtpExtraPrices(vtpStore, userId, g, service).catch((e) => ({ ok: false, error: String(e.message || e) }));
+  if (!r.ok) return res.status(400).json({ error: r.error || 'Lỗi' });
+  res.json({ ok: true, base: r.base, prices: r.prices });
+});
+
 // Mỗi tài khoản chỉ tạo vận đơn một lượt một lúc: yêu cầu bấm lại hoặc gửi từ máy khác phải chờ lượt
 // trước xong, khi đó đơn đã có mã vận đơn và được trả về "already" thay vì tạo thêm vận đơn thứ hai.
 const vtpCreateQueue = new Map();

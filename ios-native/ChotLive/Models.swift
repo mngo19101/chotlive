@@ -140,6 +140,10 @@ struct ShipInfo: Codable, Equatable {
     var heightCm: Int? = nil
     /// Tên hàng hoá nhập ở bảng Duyệt đơn, chỉ dùng khi tên hàng mặc định trong cài đặt Máy in để trống.
     var goodsName: String? = nil
+    /// Dịch vụ cộng thêm chọn ở bảng Duyệt đơn, mã cách nhau dấu phẩy ("GBH,GDK"); nil là không chọn.
+    var extras: String? = nil
+    /// Ghi chú vận đơn chọn/gõ ở bảng Duyệt đơn (mẫu + nội dung khác); nil là dùng ghi chú giao hàng của khách.
+    var orderNote: String? = nil
     // Vận đơn Viettel Post tạo qua API: máy chủ ghi, app chỉ đọc (gửi lên máy chủ cũng bỏ qua).
     var vtpCode: String? = nil
     /// Mã vận đơn đã huỷ, để tra lại; đơn về Chờ gửi.
@@ -177,15 +181,17 @@ struct ShipInfo: Codable, Equatable {
 
     init(state: String? = nil, pay: String? = nil, payer: String? = nil, deposit: Int? = nil, shipFee: Int? = nil,
          codOverride: Int? = nil, goodsOverride: Int? = nil, weightG: Int? = nil, exportedAt: Double? = nil,
-         batchId: String? = nil, lengthCm: Int? = nil, widthCm: Int? = nil, heightCm: Int? = nil, goodsName: String? = nil) {
+         batchId: String? = nil, lengthCm: Int? = nil, widthCm: Int? = nil, heightCm: Int? = nil, goodsName: String? = nil,
+         extras: String? = nil, orderNote: String? = nil) {
         self.state = state; self.pay = pay; self.payer = payer; self.deposit = deposit; self.shipFee = shipFee
         self.codOverride = codOverride; self.goodsOverride = goodsOverride; self.weightG = weightG; self.exportedAt = exportedAt; self.batchId = batchId
         self.lengthCm = lengthCm; self.widthCm = widthCm; self.heightCm = heightCm; self.goodsName = goodsName
+        self.extras = extras; self.orderNote = orderNote
     }
 
     private enum CodingKeys: String, CodingKey {
         case state, pay, payer, deposit, shipFee, codOverride, goodsOverride, weightG, exportedAt, batchId, lengthCm, widthCm, heightCm
-        case goodsName
+        case goodsName, extras, orderNote
         case vtpCode, vtpOldCode, vtpFee, vtpCod, vtpGoods, vtpService, vtpStatus, vtpStatusName, vtpStatusAt, vtpKind, vtpNote, vtpError, vtpErrorAt
         case vtpHint, vtpHintCod
         case draftCode, draftAt, draftHash, draftAccount, draftError, draftErrorAt
@@ -222,6 +228,8 @@ struct ShipInfo: Codable, Equatable {
         widthCm = Self.money(Self.number(c, .widthCm))
         heightCm = Self.money(Self.number(c, .heightCm))
         goodsName = Self.text(c, .goodsName)
+        extras = Self.text(c, .extras)
+        orderNote = Self.text(c, .orderNote)
         vtpCode = Self.text(c, .vtpCode)
         vtpOldCode = Self.text(c, .vtpOldCode)
         vtpFee = Self.money(Self.number(c, .vtpFee))
@@ -263,6 +271,8 @@ struct ShipInfo: Codable, Equatable {
         try c.encode(widthCm, forKey: .widthCm)
         try c.encode(heightCm, forKey: .heightCm)
         try c.encode(goodsName, forKey: .goodsName)
+        try c.encode(extras, forKey: .extras)
+        try c.encode(orderNote, forKey: .orderNote)
         // Máy chủ không nhận các trường vận đơn từ app; chỉ lưu trên máy và để máy chủ biết app đang giữ mã nào.
         try c.encodeIfPresent(vtpCode, forKey: .vtpCode)
         try c.encodeIfPresent(vtpOldCode, forKey: .vtpOldCode)

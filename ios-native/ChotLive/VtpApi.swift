@@ -124,7 +124,8 @@ struct VtpQuote: Equatable {
     static func signature(_ g: Vtp.Group, service: String) -> String {
         let s = g.baseSummary ?? g.summary
         let size = s.size.map { "\($0.0)x\($0.1)x\($0.2)" } ?? ""
-        return [g.id, s.address.line, "\(s.cod)", "\(s.goods)", "\(s.weightG)", size, service].joined(separator: "|")
+        return [g.id, s.address.line, "\(s.cod)", "\(s.goods)", "\(s.weightG)", size, service,
+                s.extras.joined(separator: ",")].joined(separator: "|")
     }
 }
 
@@ -260,7 +261,9 @@ enum VtpTrack {
             "goods": s.goods,
             "cod": s.cod,
             "senderPays": s.senderPays,
-            "note": String(s.note.prefix(150))
+            "note": String(s.note.prefix(150)),
+            // Dịch vụ cộng thêm chọn ở bảng Duyệt đơn; máy chủ lọc lại theo danh sách được phép.
+            "extras": s.extras.joined(separator: ",")
         ]
         if let z = s.size { p["size"] = [z.0, z.1, z.2] }
         return p
@@ -365,6 +368,21 @@ extension LiveClient {
         var out: [String: VtpQuote] = [:]
         for d in r.1["results"] as? [[String: Any]] ?? [] {
             if let key = VtpConnection.string(d["key"]) { out[key] = VtpQuote(d) }
+        }
+        return (nil, out)
+    }
+
+    /// Bảng dịch vụ cộng thêm: giá từng dịch vụ (đã gồm VAT) cho đúng đơn đang duyệt và gói đang chọn.
+    /// Giá nil: gói này Viettel Post không nhận dịch vụ đó. Chưa tạo đơn nào.
+    func vtpExtraPrices(service: String, group: [String: Any]) async -> (error: String?, prices: [String: Int?]) {
+        let r = await apiCall("/api/vtp/extras", method: "POST", body: ["service": service, "group": group], timeout: 40)
+        guard let r, r.0 == 200 else { return (Self.errorText(r, "Không hỏi được giá dịch vụ"), [:]) }
+        var out: [String: Int?] = [:]
+        let raw = r.1["prices"] as? [String: Any] ?? [:]
+        for svc in VtpExtras.all {
+            guard let v = raw[svc.code] else { continue }
+            // null (NSNull) là gói không nhận dịch vụ này.
+            out[svc.code] = .some((v as? NSNumber)?.intValue)
         }
         return (nil, out)
     }

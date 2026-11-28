@@ -601,6 +601,17 @@ final class VtpDraftClient: ObservableObject {
         return code
     }
 
+    /// Ghi chú mẫu của tài khoản (tối đa 10, quản lý ở Cài đặt tài khoản → Quản lý ghi chú trên viettelpost.vn),
+    /// như nút "Ghi chú mẫu" của trang tạo đơn. `selected` là các mẫu bật "Mặc định chọn".
+    func noteTemplates() async throws -> (templates: [String], selected: [String]) {
+        let r = try await authed("/api/user-notes/v1", method: "GET") { [String: Any]() }
+        guard let parsed = VtpExtras.parseTemplates(r.json) else {
+            throw VtpDraftError.server(VtpJ.str(VtpJ.dict(r.json)?["message"]) ?? "Không đọc được ghi chú mẫu (HTTP \(r.status))")
+        }
+        note("Ghi chú mẫu: \(parsed.templates.count)", parsed.templates.joined(separator: " | "), ok: true)
+        return parsed
+    }
+
     /// Xoá nháp: trang web gọi UpdateOrder với TYPE 11 (DELETE_ORDER).
     /// Lỗi nào cũng trả nguyên lời Viettel Post, không tự coi là đã xoá.
     func deleteDraft(_ code: String) async throws {
@@ -650,31 +661,32 @@ final class VtpDraftClient: ObservableObject {
     }
 
     /// POST tới api.viettelpost.vn kèm token + deviceId + DPoP. Viettel Post đòi nonce thì gửi lại một lần.
-    private func api(_ path: String, body: Any, token tk: String?, extra: [String: String] = [:],
-                     retried: Bool = false) async throws -> VtpDraftReply {
+    private func api(_ path: String, body: Any?, token tk: String?, extra: [String: String] = [:],
+                     method: String = "POST", retried: Bool = false) async throws -> VtpDraftReply {
         guard let url = URL(string: Endpoint.api + path) else { throw VtpDraftError.server("Sai đường dẫn") }
         var h = ["deviceId": deviceId]
-        h["X-Token"] = VtpDpop.proof(key: key, method: "POST", url: url, accessToken: tk, nonce: nonce)
+        h["X-Token"] = VtpDpop.proof(key: key, method: method, url: url, accessToken: tk, nonce: nonce)
         if let tk, !tk.isEmpty { h["token"] = tk }
         for (k, v) in extra { h[k] = v }
-        let r = try await VtpDraftHttp.send(transport, url, body: body, headers: h)
+        let r = try await VtpDraftHttp.send(transport, url, body: body, headers: h, method: method)
         if let n = r.nonce, !n.isEmpty { nonce = n }
         let mk = VtpJ.str(VtpJ.dict(r.json)?["messageKey"]) ?? ""
         if !retried, r.nonce != nil, mk == "USE_DPOP_NONCE" || r.status == 401 {
-            return try await api(path, body: body, token: tk, extra: extra, retried: true)
+            return try await api(path, body: body, token: tk, extra: extra, method: method, retried: true)
         }
         return r
     }
 
     /// Lệnh cần đăng nhập: làm mới trước nếu sắp hết hạn; Viettel Post báo hết hạn thì làm mới rồi gửi lại một lần.
-    private func authed(_ path: String, body: () -> Any) async throws -> VtpDraftReply {
+    /// `method` "GET" thì không gửi thân (body bỏ qua).
+    private func authed(_ path: String, method: String = "POST", body: () -> Any) async throws -> VtpDraftReply {
         try await ensureFresh()
         guard let tk = token else { throw VtpDraftError.notLoggedIn }
-        var r = try await api(path, body: body(), token: tk)
+        var r = try await api(path, body: method == "GET" ? nil : body(), token: tk, method: method)
         if VtpJ.str(VtpJ.dict(r.json)?["messageKey"]) == "EXPIRED_TOKEN" || r.status == 401 {
             note("Phiên hết hạn, làm mới rồi gửi lại", "", ok: false)
             try await refresh()
-            r = try await api(path, body: body(), token: token)
+            r = try await api(path, body: method == "GET" ? nil : body(), token: token, method: method)
             if VtpJ.str(VtpJ.dict(r.json)?["messageKey"]) == "EXPIRED_TOKEN" || r.status == 401 {
                 sessionExpired = true
                 throw VtpDraftError.sessionExpired

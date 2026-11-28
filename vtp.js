@@ -6,9 +6,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { summarizeGroup, vtpAttemptOpen } from './public/js/vtp-export.js';
+import { summarizeGroup, vtpAttemptOpen, VTP_EXTRAS, cleanExtras } from './public/js/vtp-export.js';
 
-export { vtpAttemptOpen };
+export { vtpAttemptOpen, VTP_EXTRAS, cleanExtras };
 export const VTP_BASE = process.env.VTP_BASE || 'https://partner.viettelpost.vn';
 /** Hạn chờ Viettel Post trả lời một lần gọi. */
 const TIMEOUT_MS = Number(process.env.VTP_TIMEOUT_MS) || 20000;
@@ -295,6 +295,7 @@ export function clipBytes(s, maxBytes = 150) {
 /** Trần tiền thu hộ một vận đơn; trần cước dùng để suy ra cước client đã báo giá. */
 export const MAX_COD = 100_000_000;
 export const MAX_SHIP_FEE = 2_000_000;
+
 const vnd = (n) => Number(n).toLocaleString('vi-VN') + 'đ';
 const BAD_COD = 'Tiền thu hộ không hợp lệ. Cập nhật app rồi gửi lại.';
 /** COD hợp lệ: số nguyên 0..MAX_COD. Chuỗi "450.000", null, số âm, số lẻ: không hợp lệ (không ép về 0). */
@@ -326,7 +327,7 @@ export function checkGroupCod(orders, cod) {
 
 /**
  * Tạo một vận đơn. `g` do trình duyệt gom sẵn (cùng cách tính với file Excel):
- * { ref, receiver, phone, address, goodsName, qty, weightG, goods, cod, senderPays, note, size:[d,r,c]|null }
+ * { ref, receiver, phone, address, goodsName, qty, weightG, goods, cod, senderPays, note, size:[d,r,c]|null, extras:"GBH,GDK" }
  */
 export async function vtpCreateOrder(store, userId, g, service, wards = null) {
   const conn = store.get(userId);
@@ -358,7 +359,8 @@ export async function vtpCreateOrder(store, userId, g, service, wards = null) {
     // 1: không thu hộ; 2: thu hộ tiền hàng + cước (người nhận trả); 3: thu hộ tiền hàng; 4: chỉ thu hộ cước
     ORDER_PAYMENT: g.senderPays ? 3 : 2,
     ORDER_SERVICE: service || 'VSL9',
-    ORDER_SERVICE_ADD: null,
+    // Dịch vụ cộng thêm shop tick ở bảng Duyệt đơn (Khai giá, Đồng kiểm…), mã cách nhau bằng dấu phẩy.
+    ORDER_SERVICE_ADD: cleanExtras(g.extras).join(',') || null,
     ORDER_NOTE: note,
     MONEY_COLLECTION: Math.max(0, Math.round(Number(g.cod) || 0)),
     EXTRA_MONEY: 0,
@@ -438,20 +440,11 @@ export async function vtpQuote(store, userId, g, service, wards = null) {
   if (!s?.address) return { ok: false, error: 'Chưa chọn điểm lấy hàng' };
   // Cước báo giá được cộng vào COD của đơn nhỏ: hỏi với COD sai (ép về 0đ/450đ) là cước sai theo.
   if (!codOk(g.cod)) return { ok: false, error: BAD_COD };
-  const cod = g.cod;
-  const base = {
-    SENDER_ADDRESS: clipBytes(s.address, 150),
-    RECEIVER_ADDRESS: clipBytes(g.address, 150),
-    PRODUCT_TYPE: 'HH',
-    PRODUCT_WEIGHT: Math.max(1, Math.round(Number(g.weightG) || 1000)),
-    PRODUCT_PRICE: Math.max(0, Math.round(Number(g.goods) || 0)),
-    MONEY_COLLECTION: cod,
-    PRODUCT_LENGTH: g.size ? Number(g.size[0]) || 0 : 0,
-    PRODUCT_WIDTH: g.size ? Number(g.size[1]) || 0 : 0,
-    PRODUCT_HEIGHT: g.size ? Number(g.size[2]) || 0 : 0
-  };
+  const base = quoteBase(s, g);
+  // Cước có cộng dịch vụ cộng thêm đã chọn: đơn nhỏ cộng đúng cước này vào thu hộ.
+  const extras = cleanExtras(g.extras).join(',');
   const [price, all] = await Promise.all([
-    vtpCall(store, userId, 'POST', '/v2/order/getPriceNlp', { ...base, NATIONAL_TYPE: 1, ORDER_SERVICE: service || 'VSL9', ORDER_SERVICE_ADD: '' }),
+    vtpCall(store, userId, 'POST', '/v2/order/getPriceNlp', { ...base, NATIONAL_TYPE: 1, ORDER_SERVICE: service || 'VSL9', ORDER_SERVICE_ADD: extras }),
     vtpCall(store, userId, 'POST', '/v2/order/getPriceAllNlp', { ...base, TYPE: 1 })
   ]);
   const out = { ok: ok(price), fee: ok(price) ? Number(price.json.data?.MONEY_TOTAL) || 0 : 0 };
@@ -467,6 +460,52 @@ export async function vtpQuote(store, userId, g, service, wards = null) {
     }
   }
   return out;
+}
+
+/** Phần chung của các lần hỏi cước: địa chỉ chữ, cân nặng, giá trị hàng, thu hộ, kích thước. */
+function quoteBase(sender, g) {
+  return {
+    SENDER_ADDRESS: clipBytes(sender.address, 150),
+    RECEIVER_ADDRESS: clipBytes(g.address, 150),
+    PRODUCT_TYPE: 'HH',
+    PRODUCT_WEIGHT: Math.max(1, Math.round(Number(g.weightG) || 1000)),
+    PRODUCT_PRICE: Math.max(0, Math.round(Number(g.goods) || 0)),
+    MONEY_COLLECTION: g.cod,
+    PRODUCT_LENGTH: g.size ? Number(g.size[0]) || 0 : 0,
+    PRODUCT_WIDTH: g.size ? Number(g.size[1]) || 0 : 0,
+    PRODUCT_HEIGHT: g.size ? Number(g.size[2]) || 0 : 0
+  };
+}
+
+/**
+ * Giá từng dịch vụ cộng thêm cho đúng đơn đang duyệt và gói đang chọn, KHÔNG tạo đơn: hỏi cước không dịch vụ,
+ * rồi hỏi cước kèm từng mã. Giá = phần chênh (đã gồm VAT, như trang viettelpost.vn hiện).
+ * Gói không nhận mã nào (Viettel Post trả lỗi, ví dụ Phát tận tay xác thực với Flashsale thỏa thuận) thì giá null.
+ * Trả { ok, base, prices: { MÃ: số | null }, error }.
+ */
+export async function vtpExtraPrices(store, userId, g, service) {
+  const s = store.get(userId)?.sender;
+  if (!s?.address) return { ok: false, error: 'Chưa chọn điểm lấy hàng' };
+  if (!codOk(g.cod)) return { ok: false, error: BAD_COD };
+  const body = { ...quoteBase(s, g), NATIONAL_TYPE: 1, ORDER_SERVICE: service || 'VSL9' };
+  const total = (r) => (ok(r) ? Number(r.json.data?.MONEY_TOTAL) : NaN);
+  const first = await vtpCall(store, userId, 'POST', '/v2/order/getPriceNlp', { ...body, ORDER_SERVICE_ADD: '' });
+  const base = total(first);
+  if (!Number.isFinite(base)) return { ok: false, error: why(first) };
+  const prices = {};
+  let next = 0;
+  // 11 lần hỏi: chạy 4 lần một lúc cho nhanh mà không dồn Viettel Post.
+  await Promise.all(
+    Array.from({ length: 4 }, async () => {
+      while (next < VTP_EXTRAS.length) {
+        const code = VTP_EXTRAS[next++];
+        const r = await vtpCall(store, userId, 'POST', '/v2/order/getPriceNlp', { ...body, ORDER_SERVICE_ADD: code });
+        const t = total(r);
+        prices[code] = Number.isFinite(t) ? Math.round(t - base) : null;
+      }
+    })
+  );
+  return { ok: true, base, prices };
 }
 
 /** Khoá so địa danh: bỏ dấu, chữ thường; dropPrefix bỏ "TP./Thành phố/Tỉnh/T." để "TP.Huế" = "Thành phố Huế". */

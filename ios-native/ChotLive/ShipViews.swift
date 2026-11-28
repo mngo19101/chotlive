@@ -176,6 +176,29 @@ struct ShipReviewSheet: View {
     /// Tên hàng trong cài đặt Máy in; để trống thì bảng có ô nhập tên hàng cho từng lần duyệt.
     @AppStorage(Vtp.goodsNameKey) private var goodsSetting = Vtp.defaultGoodsName
     @State private var goodsText = ""
+    @EnvironmentObject var vtpDrafts: VtpDraftHub
+    /// Dịch vụ cộng thêm và ghi chú vận đơn, chọn trong bảng con giống trang tạo đơn viettelpost.vn.
+    private enum Picker { case extras, notes }
+    @State private var picker: Picker?
+    @State private var extras: [String] = []
+    @State private var notePicks: [String] = []
+    @State private var noteOther = ""
+    @State private var templates: [String] = UserDefaults.standard.stringArray(forKey: VtpExtras.templatesKey) ?? VtpExtras.defaultTemplates
+    /// Mẫu đang hiện là của tài khoản Viettel Post (phần 2) hay 5 mẫu chung.
+    @State private var templatesFromAccount = false
+    @State private var templatesLoading = false
+    @State private var templatesError: String?
+    /// Đơn đã có ghi chú lưu từ lần duyệt trước: không tự tick mẫu "Mặc định chọn" của Viettel Post đè lên.
+    @State private var noteSaved = false
+    /// Giá từng dịch vụ cho đơn đang duyệt; nil trong từ điển là gói đang chọn không nhận dịch vụ đó.
+    @State private var prices: [String: Int?] = [:]
+    @State private var pricesKey = ""
+    @State private var pricesLoading = false
+    @State private var pricesError: String?
+    @AppStorage(VtpExtras.rememberKey) private var extrasRemember = false
+    @AppStorage(VtpExtras.defaultKey) private var extrasDefault = ""
+    @AppStorage(VtpExtras.noteRememberKey) private var noteRemember = false
+    @AppStorage(VtpExtras.noteDefaultKey) private var noteDefault = ""
 
     private var all: [Order] { store.allOrders() }
     private var focus: Order? { store.order(id: orderId) }
@@ -210,7 +233,24 @@ struct ShipReviewSheet: View {
                  lengthCm: needsSize ? cm(lengthText) : nil, widthCm: needsSize ? cm(widthText) : nil,
                  heightCm: needsSize ? cm(heightText) : nil,
                  // Giữ cả khi cài đặt đang có tên hàng, để lỡ xoá trống cài đặt thì tên đã nhập vẫn còn.
-                 goodsName: Vtp.cleanGoods(goodsText).isEmpty ? nil : Vtp.cleanGoods(goodsText))
+                 goodsName: Vtp.cleanGoods(goodsText).isEmpty ? nil : Vtp.cleanGoods(goodsText),
+                 extras: VtpExtras.joined(extras),
+                 orderNote: noteValue.isEmpty ? nil : noteValue)
+    }
+
+    /// Ghi chú sẽ gửi Viettel Post: mẫu đã tick + nội dung khác, cắt theo giới hạn 150 byte của Viettel Post.
+    private var noteText: String { VtpExtras.compose(picks: notePicks, templates: templates, other: noteOther) }
+    private var noteValue: String { VtpDraftBody.clip(noteText, VtpExtras.maxNoteBytes) }
+    private var noteTooLong: Bool { VtpExtras.bytes(noteText) > VtpExtras.maxNoteBytes }
+    /// Tổng tiền các dịch vụ đã chọn; nil khi chưa biết giá (chưa kết nối phần 1 hoặc chưa hỏi xong).
+    private var extrasTotal: Int? {
+        guard !extras.isEmpty else { return 0 }
+        var sum = 0
+        for c in extras {
+            guard let p = prices[c], let v = p else { return nil }
+            sum += v
+        }
+        return sum
     }
 
     /// Tính thử đúng như lúc xuất: tiền cọc ở đơn đầu, các cài đặt khác ở mọi đơn.
@@ -224,6 +264,18 @@ struct ShipReviewSheet: View {
     }
 
     var body: some View {
+        Group {
+            switch picker {
+            case .extras: extrasPicker
+            case .notes: notesPicker
+            case nil: reviewBody
+            }
+        }
+        .frame(height: Metrics.sheetHeight(top: UIScreen.main.bounds.height * 0.14))
+        .onAppear(perform: load)
+    }
+
+    private var reviewBody: some View {
         VStack(spacing: 0) {
             HStack {
                 T(draftIds == nil ? "Duyệt đơn" : "Sửa hàng & tiền", 20, .heavy, Theme.ink, track: -0.3)
@@ -259,8 +311,6 @@ struct ShipReviewSheet: View {
                 Spacer()
             }
         }
-        .frame(height: Metrics.sheetHeight(top: UIScreen.main.bounds.height * 0.14))
-        .onAppear(perform: load)
     }
 
     private func load() {
@@ -292,6 +342,7 @@ struct ShipReviewSheet: View {
         } else {
             resetValue()
         }
+        loadExtrasAndNote(list, focus: focus)
         resetCod()
         // Sửa nháp: COD đã sửa tay lúc duyệt thì giữ nguyên, không lặng lẽ quay về số tự cộng.
         if draftIds != nil, let manual = list.reversed().compactMap({ $0.ship?.codOverride }).first {
@@ -512,6 +563,11 @@ struct ShipReviewSheet: View {
                     forcedSenderWarning(t)
                 }
             }
+            // Chưa kết nối Viettel Post thì không tạo vận đơn: không cần dịch vụ cộng thêm hay ghi chú vận đơn.
+            if !shipsDirect {
+                extrasRow
+                noteRow
+            }
         }
     }
 
@@ -638,6 +694,7 @@ struct ShipReviewSheet: View {
             ui.notify("Nhập tên hàng trước khi gửi.")
             return
         }
+        rememberDefaults()
         // Đơn đang Chờ gửi mà bị bỏ tick: đưa về chưa duyệt, không thì lúc tạo vận đơn vẫn bị gộp chung và cộng tiền.
         let dropped = state == .ready ? pending.filter { !checked.contains($0.id) && Vtp.state($0) == .ready }.map(\.id) : []
         if direct {
@@ -651,6 +708,390 @@ struct ShipReviewSheet: View {
         } else {
             ui.dismissSheet()
         }
+    }
+}
+
+// MARK: - Dịch vụ cộng thêm và ghi chú vận đơn (bảng Duyệt đơn)
+
+extension ShipReviewSheet {
+    /// Mở bảng: lấy dịch vụ và ghi chú đã lưu ở đơn. Đơn chưa duyệt lần nào thì dùng mặc định shop đã bật
+    /// ("Mặc định chọn/lưu cho các đơn tiếp theo"), ghi chú giao hàng của khách điền sẵn vào Nội dung khác.
+    fileprivate func loadExtrasAndNote(_ list: [Order], focus: Order) {
+        let ships = (list + [focus]).reversed().compactMap { $0.ship }
+        let reviewed = list.contains { Vtp.state($0) != .ask }
+        if let saved = ships.compactMap(\.extras).first {
+            extras = VtpExtras.clean(saved)
+        } else if !reviewed && extrasRemember {
+            extras = VtpExtras.clean(extrasDefault)
+        }
+        let note: String
+        if let saved = ships.compactMap(\.orderNote).first {
+            noteSaved = true
+            note = saved
+        } else {
+            let base = !reviewed && noteRemember ? noteDefault : ""
+            note = joinNote([base, focus.customer.address?.note ?? ""])
+        }
+        (notePicks, noteOther) = VtpExtras.split(note, templates: templates)
+    }
+
+    /// Nối các phần ghi chú bằng "; ", bỏ phần trống và phần trùng.
+    fileprivate func joinNote(_ parts: [String]) -> String {
+        var out: [String] = []
+        for p in parts.flatMap({ $0.components(separatedBy: ";") }).map(VtpExtras.cleanText) where !p.isEmpty {
+            if !out.contains(where: { $0.lowercased() == p.lowercased() }) { out.append(p) }
+        }
+        return out.joined(separator: VtpExtras.separator)
+    }
+
+    /// Bấm Xác nhận / Gom sau: bật "mặc định" thì nhớ lựa chọn này cho đơn chưa duyệt lần sau.
+    /// Ghi chú giao hàng riêng của khách này không được nhớ sang khách khác.
+    fileprivate func rememberDefaults() {
+        if extrasRemember { extrasDefault = VtpExtras.joined(extras) ?? "" }
+        if noteRemember {
+            let own = VtpExtras.cleanText(focus?.customer.address?.note ?? "").lowercased()
+            let parts = noteValue.components(separatedBy: ";").map(VtpExtras.cleanText)
+                .filter { !$0.isEmpty && (own.isEmpty || $0.lowercased() != own) }
+            noteDefault = parts.joined(separator: VtpExtras.separator)
+        }
+    }
+
+    // MARK: Hai dòng trong form
+
+    fileprivate var extrasRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            T("Dịch vụ cộng thêm", 12, .semibold, Theme.muted)
+            Button { openExtras() } label: {
+                HStack(spacing: 12) {
+                    Icon(name: .plus, size: 15, weight: 2.4, color: Theme.orange)
+                        .frame(width: 32, height: 32)
+                        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.orange.opacity(0.12)))
+                    VStack(alignment: .leading, spacing: 2) {
+                        T(extras.isEmpty ? "Chưa chọn" : "\(extras.count) dịch vụ", 15, .bold, extras.isEmpty ? Theme.muted : Theme.ink)
+                        if !extras.isEmpty {
+                            T(VtpExtras.names(extras), 12, .medium, Theme.muted).lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 6)
+                    if let total = extrasTotal, total > 0 {
+                        T("+" + money(total), 14, .bold, Theme.orange).fixedSize()
+                    }
+                    Icon(name: .chevronRight, size: 14, weight: 2.4, color: Theme.faint)
+                }
+                .padding(.horizontal, 12)
+                .frame(minHeight: 54)
+                .contentShape(Rectangle())
+                .cardStyle(12)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    fileprivate var noteRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            T("Ghi chú đơn hàng", 12, .semibold, Theme.muted)
+            Button { openNotes() } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    Icon(name: .pencil, size: 15, weight: 2.2, color: Theme.orange)
+                        .frame(width: 32, height: 32)
+                        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.orange.opacity(0.12)))
+                    T(noteValue.isEmpty ? "Chưa có ghi chú" : noteValue, 14, .semibold, noteValue.isEmpty ? Theme.muted : Theme.ink)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                    Icon(name: .chevronRight, size: 14, weight: 2.4, color: Theme.faint).padding(.top, 9)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .contentShape(Rectangle())
+                .cardStyle(12)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: Bảng chọn dịch vụ
+
+    private var service: String { UserDefaults.standard.string(forKey: Vtp.serviceKey) ?? Vtp.defaultService }
+
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    fileprivate func openExtras() {
+        hideKeyboard()
+        picker = .extras
+        loadPrices()
+    }
+
+    /// Hỏi máy chủ giá từng dịch vụ cho đúng đơn này (địa chỉ, cân nặng, giá trị, thu hộ, gói). Đơn không đổi thì không hỏi lại.
+    private func loadPrices() {
+        guard client.vtpConnected, let focus, let t = trial else { return }
+        let list = chosen.isEmpty ? [focus] : chosen
+        let g = Vtp.Group(customer: focus.customer, orders: list, recentExported: [], summary: t)
+        let svc = service
+        let size = t.size.map { "\($0.0)x\($0.1)x\($0.2)" } ?? ""
+        let key = [t.address.line, "\(t.cod)", "\(t.goods)", "\(t.weightG)", size, svc].joined(separator: "|")
+        guard key != pricesKey || pricesError != nil, !pricesLoading else { return }
+        var payload = VtpTrack.payload(g)
+        payload["extras"] = ""
+        pricesLoading = true
+        pricesError = nil
+        Task { @MainActor in
+            let r = await client.vtpExtraPrices(service: svc, group: payload)
+            pricesLoading = false
+            if let e = r.error {
+                pricesError = e
+                return
+            }
+            prices = r.prices
+            pricesKey = key
+            // Dịch vụ đã chọn mà gói đang chọn không nhận: bỏ tick, kẻo Viettel Post từ chối cả vận đơn.
+            let refusedNow = extras.filter { refused($0) }
+            if !refusedNow.isEmpty {
+                extras.removeAll { refusedNow.contains($0) }
+                ui.notify("Bỏ chọn \(VtpExtras.names(refusedNow)): gói đang chọn không nhận.")
+            }
+        }
+    }
+
+    /// Đã hỏi giá và Viettel Post báo gói đang chọn không nhận dịch vụ này.
+    private func refused(_ code: String) -> Bool {
+        guard let p = prices[code] else { return false }
+        return p == nil
+    }
+
+    fileprivate var extrasPicker: some View {
+        VStack(spacing: 0) {
+            pickerHeader("Dịch vụ cộng thêm") {
+                if pricesLoading {
+                    ProgressView().scaleEffect(0.8)
+                } else if !prices.isEmpty {
+                    T("giá đã gồm VAT", 12, .semibold, Theme.faint)
+                }
+            }
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(VtpExtras.all.enumerated()), id: \.element.code) { i, svc in
+                            if i > 0 { Rectangle().fill(Theme.line.opacity(0.7)).frame(height: 1).padding(.leading, 50) }
+                            extraRow(svc)
+                        }
+                    }
+                    .cardStyle(16)
+                    if let e = pricesError {
+                        T("Chưa hỏi được giá: \(e)", 12.5, .medium, Theme.red).fixedSize(horizontal: false, vertical: true)
+                    } else if !client.vtpConnected {
+                        T("Kết nối Viettel Post phần 1 (Tôi › ViettelPost) để xem giá từng dịch vụ.", 12.5, .medium, Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Toggle(isOn: $extrasRemember) {
+                        T("Mặc định chọn cho các đơn tiếp theo", 14, .semibold)
+                    }
+                    .tint(Theme.orange)
+                    .onChange(of: extrasRemember) { on in if !on { extrasDefault = "" } }
+                    .padding(.horizontal, 4)
+                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.bottom, 12)
+            }
+            pickerFooter(left: extras.isEmpty ? "Chưa chọn dịch vụ" : "\(extras.count) dịch vụ",
+                         right: extrasTotal.map { $0 > 0 ? "+" + money($0) : "" } ?? "")
+        }
+    }
+
+    private func extraRow(_ svc: VtpExtras.Service) -> some View {
+        let on = extras.contains(svc.code)
+        let off = refused(svc.code)
+        let price: Int? = prices[svc.code] ?? nil
+        return Button {
+            guard !off else { return }
+            if on { extras.removeAll { $0 == svc.code } } else { extras = VtpExtras.clean(extras + [svc.code]) }
+        } label: {
+            HStack(spacing: 12) {
+                TickCircle(on: on && !off, enabled: !off)
+                VStack(alignment: .leading, spacing: 2) {
+                    T(svc.name, 15, .semibold, off ? Theme.faint : Theme.ink)
+                    if off {
+                        T("Gói đang chọn không nhận", 11.5, .medium, Theme.faint)
+                    } else if svc.code == "GBH", let t = trial {
+                        T("Theo giá trị đơn \(money(t.goods))", 11.5, .medium, Theme.muted)
+                    }
+                }
+                Spacer(minLength: 6)
+                if let price {
+                    T(money(price), 14, .bold, on ? Theme.ink : Theme.muted).fixedSize()
+                } else if off {
+                    T("—", 14, .bold, Theme.faint)
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Bảng ghi chú
+
+    fileprivate func openNotes() {
+        hideKeyboard()
+        picker = .notes
+        if !templatesFromAccount { loadTemplates() }
+    }
+
+    private var noteAccount: VtpDraftClient? {
+        let c = vtpDrafts.current
+        return c.loggedIn && !c.sessionExpired ? c : nil
+    }
+
+    /// Ghi chú mẫu lấy thẳng từ tài khoản Viettel Post (phần 2); chưa đăng nhập thì dùng 5 mẫu chung của Viettel Post.
+    private func loadTemplates() {
+        guard let account = noteAccount, !templatesLoading else { return }
+        templatesLoading = true
+        templatesError = nil
+        Task { @MainActor in
+            defer { templatesLoading = false }
+            do {
+                let r = try await account.noteTemplates()
+                let list = r.templates.isEmpty ? VtpExtras.defaultTemplates : r.templates
+                let current = noteText
+                templates = list
+                templatesFromAccount = true
+                UserDefaults.standard.set(list, forKey: VtpExtras.templatesKey)
+                // Tách lại ghi chú theo mẫu mới; đơn chưa có ghi chú lưu thì tick sẵn mẫu bật "Mặc định chọn".
+                var split = VtpExtras.split(current, templates: list)
+                if !noteSaved {
+                    for t in r.selected where !split.picks.contains(t) { split.picks.append(t) }
+                }
+                notePicks = split.picks
+                noteOther = split.other
+            } catch {
+                templatesError = error.localizedDescription
+            }
+        }
+    }
+
+    fileprivate var notesPicker: some View {
+        VStack(spacing: 0) {
+            pickerHeader("Ghi chú đơn hàng") {
+                if templatesLoading {
+                    ProgressView().scaleEffect(0.8)
+                } else if noteAccount != nil {
+                    Button { loadTemplates() } label: { T("Tải lại", 13, .bold, Theme.accent) }.buttonStyle(.plain)
+                }
+            }
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    T(templatesFromAccount ? "GHI CHÚ MẪU · TỪ TÀI KHOẢN VIETTEL POST" : "GHI CHÚ MẪU VIETTEL POST",
+                      11.5, .bold, Theme.muted, track: 0.4)
+                        .padding(.leading, 4)
+                    VStack(spacing: 0) {
+                        ForEach(Array(templates.enumerated()), id: \.element) { i, t in
+                            if i > 0 { Rectangle().fill(Theme.line.opacity(0.7)).frame(height: 1).padding(.leading, 50) }
+                            templateRow(t)
+                        }
+                    }
+                    .cardStyle(16)
+                    if let e = templatesError {
+                        T("Chưa đọc được mẫu của tài khoản: \(e)", 12, .medium, Theme.red).fixedSize(horizontal: false, vertical: true)
+                    } else if noteAccount == nil {
+                        T("Đăng nhập Viettel Post phần 2 để lấy đúng ghi chú mẫu của tài khoản bạn.", 12, .medium, Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    T("NỘI DUNG KHÁC · TỰ ĐIỀN", 11.5, .bold, Theme.muted, track: 0.4)
+                        .padding(.leading, 4)
+                        .padding(.top, 6)
+                    ZStack(alignment: .topLeading) {
+                        if noteOther.isEmpty {
+                            T("Ví dụ: Giao sau 17h giúp shop", 15, .medium, Theme.placeholder)
+                        }
+                        TextField("", text: $noteOther, axis: .vertical)
+                            .font(.bv(15, .semibold))
+                            .foregroundColor(Theme.ink)
+                            .lineLimit(2...5)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+                    .cardStyle(12)
+                    HStack {
+                        T("Chữ có dấu tính 2-3 ký tự", 11.5, .medium, Theme.faint)
+                        Spacer()
+                        T("\(VtpExtras.bytes(noteText))/\(VtpExtras.maxNoteBytes)", 12, .bold, noteTooLong ? Theme.red : Theme.muted)
+                    }
+                    .padding(.horizontal, 4)
+                    if noteTooLong {
+                        T("Ghi chú dài quá giới hạn Viettel Post, phần cuối sẽ bị cắt.", 12, .medium, Theme.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Toggle(isOn: $noteRemember) {
+                        T("Mặc định lưu ghi chú này cho các đơn tiếp theo", 14, .semibold)
+                    }
+                    .tint(Theme.orange)
+                    .onChange(of: noteRemember) { on in if !on { noteDefault = "" } }
+                    .padding(.horizontal, 4)
+                    .padding(.top, 4)
+                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.bottom, 12)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            pickerFooter(left: "", right: "")
+        }
+    }
+
+    private func templateRow(_ t: String) -> some View {
+        let on = notePicks.contains(t)
+        return Button {
+            if on { notePicks.removeAll { $0 == t } } else { notePicks.append(t) }
+        } label: {
+            HStack(spacing: 12) {
+                TickCircle(on: on)
+                T(t, 15, .semibold).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(minHeight: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Khung chung của hai bảng con
+
+    private func pickerHeader<Trailing: View>(_ title: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack(spacing: 10) {
+            Button { closePicker() } label: {
+                Icon(name: .chevronLeft, size: 17, weight: 2.4).frame(width: 36, height: 36).background(Circle().fill(Theme.field))
+            }
+            .buttonStyle(.plain)
+            T(title, 20, .heavy, Theme.ink, track: -0.3)
+            Spacer()
+            trailing()
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.bottom, 12)
+    }
+
+    private func pickerFooter(left: String, right: String) -> some View {
+        VStack(spacing: 10) {
+            if !left.isEmpty || !right.isEmpty {
+                HStack {
+                    T(left, 13.5, .semibold, Theme.muted)
+                    Spacer()
+                    T(right, 15, .heavy)
+                }
+            }
+            PrimaryButton(title: "Xong", fontSize: 15) { closePicker() }
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.top, 10)
+    }
+
+    private func closePicker() {
+        hideKeyboard()
+        withAnimation(.easeOut(duration: 0.18)) { picker = nil }
     }
 }
 
@@ -952,6 +1393,7 @@ struct VtpExportSheet: View {
                             kv(s.feeIsReal ? "Tiền ship cộng vào thu hộ" : "Tiền ship cộng vào thu hộ (tạm tính)", money(s.shipFee))
                         }
                         kv("Thu hộ (COD)", money(s.cod), strong: true)
+                        if !s.extras.isEmpty { kv("Dịch vụ thêm", VtpExtras.names(s.extras)) }
                     }
                     detailBox("CƯỚC DỰ TÍNH · \(service)") {
                         if busy {

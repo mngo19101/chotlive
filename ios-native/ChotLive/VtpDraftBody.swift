@@ -67,7 +67,8 @@ enum VtpDraftBody {
         b["PRODUCT_TYPE"] = "HH"
         b["ORDER_PAYMENT"] = payment(cod: s.cod, senderPays: s.senderPays)
         b["ORDER_SERVICE"] = svc
-        b["ORDER_SERVICE_ADD"] = ""
+        // Dịch vụ cộng thêm chọn ở bảng Duyệt đơn (Khai giá, Đồng kiểm…), mã cách nhau dấu phẩy như web.
+        b["ORDER_SERVICE_ADD"] = s.extras.joined(separator: ",")
         b["ORDER_VOUCHER"] = ""
         b["ORDER_NOTE"] = clip(s.note)
         b["DELIVERY_CODE"] = -1
@@ -105,7 +106,7 @@ enum VtpDraftBody {
     // MARK: - Nháp còn khớp đơn không
 
     /// Băm những gì quyết định nội dung nháp: người nhận, địa chỉ, tiền, ai trả cước, cân nặng, kích thước,
-    /// dịch vụ, ghi chú, tên hàng và danh sách đơn. Đổi một trong số đó là nháp trên Viettel Post đã cũ.
+    /// dịch vụ, dịch vụ cộng thêm, ghi chú, tên hàng và danh sách đơn. Đổi một trong số đó là nháp trên Viettel Post đã cũ.
     static func hash(_ g: Vtp.Group, service: String) -> String {
         // Bản tạm tính (chưa áp cước thật): cước Viettel Post báo về sau không làm nháp vừa đẩy bị coi là cũ.
         let s = g.baseSummary ?? g.summary
@@ -117,6 +118,8 @@ enum VtpDraftBody {
         ]
         // Tên hàng mặc định không đưa vào băm: nháp đẩy trước khi có cài đặt tên hàng vẫn còn khớp.
         if s.goodsName != Vtp.defaultGoodsName { parts.append(s.goodsName) }
+        // Dịch vụ cộng thêm cũng vậy: chỉ đưa vào băm khi có chọn, nháp đẩy trước khi có tính năng này vẫn khớp.
+        if !s.extras.isEmpty { parts.append("+" + s.extras.joined(separator: ",")) }
         let digest = SHA256.hash(data: Data(parts.joined(separator: "|").utf8))
         return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
     }

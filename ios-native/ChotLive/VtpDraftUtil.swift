@@ -120,9 +120,10 @@ typealias VtpDraftTransport = (URLRequest) async throws -> (Data, URLResponse)
 enum VtpDraftHttp {
     static let live: VtpDraftTransport = { req in try await URLSession.shared.data(for: req) }
 
-    static func send(_ transport: VtpDraftTransport, _ url: URL, body: Any?, headers: [String: String]) async throws -> VtpDraftReply {
+    static func send(_ transport: VtpDraftTransport, _ url: URL, body: Any?, headers: [String: String],
+                     method: String = "POST") async throws -> VtpDraftReply {
         var req = URLRequest(url: url, timeoutInterval: 30)
-        req.httpMethod = "POST"
+        req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
