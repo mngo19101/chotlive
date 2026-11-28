@@ -1417,8 +1417,11 @@ struct VtpExportSheet: View {
             }
             .frame(maxHeight: .infinity)
 
+            // Trong tab Chờ gửi: nút thấp hơn và chừa lề dưới để không dính sát thanh tab.
+            let detailBtnH: CGFloat = embedded ? 44 : 52
+            let detailFont: CGFloat = embedded ? 14.5 : 15
             HStack(spacing: 10) {
-                OutlineButton(title: embedded ? "Quay lại" : "Để nháp", height: 52) { detailId = nil }
+                OutlineButton(title: embedded ? "Quay lại" : "Để nháp", height: detailBtnH) { detailId = nil }
                     .frame(width: (Metrics.screenWidth - 50) / 3)
                 let hasPushedDraft: Bool = {
                     if case .pushed = VtpDraftBody.status(g, service: service) { return true }
@@ -1431,17 +1434,18 @@ struct VtpExportSheet: View {
                         : hasPushedDraft ? "Duyệt nháp lên đơn"
                         : (embedded ? "Lên vận đơn" : "Tạo vận đơn này")
                     PrimaryButton(title: btnTitle,
-                                  icon: .truck, fontSize: 15, enabled: !g.isBad && !sending && !busy) {
+                                  icon: .truck, fontSize: detailFont, height: detailBtnH, enabled: !g.isBad && !sending && !busy) {
                         create([g])
                     }
                 } else {
-                    PrimaryButton(title: "Đẩy nháp VTP", icon: .arrowRight, fontSize: 15, enabled: !g.isBad) {
+                    PrimaryButton(title: "Đẩy nháp VTP", icon: .arrowRight, fontSize: detailFont, height: detailBtnH, enabled: !g.isBad) {
                         pushDrafts([g])
                     }
                 }
             }
             .padding(.horizontal, Metrics.gutter)
-            .padding(.top, 14)
+            .padding(.top, embedded ? 10 : 14)
+            .padding(.bottom, embedded ? 10 : 0)
             .background(Theme.card.overlay(alignment: .top) { HairLine() })
         }
     }
@@ -1798,32 +1802,32 @@ struct VtpExportSheet: View {
         let feeTotal = picked.reduce(0) { $0 + (quote($1).flatMap { $0.ok ? $0.fee : nil } ?? 0) }
         // Trong tab Chờ gửi: chân gọn hơn (không nhãn "Dịch vụ", nút thấp hơn) để danh sách khách có thêm chỗ.
         let compact = embedded
-        let btnH: CGFloat = compact ? 38 : 52
-        return VStack(spacing: compact ? 8 : 14) {
+        let btnH: CGFloat = compact ? 42 : 52
+        return VStack(spacing: compact ? 9 : 14) {
             HStack(alignment: compact ? .center : .bottom) {
                 VStack(alignment: .leading, spacing: 5) {
                     if !compact { fieldLabel("Dịch vụ") }
                     Button { picking.toggle() } label: {
                         HStack(spacing: 4) {
-                            T(serviceName, compact ? 13 : 14, .bold).lineLimit(1).fixedSize()
+                            T(serviceName, compact ? 14 : 14, .bold).lineLimit(1).fixedSize()
                             Icon(name: picking ? .chevronUp : .chevronDown, size: 14, color: Theme.muted)
                         }
-                        .padding(.horizontal, compact ? 10 : 12)
-                        .frame(height: compact ? 30 : 38)
+                        .padding(.horizontal, compact ? 11 : 12)
+                        .frame(height: compact ? 33 : 38)
                         .cardStyle(compact ? 10 : 12, fill: Theme.field)
                     }
                     .buttonStyle(.plain)
                     .overlay(alignment: .bottomLeading) {
-                        if picking { servicePicker.offset(y: compact ? -38 : -46).fixedSize() }
+                        if picking { servicePicker.offset(y: compact ? -41 : -46).fixedSize() }
                     }
                 }
                 .zIndex(1)
                 Spacer(minLength: 8)
                 if compact {
                     VStack(alignment: .trailing, spacing: 0) {
-                        T(money(total), 17, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.7)
+                        T(money(total), 19, .heavy, Theme.ink, track: -0.3).lineLimit(1).minimumScaleFactor(0.7)
                         T(["\(pick.count) khách", api && feeTotal > 0 ? "cước \(money(feeTotal))" : ""]
-                            .filter { !$0.isEmpty }.joined(separator: " · "), 11, .semibold, Theme.muted)
+                            .filter { !$0.isEmpty }.joined(separator: " · "), 12, .semibold, Theme.muted)
                             .lineLimit(1).minimumScaleFactor(0.8)
                     }
                 } else {
@@ -1849,7 +1853,7 @@ struct VtpExportSheet: View {
                     Button { pushDrafts(picked) } label: {
                         HStack(spacing: 6) {
                             Icon(name: draftLocked ? .lock : .arrowRight, size: 14, weight: 2.4, color: VtpDraftColors.brand)
-                            T("Đẩy nháp VTP", 14, .bold, VtpDraftColors.brand).lineLimit(1).minimumScaleFactor(0.8)
+                            T("Đẩy nháp VTP", 15, .bold, VtpDraftColors.brand).lineLimit(1).minimumScaleFactor(0.8)
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: btnH)
@@ -1861,11 +1865,11 @@ struct VtpExportSheet: View {
                     .opacity(pick.isEmpty || sending ? 0.45 : (draftLocked ? 0.6 : 1))
                     if api || canApproveOnly {
                         PrimaryButton(title: sending ? (allPushedDrafts ? "Đang duyệt…" : "Đang tạo…") : busy ? "Đang tính cước…" : "Lên vận đơn",
-                                      icon: .truck, fontSize: 14, height: btnH, enabled: !pick.isEmpty && !sending && !busy) {
+                                      icon: .truck, fontSize: 15, height: btnH, enabled: !pick.isEmpty && !sending && !busy) {
                             create(picked)
                         }
                     } else {
-                        PrimaryButton(title: "Xuất Excel", icon: .download, fontSize: 14, height: btnH, enabled: !pick.isEmpty) {
+                        PrimaryButton(title: "Xuất Excel", icon: .download, fontSize: 15, height: btnH, enabled: !pick.isEmpty) {
                             export(picked)
                         }
                     }
@@ -1898,8 +1902,8 @@ struct VtpExportSheet: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
-        .padding(.top, compact ? 8 : 14)
-        .padding(.bottom, compact ? 6 : 0)
+        .padding(.top, compact ? 9 : 14)
+        .padding(.bottom, compact ? 7 : 0)
         .background(Theme.card.overlay(alignment: .top) { HairLine() })
     }
 
