@@ -833,6 +833,14 @@ extension ShipReviewSheet {
         let size = t.size.map { "\($0.0)x\($0.1)x\($0.2)" } ?? ""
         let key = [t.address.line, "\(t.cod)", "\(t.goods)", "\(t.weightG)", size, svc].joined(separator: "|")
         guard key != pricesKey || pricesError != nil, !pricesLoading else { return }
+        // Viettel Post chỉ tính giá khi có địa chỉ khách đủ (số nhà, phường, tỉnh); trống hoặc thiếu thì họ trả
+        // "Invalid [RECEIVER_ADDRESS]". Báo rõ ngay, không hỏi máy chủ.
+        guard t.address.ok else {
+            prices = [:]
+            pricesKey = ""
+            pricesError = Self.noAddressText
+            return
+        }
         var payload = VtpTrack.payload(g)
         payload["extras"] = ""
         pricesLoading = true
@@ -841,7 +849,7 @@ extension ShipReviewSheet {
             let r = await client.vtpExtraPrices(service: svc, group: payload)
             pricesLoading = false
             if let e = r.error {
-                pricesError = e
+                pricesError = e.contains("RECEIVER_ADDRESS") ? Self.noAddressText : e
                 return
             }
             prices = r.prices
@@ -854,6 +862,8 @@ extension ShipReviewSheet {
             }
         }
     }
+
+    static let noAddressText = "Viettel Post chưa đọc được địa chỉ khách nên chưa tính được giá. Nhập đủ số nhà, phường, tỉnh ở mục Người nhận rồi mở lại bảng này."
 
     /// Đã hỏi giá và Viettel Post báo gói đang chọn không nhận dịch vụ này.
     private func refused(_ code: String) -> Bool {
