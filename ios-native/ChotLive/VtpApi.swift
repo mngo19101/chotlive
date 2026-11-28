@@ -139,8 +139,8 @@ final class VtpQuoteCache: ObservableObject {
         var at: Double
     }
 
-    /// Giá đúng giữ 6 tiếng; lỗi chỉ giữ 90 giây để lần mở sau hỏi lại.
-    static let okLife: TimeInterval = 6 * 3600
+    /// Giá đúng lưu trên máy 30 ngày rồi tự xoá; lỗi chỉ giữ 90 giây để lần mở sau hỏi lại.
+    static let okLife: TimeInterval = 30 * 24 * 3600
     static let errorLife: TimeInterval = 90
     /// Mỗi lượt gửi máy chủ 4 khách (máy chủ hỏi 4 khách cùng lúc): xong lượt nào hiện giá lượt đó.
     static let chunk = 4
