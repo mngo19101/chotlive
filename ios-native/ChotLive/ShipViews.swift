@@ -145,6 +145,33 @@ func weightText(_ g: Int) -> String {
 
 // MARK: - Bảng Duyệt đơn
 
+/// Bảng Duyệt đơn đang dở khi bấm Sửa địa chỉ / số điện thoại. Bảng bị đóng để mở trang sửa, nên lưu các ô
+/// đã nhập ở đây theo mã đơn; mở lại bảng thì điền lại rồi xoá.
+enum ReviewResume {
+    struct Form {
+        var checked: Set<String>
+        var pay: String
+        var payer: String
+        var fee: Int?
+        var depositText: String
+        var weightText: String
+        var codText: String
+        var lengthText: String
+        var widthText: String
+        var heightText: String
+        var codEdited: Bool
+        var valueText: String
+        var valueEdited: Bool
+        var goodsText: String
+        var extras: [String]
+        var notePicks: [String]
+        var noteOther: String
+        var noteSaved: Bool
+    }
+
+    static var forms: [String: Form] = [:]
+}
+
 struct ShipReviewSheet: View {
     let orderId: String
     /// Mở từ nút Sửa ở "Hàng & tiền" của một nháp vận đơn: chỉ tick sẵn đúng các đơn của nháp đó,
@@ -263,14 +290,31 @@ struct ShipReviewSheet: View {
                              goodsSetting: Vtp.cleanGoods(goodsSetting))
     }
 
+    /// Mở / đóng bảng con (dịch vụ cộng thêm, ghi chú): trượt ngang như chuyển trang.
+    static let pickerMotion = Animation.spring(response: 0.36, dampingFraction: 0.9)
+
     var body: some View {
-        Group {
-            switch picker {
-            case .extras: extrasPicker
-            case .notes: notesPicker
-            case nil: reviewBody
+        ZStack {
+            // Bảng Duyệt đơn luôn nằm dưới, chỉ lùi sang trái và mờ đi khi mở bảng con: bấm Xong là về đúng chỗ đang xem.
+            reviewBody
+                .offset(x: picker == nil ? 0 : -Metrics.screenWidth * 0.28)
+                .opacity(picker == nil ? 1 : 0)
+                .allowsHitTesting(picker == nil)
+                .accessibilityHidden(picker != nil)
+            if let p = picker {
+                Group {
+                    switch p {
+                    case .extras: extrasPicker
+                    case .notes: notesPicker
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(Theme.card)
+                .transition(.move(edge: .trailing))
+                .zIndex(1)
             }
         }
+        .clipped()
         .frame(height: Metrics.sheetHeight(top: UIScreen.main.bounds.height * 0.14))
         .onAppear(perform: load)
     }
@@ -349,6 +393,47 @@ struct ShipReviewSheet: View {
             codEdited = true
             codText = moneyDigits(manual)
         }
+        // Vừa sửa địa chỉ / số điện thoại xong quay lại: điền lại đúng những gì đã nhập trước khi bấm Sửa.
+        if let saved = ReviewResume.forms.removeValue(forKey: orderId) { restore(saved) }
+    }
+
+    /// Sang trang Sửa địa chỉ: nhớ các ô đang nhập, sửa xong (Lưu hoặc quay lại) thì mở lại bảng này cho đơn này.
+    private func editAddress(_ customerId: String) {
+        ReviewResume.forms[orderId] = snapshot
+        let id = orderId, ids = draftIds, app = ui
+        ui.resumeAfterPop { app.present(dim: 0.42) { ShipReviewSheet(orderId: id, draftIds: ids) } }
+        ui.dismissSheet()
+        ui.push(.addressEdit(customerId))
+    }
+
+    private var snapshot: ReviewResume.Form {
+        ReviewResume.Form(checked: checked, pay: pay, payer: payer, fee: fee, depositText: depositText,
+                          weightText: weightText, codText: codText, lengthText: lengthText, widthText: widthText,
+                          heightText: heightText, codEdited: codEdited, valueText: valueText, valueEdited: valueEdited,
+                          goodsText: goodsText, extras: extras, notePicks: notePicks, noteOther: noteOther, noteSaved: noteSaved)
+    }
+
+    private func restore(_ f: ReviewResume.Form) {
+        // Đơn đã tick mà nay không còn chờ duyệt thì bỏ; không còn đơn nào thì giữ lựa chọn vừa nạp.
+        let still = f.checked.intersection(Set(pending.map(\.id)))
+        if !still.isEmpty { checked = still }
+        pay = f.pay
+        payer = f.payer
+        fee = f.fee
+        depositText = f.depositText
+        weightText = f.weightText
+        codText = f.codText
+        lengthText = f.lengthText
+        widthText = f.widthText
+        heightText = f.heightText
+        codEdited = f.codEdited
+        valueText = f.valueText
+        valueEdited = f.valueEdited
+        goodsText = f.goodsText
+        extras = f.extras
+        notePicks = f.notePicks
+        noteOther = f.noteOther
+        noteSaved = f.noteSaved
     }
 
     /// Quay lại tab Chờ gửi (danh sách nháp nằm ngay trong tab); `open` thì mở thẳng nháp của khách này.
@@ -389,10 +474,7 @@ struct ShipReviewSheet: View {
             if let warn = trial?.problems.filter({ !$0.contains("kích thước") && $0 != Vtp.goodsNameMissing }), !warn.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     T(warn.joined(separator: " · "), 12.5, .medium, Theme.red).fixedSize(horizontal: false, vertical: true)
-                    Button {
-                        ui.dismissSheet()
-                        ui.push(.addressEdit(focus.customer.id))
-                    } label: { T("Sửa", 12.5, .bold, Theme.accent) }
+                    Button { editAddress(focus.customer.id) } label: { T("Sửa", 12.5, .bold, Theme.accent) }
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 4)
@@ -820,7 +902,7 @@ extension ShipReviewSheet {
 
     fileprivate func openExtras() {
         hideKeyboard()
-        picker = .extras
+        withAnimation(Self.pickerMotion) { picker = .extras }
         loadPrices()
     }
 
@@ -946,7 +1028,7 @@ extension ShipReviewSheet {
 
     fileprivate func openNotes() {
         hideKeyboard()
-        picker = .notes
+        withAnimation(Self.pickerMotion) { picker = .notes }
         if !templatesFromAccount { loadTemplates() }
     }
 
@@ -1101,7 +1183,7 @@ extension ShipReviewSheet {
 
     private func closePicker() {
         hideKeyboard()
-        withAnimation(.easeOut(duration: 0.18)) { picker = nil }
+        withAnimation(Self.pickerMotion) { picker = nil }
     }
 }
 

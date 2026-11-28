@@ -39,7 +39,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.chotlive.native
         # Workflow build IPA truyền địa chỉ thật vào đây; để trống thì app cho nhập tay.
         CHOTLIVE_SERVER_URL: ""
-        MARKETING_VERSION: "1.4.5"
+        MARKETING_VERSION: "1.4.6"
         CURRENT_PROJECT_VERSION: "15"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"

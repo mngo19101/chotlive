@@ -215,8 +215,15 @@ struct ConfirmItem: Identifiable {
 
 @MainActor
 final class AppUI: ObservableObject {
-    @Published var tab: AppTab = .sales
-    @Published var path = NavigationPath()
+    @Published var tab: AppTab = .sales {
+        // Sang tab khác thì thôi, không bật lại bảng đang dở của tab cũ.
+        didSet { if tab != oldValue { resume = nil } }
+    }
+    @Published var path = NavigationPath() {
+        didSet { runResumeIfBack() }
+    }
+    /// Bảng cần mở lại khi trang vừa đẩy vào được đóng (ví dụ Duyệt đơn → Sửa địa chỉ → Lưu).
+    private var resume: (depth: Int, run: @MainActor () -> Void)?
     @Published var sheet: SheetItem?
     @Published var alert: String?
     @Published var confirm: ConfirmItem?
@@ -227,6 +234,19 @@ final class AppUI: ObservableObject {
 
     func push(_ r: Route) { path.append(r) }
     func pop() { if !path.isEmpty { path.removeLast() } }
+
+    /// Gọi ngay TRƯỚC khi đẩy một trang: trang đó đóng (Lưu hoặc quay lại) thì chạy `run`, thường là mở lại bảng cũ.
+    func resumeAfterPop(_ run: @escaping @MainActor () -> Void) { resume = (path.count, run) }
+
+    private func runResumeIfBack() {
+        guard let r = resume, path.count <= r.depth else { return }
+        resume = nil
+        Task { @MainActor in
+            // Đợi trang trượt ra hết rồi mới kéo bảng lên, không chồng hai hoạt ảnh.
+            try? await Task.sleep(nanoseconds: 380_000_000)
+            r.run()
+        }
+    }
 
     func present<V: View>(dim: Double = 0.45, @ViewBuilder _ content: () -> V) {
         sheet = SheetItem(dim: dim, content: AnyView(content()))
