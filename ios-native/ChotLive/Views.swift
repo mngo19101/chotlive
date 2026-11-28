@@ -174,7 +174,8 @@ struct TabBar: View {
         .padding(.horizontal, 12)
         .padding(.top, 4.5)
         .frame(height: 64.5)
-        .padding(.bottom, max(Metrics.safeBottom - 25, 0))
+        // Chừa 22pt (máy có thanh vuốt home 34pt) để nhãn không sát thanh vuốt.
+        .padding(.bottom, max(Metrics.safeBottom - 12, 0))
         .background(
             Theme.tabBar
                 .overlay(Rectangle().fill(Theme.line).frame(height: 1), alignment: .top)
